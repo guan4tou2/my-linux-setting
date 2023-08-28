@@ -37,6 +37,7 @@ apt install fonts-firacode
 apt update
 apt install python3-dev python3-pip python3-setuptools
 pip3 install thefuck --user
+echo 'export PATH="$PATH:~/.local/bin"' >> ~/.zshrc
 echo 'eval $(thefuck --alias)' >> ~/.zshrc
 source ~/.zshrc
 
