@@ -35,9 +35,10 @@ apt install fonts-firacode
 
 # thefuck
 apt update
-sudo apt install python3-dev python3-pip python3-setuptools
+apt install python3-dev python3-pip python3-setuptools
 pip3 install thefuck --user
 echo 'eval $(thefuck --alias)' >> ~/.zshrc
+source ~/.zshrc
 
 # nvim
 snap install nvim --classic
