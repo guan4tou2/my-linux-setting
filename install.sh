@@ -56,4 +56,4 @@ sudo install lazygit /usr/local/bin
 
 # lazydocker
 curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
-
+sudo mv .local/bin/lazydocker /usr/bin/ 
