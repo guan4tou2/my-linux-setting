@@ -34,19 +34,21 @@ source ~/.zshrc
 
 # fonts
 sudo add-apt-repository universe
-sudo apt install fonts-firacode
+sudo apt install -y fonts-firacode
 
 # thefuck
 sudo apt update
-sudo apt install python3-dev python3-pip python3-setuptools
+sudo apt install -y python3-dev python3-pip python3-setuptools
 sudo -H pip3 install thefuck
 echo 'export PATH="$PATH:~/.local/bin"' >> ~/.zshrc
 echo 'eval $(thefuck --alias)' >> ~/.zshrc
 source ~/.zshrc
 
 # nvim
-sudo snap install nvim --classic
-sudo apt install -ypython3-neovim python3-venv
+wget https://github.com/neovim/neovim/releases/latest/download/nvim-linux64.tar.gz
+
+sudo snap install nvim --classic --channel=latest/edge
+sudo apt install -y python3-neovim python3-venv
 git clone https://github.com/LazyVim/starter ~/.config/nvim
 rm -rf ~/.config/nvim/.git
 npm install -g neovim
