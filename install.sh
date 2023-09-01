@@ -2,7 +2,7 @@
 
 # package
 sudo apt update
-sudo apt install -y  lnav zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep 
+sudo apt install -y  lnav zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep  net-tools iftop
 
 # docker
 sudo install -m 0755 -d /etc/apt/keyrings
