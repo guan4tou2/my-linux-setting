@@ -19,7 +19,7 @@ git clone https://github.com/agkozak/zsh-z $ZSH_CUSTOM/plugins/zsh-z
 sed -i -e 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
 # plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-z)
 sed -i -e 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-z)/g' ~/.zshrc
-source ~/.zshrc
+
 
 # fonts
 echo  "\033[36m##########\ninstall fonts\n##########\n\033[m"
@@ -69,3 +69,5 @@ newgrp docker
 echo  "\033[36m##########\ninstall lazydocker\n##########\n\033[m"
 curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
 sudo mv .local/bin/lazydocker /usr/bin/ 
+
+source ~/.zshrc
