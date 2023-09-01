@@ -1,10 +1,12 @@
 #!/bin/sh
 
 # package
+echo "apt"
 sudo apt update
 sudo apt install -y  lnav zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep  net-tools iftop
 
 # docker
+echo "docker"
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 sudo chmod a+r /etc/apt/keyrings/docker.gpg
@@ -18,6 +20,7 @@ sudo groupadd -f docker
 sudo usermod -aG docker $USER
 newgrp docker
 
+echo "oh-my-zsh"
 # oh-my-zsh
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 
@@ -33,10 +36,12 @@ sed -i -e 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlight
 source ~/.zshrc
 
 # fonts
+echo "fonts"
 sudo add-apt-repository universe
 sudo apt install -y fonts-firacode
 
 # thefuck
+echo "thefuck"
 sudo apt update
 sudo apt install -y python3-dev python3-pip python3-setuptools
 sudo -H pip3 install thefuck
@@ -45,8 +50,7 @@ echo 'eval $(thefuck --alias)' >> ~/.zshrc
 source ~/.zshrc
 
 # nvim
-wget https://github.com/neovim/neovim/releases/latest/download/nvim-linux64.tar.gz
-
+echo "neovim"
 sudo snap install nvim --classic --channel=latest/edge
 sudo apt install -y python3-neovim python3-venv
 git clone https://github.com/LazyVim/starter ~/.config/nvim
