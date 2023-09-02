@@ -3,7 +3,7 @@
 # package
 echo  "\033[36m##########\ninstall apt\n##########\n\033[m"
 sudo apt update
-sudo apt install -y  lnav zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep  net-tools iftop tldr fzf
+sudo apt install -y  lnav zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep  net-tools iftop tldr fzf ncdu logwatch
 
 
 # oh-my-zsh
