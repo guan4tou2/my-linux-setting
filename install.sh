@@ -1,24 +1,25 @@
 #!/bin/sh
 
 # time
-echo  "\033[36m##########\ninstall date\n##########\n\033[m"
+echo  "\033[36m##########\nsetting date\n##########\n\033[m"
 sudo timedatectl set-timezone "Asia/Taipei"
+timedatectl
 
 # package
 echo  "\033[36m##########\ninstall apt\n##########\n\033[m"
 sudo apt update
-sudo apt install -y  lnav zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep  net-tools iftop tldr fzf ncdu logwatch
-
+sudo apt install -y  lnav zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep  net-tools iftop tldr fzf ncdu logwatch \
+                      lua5.4
 
 # oh-my-zsh
 echo  "\033[36m##########\ninstall oh-my-zsh\n##########\n\033[m"
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 
 sudo apt update
-git clone https://github.com/romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerlevel10k
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
-git clone https://github.com/agkozak/zsh-z $ZSH_CUSTOM/plugins/zsh-z
+sudo git clone https://github.com/romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerlevel10k
+sudo git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+sudo git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+sudo git clone https://github.com/agkozak/zsh-z $ZSH_CUSTOM/plugins/zsh-z
 # ZSH_THEME="powerlevel10k/powerlevel10k"
 sed -i -e 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
 # plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-z)
