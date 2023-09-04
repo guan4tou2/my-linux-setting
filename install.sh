@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # time
-echo  "\033[36m##########\ninstall apt\n##########\n\033[m"
+echo  "\033[36m##########\ninstall date\n##########\n\033[m"
 sudo timedatectl set-timezone "Asia/Taipei"
 
 # package
