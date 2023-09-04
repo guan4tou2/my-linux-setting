@@ -1,4 +1,10 @@
-#!/bin/sh
+#!/bin/bash
+
+ARCH=$(uname -m)
+case $ARCH in
+    i386|i686|armv6*|armv7*|aarch64*) ARCH=match ;;
+    *) ARCH=$(uname -m) ;;
+esac
 
 # time
 echo  "\033[36m##########\nsetting date\n##########\n\033[m"
@@ -69,9 +75,16 @@ sudo groupadd -f docker
 sudo usermod -aG docker $USER
 newgrp docker
 
-# lazydocker
+# lazydocker arch
 echo  "\033[36m##########\ninstall lazydocker\n##########\n\033[m"
-curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
-sudo mv .local/bin/lazydocker /usr/bin/ 
+if [ "$ARCH" = "match" ]
+then
+  curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
+  sudo mv .local/bin/lazydocker /usr/bin/ 
+else
+  echo "skip install lazydocker, $ARCH not match"
+fi
 
+# p10k
+echo  "\033[36m##########\nsetting p10k\n##########\n\033[m"
 source ~/.zshrc
