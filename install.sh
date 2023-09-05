@@ -17,6 +17,10 @@ sudo apt update
 sudo apt install -y  lnav zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep  net-tools iftop tldr fzf ncdu logwatch \
                       lua5.4
 
+# fail2bam
+echo  "\033[36m##########\nsetting fail2ban\n##########\n\033[m"
+sudo systemctl start fail2ban
+
 # oh-my-zsh
 echo  "\033[36m##########\ninstall oh-my-zsh\n##########\n\033[m"
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
