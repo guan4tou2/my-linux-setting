@@ -87,4 +87,5 @@ fi
 
 # p10k
 echo  "\033[36m##########\nsetting p10k\n##########\n\033[m"
+wget https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh
 source ~/.zshrc
