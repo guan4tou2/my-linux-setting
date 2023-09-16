@@ -23,18 +23,15 @@ sudo systemctl start fail2ban
 
 # oh-my-zsh
 echo  "\033[36m##########\ninstall oh-my-zsh\n##########\n\033[m"
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+sudo -k chsh -s $(command -v zsh) "$USER"
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"  "" --skip-chsh
 
-sudo apt update
 sudo git clone https://github.com/romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerlevel10k
 sudo git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
 sudo git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
 sudo git clone https://github.com/agkozak/zsh-z $ZSH_CUSTOM/plugins/zsh-z
-# ZSH_THEME="powerlevel10k/powerlevel10k"
 sed -i -e 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
-# plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-z)
 sed -i -e 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-z)/g' ~/.zshrc
-
 
 # fonts
 echo  "\033[36m##########\ninstall fonts\n##########\n\033[m"
@@ -74,10 +71,9 @@ echo \
   "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker-compose
 sudo groupadd -f docker
 sudo usermod -aG docker $USER
-newgrp docker
 
 # lazydocker arch
 echo  "\033[36m##########\ninstall lazydocker\n##########\n\033[m"
