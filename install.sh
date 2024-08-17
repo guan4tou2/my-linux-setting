@@ -20,8 +20,8 @@ sudo apt install -y   zsh fail2ban ca-certificates curl gnupg nodejs npm python-
 sudo apt install -y   btop iftop 
                       # log watcher
 sudo apt install -y   lnav logwatch
-pipx run --spec ranger-fm ranger
-sudo pip install s-tui --break-system-packages
+pip install ranger-fm --break-system-packages   
+pip install s-tui --break-system-packages
 
 # fail2bam
 echo  "\033[36m##########\nsetting fail2ban\n##########\n\033[m"
