@@ -49,7 +49,6 @@ echo  "\033[36m##########\ninstall thefuck\n##########\n\033[m"
 sudo apt update
 sudo apt install -y python3-dev python3-pip python3-setuptools
 sudo -H pip3 install thefuck --break-system-packages
-echo 'export PATH="$PATH:~/.local/bin"' >> ~/.zshrc
 echo 'eval $(thefuck --alias)' >> ~/.zshrc
 
 # nvim
@@ -87,7 +86,9 @@ sudo usermod -aG docker $USER
 # lazydocker
 echo  "\033[36m##########\ninstall lazydocker\n##########\n\033[m"
 curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
-echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.zshrc
+echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.zshrc
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
+
 . ~/.zshrc
 
 echo  "\033[36m########## Done! ##########\033[m"
