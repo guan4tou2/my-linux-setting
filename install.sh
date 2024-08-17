@@ -14,8 +14,13 @@ timedatectl
 # package
 echo  "\033[36m##########\ninstall apt\n##########\n\033[m"
 sudo apt update
-sudo apt install -y  lnav zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep  net-tools iftop tldr fzf ncdu logwatch \
-                      lua5.4 stress
+sudo apt install -y   zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep net-tools tldr fzf ncdu  \
+                      lua5.4 stress pipx
+                      # monitor
+sudo apt install -y   btop iftop 
+                      # log watcher
+sudo apt install -y   lnav logwatch
+pipx run --spec ranger-fm ranger
 sudo pip install s-tui --break-system-packages
 
 # fail2bam
