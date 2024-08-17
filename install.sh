@@ -86,6 +86,7 @@ sudo usermod -aG docker $USER
 # lazydocker
 echo  "\033[36m##########\ninstall lazydocker\n##########\n\033[m"
 curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
+echo 'alias lzd="lazydocker"' >> ~/.zshrc
 echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.zshrc
 echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
 
