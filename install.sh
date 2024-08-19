@@ -42,7 +42,7 @@ sed -i -e 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlight
 # p10k
 echo  "\033[36m##########\nsetting p10k\n##########\n\033[m"
 wget https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh -O ~/.p10k.zsh
-echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >>! ~/.zshrc
+echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
 
 # fonts
 echo  "\033[36m##########\ninstall fonts\n##########\n\033[m"
