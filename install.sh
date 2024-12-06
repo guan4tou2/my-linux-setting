@@ -53,7 +53,8 @@ sudo apt install -y fonts-firacode
 echo  "\033[36m##########\ninstall thefuck\n##########\n\033[m"
 sudo apt update
 sudo apt install -y python3-dev python3-pip python3-setuptools
-sudo -H pip3 install thefuck --break-system-packages
+# sudo -H pip3 install thefuck --break-system-packages
+pip install https://github.com/DJStompZone/thefuck/archive/master.zip
 echo 'eval $(thefuck --alias)' >> ~/.zshrc
 
 # nvim
