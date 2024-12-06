@@ -59,7 +59,10 @@ echo 'eval $(thefuck --alias)' >> ~/.zshrc
 
 # nvim
 echo  "\033[36m##########\ninstall nvim\n##########\n\033[m"
-sudo snap install nvim --classic --channel=latest/edge
+sudo apt remove nvim
+sudo add-apt-repository ppa:neovim-ppa/unstable
+sudo apt update
+sudo apt install neovim
 sudo apt install -y python3-neovim python3-venv
 git clone https://github.com/LazyVim/starter ~/.config/nvim
 rm -rf ~/.config/nvim/.git
