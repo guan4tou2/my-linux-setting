@@ -44,6 +44,13 @@ echo  "\033[36m##########\nsetting p10k\n##########\n\033[m"
 wget https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh -O ~/.p10k.zsh
 echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
 
+# thefuck
+echo  "\033[36m##########\ninstall thefuck\n##########\n\033[m"
+sudo apt update
+sudo apt install -y python3-dev python3-pip python3-setuptools
+pip3 install --user git+https://github.com/nvbn/thefuck --break-system-packages
+echo 'eval $(thefuck --alias)' >> ~/.zshrc
+
 # fonts
 echo  "\033[36m##########\ninstall fonts\n##########\n\033[m"
 sudo add-apt-repository universe
@@ -82,14 +89,7 @@ echo  "\033[36m##########\ninstall lazydocker\n##########\n\033[m"
 curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
 echo 'alias lzd="lazydocker"' >> ~/.zshrc
 echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.zshrc
-echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
-
-# thefuck
-echo  "\033[36m##########\ninstall thefuck\n##########\n\033[m"
-sudo apt update
-sudo apt install -y python3-dev python3-pip python3-setuptools
-pip3 install --user git+https://github.com/nvbn/thefuck --break-system-packages
-echo 'eval $(thefuck --alias)' >> ~/.zshrc
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshr
 
 . ~/.zshrc
 
