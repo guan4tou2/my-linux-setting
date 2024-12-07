@@ -16,7 +16,7 @@ echo -e "\033[36m##########\nInstalling packages\n##########\n\033[m"
 sudo apt update
 
 # 檢查並安裝必要的套件
-packages=( zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep net-tools tldr fzf ncdu lua5.3 stress pipx iftop lnav logwatch fonts-firacode python3-pip )
+packages=(zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep net-tools tldr fzf ncdu lua5.3 stress pipx iftop lnav logwatch fonts-firacode python3-pip)
 for pkg in "${packages[@]}"; do
     if ! dpkg -l | grep -q "^ii  $pkg"; then
         sudo apt install -y "$pkg"
