@@ -25,12 +25,11 @@ for pkg in $packages; do
     fi
 done
 
-#echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.zshrc
-#echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
+# 修改 PATH
 sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
 
 # 檢查並使用 snap 安裝的特殊套件
-if ! command -v btop &> /dev/null; then
+if ! command -v btop > /dev/null 2>&1; then
     sudo snap install btop
 else
     echo "btop is already installed."
@@ -136,6 +135,7 @@ else
 fi
 
 # 重新載入 zsh 配置
+zsh
 . ~/.zshrc
 
 echo -e "\033[36m########## Done! ##########\033[m"
