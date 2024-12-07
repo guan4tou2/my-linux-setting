@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 ARCH=$(uname -m)
 case $ARCH in
@@ -16,8 +16,8 @@ echo -e "\033[36m##########\nInstalling packages\n##########\n\033[m"
 sudo apt update
 
 # 檢查並安裝必要的套件
-packages=(zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep net-tools tldr fzf ncdu lua5.3 stress pipx iftop lnav logwatch fonts-firacode python3-pip)
-for pkg in "${packages[@]}"; do
+packages="zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep net-tools tldr fzf ncdu lua5.3 stress pipx iftop lnav logwatch fonts-firacode python3-pip"
+for pkg in $packages; do
     if ! dpkg -l | grep -q "^ii  $pkg"; then
         sudo apt install -y "$pkg"
     else
@@ -37,8 +37,8 @@ else
 fi
 
 # 安裝 Python 套件
-pip_packages=(ranger-fm s-tui)
-for pip_pkg in "${pip_packages[@]}"; do
+pip_packages="ranger-fm s-tui"
+for pip_pkg in $pip_packages; do
     if ! pip list --format=columns | grep -q "$pip_pkg"; then
         pip install "$pip_pkg"
     else
@@ -53,17 +53,17 @@ sudo systemctl enable --now fail2ban
 # 安裝 oh-my-zsh
 echo -e "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    sudo -k chsh -s $(command -v zsh) "$USER"
+    sudo -k chsh -s "$(command -v zsh)" "$USER"
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --skip-chsh
 fi
 
 # 安裝 zsh 插件
-plugins=("romkatv/powerlevel10k" "zsh-users/zsh-autosuggestions" "zsh-users/zsh-syntax-highlighting" "agkozak/zsh-z")
-for plugin in "${plugins[@]}"; do
+plugins="romkatv/powerlevel10k zsh-users/zsh-autosuggestions zsh-users/zsh-syntax-highlighting agkozak/zsh-z"
+for plugin in $plugins; do
     repo_name=$(basename "$plugin")
-    plugin_dir=${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/$(basename "$repo_name")
+    plugin_dir="${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/$repo_name"
     if [ ! -d "$plugin_dir" ]; then
-        sudo git clone https://github.com/$plugin.git "$plugin_dir"
+        sudo git clone "https://github.com/$plugin.git" "$plugin_dir"
     else
         echo "$repo_name plugin is already installed."
     fi
@@ -80,7 +80,7 @@ if [ ! -f ~/.p10k.zsh ]; then
 fi
 
 # 安裝 neovim
-if ! command -v nvim &> /dev/null; then
+if ! command -v nvim > /dev/null 2>&1; then
     echo -e "\033[36m##########\nInstalling nvim\n##########\n\033[m"
     sudo apt remove -y nvim
     sudo add-apt-repository ppa:neovim-ppa/unstable -y
@@ -95,7 +95,7 @@ else
 fi
 
 # 安裝 lazygit
-if ! command -v lazygit &> /dev/null; then
+if ! command -v lazygit > /dev/null 2>&1; then
     echo -e "\033[36m##########\nInstalling lazygit\n##########\n\033[m"
     LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
     curl -Lo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
@@ -107,7 +107,7 @@ else
 fi
 
 # 安裝 Docker
-if ! command -v docker &> /dev/null; then
+if ! command -v docker > /dev/null 2>&1; then
     echo -e "\033[36m##########\nInstalling Docker\n##########\n\033[m"
     curl -fsSL https://get.docker.com -o get-docker.sh
     sh get-docker.sh
@@ -117,16 +117,16 @@ else
 fi
 
 # 安裝 lazydocker
-if ! command -v lazydocker &> /dev/null; then
+if ! command -v lazydocker > /dev/null 2>&1; then
     echo -e "\033[36m##########\nInstalling lazydocker\n##########\n\033[m"
-    curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
+    curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | sh
     echo 'alias lzd="lazydocker"' >> ~/.zshrc
 else
     echo "lazydocker is already installed."
 fi
 
 # 安裝 thefuck
-if ! command -v thefuck &> /dev/null; then
+if ! command -v thefuck > /dev/null 2>&1; then
     echo -e "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
     sudo apt install -y python3-dev python3-pip python3-setuptools
     pip install git+https://github.com/nvbn/thefuck
@@ -136,7 +136,6 @@ else
 fi
 
 # 重新載入 zsh 配置
-zsh
 . ~/.zshrc
 
 echo -e "\033[36m########## Done! ##########\033[m"
