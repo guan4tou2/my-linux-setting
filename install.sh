@@ -54,6 +54,7 @@ echo -e "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     sudo -k chsh -s $(command -v zsh) "$USER"
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --skip-chsh
+    exit
 fi
 
 # 安裝 zsh 插件
