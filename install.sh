@@ -95,15 +95,7 @@ fi
 # 修改 PATH
 sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
 
-# 安裝 thefuck
-if ! command -v thefuck > /dev/null 2>&1; then
-    echo -e "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
-    sudo apt install -y python3-dev python3-pip python3-setuptools
-    pip install git+https://github.com/nvbn/thefuck
-    echo 'eval $(thefuck --alias)' >> ~/.zshrc
-else
-    echo "thefuck is already installed."
-fi
+
 
 # 安裝 oh-my-zsh
 echo -e "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
@@ -136,5 +128,15 @@ fi
 
 # 重新載入 zsh 配置
 . ~/.zshrc
+
+# 安裝 thefuck
+if ! command -v thefuck > /dev/null 2>&1; then
+    echo -e "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
+    sudo apt install -y python3-dev python3-pip python3-setuptools
+    pip install git+https://github.com/nvbn/thefuck
+    echo 'eval $(thefuck --alias)' >> ~/.zshrc
+else
+    echo "thefuck is already installed."
+fi
 
 echo -e "\033[36m########## Done! ##########\033[m"
