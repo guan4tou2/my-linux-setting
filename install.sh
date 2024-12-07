@@ -1,11 +1,5 @@
 #!/bin/sh
 
-ARCH=$(uname -m)
-case $ARCH in
-    i386|i686|armv6*|armv7*|aarch64*) ARCH=match ;;
-    *) ARCH=$(uname -m) ;;
-esac
-
 # 設定時區
 echo -e "\033[36m##########\nSetting date\n##########\n\033[m"
 sudo timedatectl set-timezone "Asia/Taipei"
