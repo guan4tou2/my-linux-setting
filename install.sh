@@ -20,8 +20,8 @@ sudo apt install -y   zsh fail2ban ca-certificates curl gnupg nodejs npm python-
 sudo apt install -y   btop iftop 
                       # log watcher
 sudo apt install -y   lnav logwatch
-pip install ranger-fm --break-system-packages   
-pip install s-tui --break-system-packages
+pip3 install ranger-fm --break-system-packages   
+pip3 install s-tui --break-system-packages
 
 # fail2bam
 echo  "\033[36m##########\nsetting fail2ban\n##########\n\033[m"
@@ -48,14 +48,6 @@ echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
 echo  "\033[36m##########\ninstall fonts\n##########\n\033[m"
 sudo add-apt-repository universe
 sudo apt install -y fonts-firacode
-
-# thefuck
-echo  "\033[36m##########\ninstall thefuck\n##########\n\033[m"
-sudo apt update
-sudo apt install -y python3-dev python3-pip python3-setuptools
-# sudo -H pip3 install thefuck --break-system-packages
-pip install https://github.com/DJStompZone/thefuck/archive/master.zip
-echo 'eval $(thefuck --alias)' >> ~/.zshrc
 
 # nvim
 echo  "\033[36m##########\ninstall nvim\n##########\n\033[m"
@@ -91,6 +83,13 @@ curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/i
 echo 'alias lzd="lazydocker"' >> ~/.zshrc
 echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.zshrc
 echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
+
+# thefuck
+echo  "\033[36m##########\ninstall thefuck\n##########\n\033[m"
+sudo apt update
+sudo apt install -y python3-dev python3-pip python3-setuptools
+pip3 install --user git+https://github.com/nvbn/thefuck --break-system-packages
+echo 'eval $(thefuck --alias)' >> ~/.zshrc
 
 . ~/.zshrc
 
