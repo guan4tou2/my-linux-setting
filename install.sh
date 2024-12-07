@@ -25,9 +25,6 @@ for pkg in $packages; do
     fi
 done
 
-# 修改 PATH
-sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
-
 # 檢查並使用 snap 安裝的特殊套件
 if ! command -v btop > /dev/null 2>&1; then
     sudo snap install btop
@@ -48,6 +45,9 @@ done
 # 啟動 fail2ban
 echo -e "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
 sudo systemctl enable --now fail2ban
+
+# 修改 PATH
+sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
 
 # 安裝 oh-my-zsh
 echo -e "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
