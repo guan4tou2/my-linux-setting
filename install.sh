@@ -46,38 +46,6 @@ done
 echo -e "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
 sudo systemctl enable --now fail2ban
 
-# 修改 PATH
-sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
-
-# 安裝 oh-my-zsh
-echo -e "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
-if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    sudo -k chsh -s "$(command -v zsh)" "$USER"
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --skip-chsh
-fi
-
-# 安裝 zsh 插件
-plugins="romkatv/powerlevel10k zsh-users/zsh-autosuggestions zsh-users/zsh-syntax-highlighting agkozak/zsh-z"
-for plugin in $plugins; do
-    repo_name=$(basename "$plugin")
-    plugin_dir="${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/$repo_name"
-    if [ ! -d "$plugin_dir" ]; then
-        sudo git clone "https://github.com/$plugin.git" "$plugin_dir"
-    else
-        echo "$repo_name plugin is already installed."
-    fi
-done
-
-# 設定主題和插件
-sed -i -e 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
-sed -i -e 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-z)/g' ~/.zshrc
-
-# 設定 Powerlevel10k
-if [ ! -f ~/.p10k.zsh ]; then
-    wget https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh -O ~/.p10k.zsh
-    echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
-fi
-
 # 安裝 neovim
 if ! command -v nvim > /dev/null 2>&1; then
     echo -e "\033[36m##########\nInstalling nvim\n##########\n\033[m"
@@ -124,6 +92,9 @@ else
     echo "lazydocker is already installed."
 fi
 
+# 修改 PATH
+sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
+
 # 安裝 thefuck
 if ! command -v thefuck > /dev/null 2>&1; then
     echo -e "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
@@ -134,8 +105,36 @@ else
     echo "thefuck is already installed."
 fi
 
+# 安裝 oh-my-zsh
+echo -e "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
+if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    sudo -k chsh -s "$(command -v zsh)" "$USER"
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --skip-chsh
+fi
+
+# 安裝 zsh 插件
+plugins="romkatv/powerlevel10k zsh-users/zsh-autosuggestions zsh-users/zsh-syntax-highlighting agkozak/zsh-z"
+for plugin in $plugins; do
+    repo_name=$(basename "$plugin")
+    plugin_dir="${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/$repo_name"
+    if [ ! -d "$plugin_dir" ]; then
+        sudo git clone "https://github.com/$plugin.git" "$plugin_dir"
+    else
+        echo "$repo_name plugin is already installed."
+    fi
+done
+
+# 設定主題和插件
+sed -i -e 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
+sed -i -e 's/plugins=(git)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-z)/g' ~/.zshrc
+
+# 設定 Powerlevel10k
+if [ ! -f ~/.p10k.zsh ]; then
+    wget https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh -O ~/.p10k.zsh
+    echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
+fi
+
 # 重新載入 zsh 配置
-zsh
 . ~/.zshrc
 
 echo -e "\033[36m########## Done! ##########\033[m"
