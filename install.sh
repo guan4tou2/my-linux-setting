@@ -15,13 +15,13 @@ timedatectl
 echo  "\033[36m##########\ninstall apt\n##########\n\033[m"
 sudo apt update
 sudo apt install -y   zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep net-tools tldr fzf ncdu  \
-                      lua5.4 stress pipx
+                      lua stress pipx python3-pip
                       # monitor
 sudo apt install -y   btop iftop 
                       # log watcher
 sudo apt install -y   lnav logwatch
-pip3 install ranger-fm --break-system-packages   
-pip3 install s-tui --break-system-packages
+pip install ranger-fm --break-system-packages   
+pip install s-tui --break-system-packages
 
 # fail2bam
 echo  "\033[36m##########\nsetting fail2ban\n##########\n\033[m"
@@ -48,7 +48,7 @@ echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
 echo  "\033[36m##########\ninstall thefuck\n##########\n\033[m"
 sudo apt update
 sudo apt install -y python3-dev python3-pip python3-setuptools
-pip3 install --user git+https://github.com/nvbn/thefuck --break-system-packages
+pip install git+https://github.com/nvbn/thefuck --break-system-packages
 echo 'eval $(thefuck --alias)' >> ~/.zshrc
 
 # fonts
