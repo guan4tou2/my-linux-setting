@@ -16,7 +16,7 @@ echo "\033[36m##########\nInstalling packages\n##########\n\033[m"
 sudo apt update
 
 # 檢查並安裝必要的套件
-packages=(zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep net-tools tldr fzf ncdu lua5.3 stress pipx iftop lnav logwatch fonts-firacode)
+packages=(zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep net-tools tldr fzf ncdu lua5.3 stress pipx iftop lnav logwatch fonts-firacode python3-pip)
 for pkg in "${packages[@]}"; do
     if ! dpkg -l | grep -q "^ii  $pkg"; then
         sudo apt install -y "$pkg"
@@ -38,8 +38,8 @@ fi
 # 安裝 Python 套件
 pip_packages=(ranger-fm s-tui)
 for pip_pkg in "${pip_packages[@]}"; do
-    if ! pip3 list --format=columns | grep -q "$pip_pkg"; then
-        pip3 install "$pip_pkg"
+    if ! pip list --format=columns | grep -q "$pip_pkg"; then
+        pip install "$pip_pkg"
     else
         echo "$pip_pkg is already installed."
     fi
@@ -128,7 +128,7 @@ fi
 if ! command -v thefuck &> /dev/null; then
     echo "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
     sudo apt install -y python3-dev python3-pip python3-setuptools
-    pip3 install --user git+https://github.com/nvbn/thefuck --break-system-packages
+    pip install git+https://github.com/nvbn/thefuck
     echo 'eval $(thefuck --alias)' >> ~/.zshrc
 else
     echo "thefuck is already installed."
