@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 ARCH=$(uname -m)
 case $ARCH in
@@ -7,12 +7,12 @@ case $ARCH in
 esac
 
 # 設定時區
-echo "\033[36m##########\nSetting date\n##########\n\033[m"
+echo -e "\033[36m##########\nSetting date\n##########\n\033[m"
 sudo timedatectl set-timezone "Asia/Taipei"
 timedatectl
 
 # 更新並安裝套件
-echo "\033[36m##########\nInstalling packages\n##########\n\033[m"
+echo -e "\033[36m##########\nInstalling packages\n##########\n\033[m"
 sudo apt update
 
 # 檢查並安裝必要的套件
@@ -46,11 +46,11 @@ for pip_pkg in "${pip_packages[@]}"; do
 done
 
 # 啟動 fail2ban
-echo "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
+echo -e "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
 sudo systemctl enable --now fail2ban
 
 # 安裝 oh-my-zsh
-echo "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
+echo -e "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     sudo -k chsh -s $(command -v zsh) "$USER"
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --skip-chsh
@@ -80,7 +80,7 @@ fi
 
 # 安裝 neovim
 if ! command -v nvim &> /dev/null; then
-    echo "\033[36m##########\nInstalling nvim\n##########\n\033[m"
+    echo -e "\033[36m##########\nInstalling nvim\n##########\n\033[m"
     sudo apt remove -y nvim
     sudo add-apt-repository ppa:neovim-ppa/unstable -y
     sudo apt update
@@ -95,7 +95,7 @@ fi
 
 # 安裝 lazygit
 if ! command -v lazygit &> /dev/null; then
-    echo "\033[36m##########\nInstalling lazygit\n##########\n\033[m"
+    echo -e "\033[36m##########\nInstalling lazygit\n##########\n\033[m"
     LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
     curl -Lo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
     tar xf lazygit.tar.gz lazygit
@@ -107,7 +107,7 @@ fi
 
 # 安裝 Docker
 if ! command -v docker &> /dev/null; then
-    echo "\033[36m##########\nInstalling Docker\n##########\n\033[m"
+    echo -e "\033[36m##########\nInstalling Docker\n##########\n\033[m"
     curl -fsSL https://get.docker.com -o get-docker.sh
     sh get-docker.sh
     rm get-docker.sh
@@ -117,7 +117,7 @@ fi
 
 # 安裝 lazydocker
 if ! command -v lazydocker &> /dev/null; then
-    echo "\033[36m##########\nInstalling lazydocker\n##########\n\033[m"
+    echo -e "\033[36m##########\nInstalling lazydocker\n##########\n\033[m"
     curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
     echo 'alias lzd="lazydocker"' >> ~/.zshrc
 else
@@ -126,7 +126,7 @@ fi
 
 # 安裝 thefuck
 if ! command -v thefuck &> /dev/null; then
-    echo "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
+    echo -e "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
     sudo apt install -y python3-dev python3-pip python3-setuptools
     pip install git+https://github.com/nvbn/thefuck
     echo 'eval $(thefuck --alias)' >> ~/.zshrc
@@ -137,4 +137,4 @@ fi
 # 重新載入 zsh 配置
 . ~/.zshrc
 
-echo "\033[36m########## Done! ##########\033[m"
+echo -e "\033[36m########## Done! ##########\033[m"
