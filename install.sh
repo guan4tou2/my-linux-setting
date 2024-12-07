@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 ARCH=$(uname -m)
 case $ARCH in
@@ -15,7 +15,7 @@ timedatectl
 echo  "\033[36m##########\ninstall apt\n##########\n\033[m"
 sudo apt update
 sudo apt install -y   zsh fail2ban ca-certificates curl gnupg nodejs npm python-is-python3 unzip cargo gem fd-find ripgrep net-tools tldr fzf ncdu  \
-                      lua stress pipx python3-pip
+                      lua5.3 stress pipx python3-pip
                       # monitor
 sudo apt install -y   btop iftop 
                       # log watcher
