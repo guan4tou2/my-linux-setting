@@ -25,6 +25,9 @@ for pkg in "${packages[@]}"; do
     fi
 done
 
+echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.zshrc
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
+
 # 檢查並使用 snap 安裝的特殊套件
 if ! command -v btop &> /dev/null; then
     sudo snap install btop
