@@ -9,10 +9,10 @@ esac
 # 設定時區
 echo -e "\033[36m##########\nSetting date\n##########\n\033[m"
 sudo timedatectl set-timezone "Asia/Taipei"
-timedatectl
 
 # 更新並安裝套件
 echo -e "\033[36m##########\nInstalling packages\n##########\n\033[m"
+sudo add-apt-repository universe
 sudo apt update
 
 # 檢查並安裝必要的套件
@@ -43,12 +43,12 @@ for pip_pkg in $pip_packages; do
 done
 
 # 啟動 fail2ban
-echo -e "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
+echo "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
 sudo systemctl enable --now fail2ban
 
 # 安裝 neovim
 if ! command -v nvim > /dev/null 2>&1; then
-    echo -e "\033[36m##########\nInstalling nvim\n##########\n\033[m"
+    echo "\033[36m##########\nInstalling nvim\n##########\n\033[m"
     sudo apt remove -y nvim
     sudo add-apt-repository ppa:neovim-ppa/unstable -y
     sudo apt update
@@ -63,7 +63,7 @@ fi
 
 # 安裝 lazygit
 if ! command -v lazygit > /dev/null 2>&1; then
-    echo -e "\033[36m##########\nInstalling lazygit\n##########\n\033[m"
+    echo "\033[36m##########\nInstalling lazygit\n##########\n\033[m"
     LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
     curl -Lo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
     tar xf lazygit.tar.gz lazygit
@@ -75,7 +75,7 @@ fi
 
 # 安裝 Docker
 if ! command -v docker > /dev/null 2>&1; then
-    echo -e "\033[36m##########\nInstalling Docker\n##########\n\033[m"
+    echo "\033[36m##########\nInstalling Docker\n##########\n\033[m"
     curl -fsSL https://get.docker.com -o get-docker.sh
     sh get-docker.sh
     rm get-docker.sh
@@ -85,7 +85,7 @@ fi
 
 # 安裝 lazydocker
 if ! command -v lazydocker > /dev/null 2>&1; then
-    echo -e "\033[36m##########\nInstalling lazydocker\n##########\n\033[m"
+    echo "\033[36m##########\nInstalling lazydocker\n##########\n\033[m"
     curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | sh
     echo 'alias lzd="lazydocker"' >> ~/.zshrc
 else
@@ -95,26 +95,18 @@ fi
 # 修改 PATH
 sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
 
-
-
 # 安裝 oh-my-zsh
-echo -e "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
+echo "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     sudo -k chsh -s "$(command -v zsh)" "$USER"
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --skip-chsh
 fi
 
 # 安裝 zsh 插件
-plugins="romkatv/powerlevel10k zsh-users/zsh-autosuggestions zsh-users/zsh-syntax-highlighting agkozak/zsh-z"
-for plugin in $plugins; do
-    repo_name=$(basename "$plugin")
-    plugin_dir="${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/$repo_name"
-    if [ ! -d "$plugin_dir" ]; then
-        sudo git clone "https://github.com/$plugin.git" "$plugin_dir"
-    else
-        echo "$repo_name plugin is already installed."
-    fi
-done
+sudo git clone https://github.com/romkatv/powerlevel10k.git $ZSH_CUSTOM/themes/powerlevel10k
+sudo git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+sudo git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+sudo git clone https://github.com/agkozak/zsh-z $ZSH_CUSTOM/plugins/zsh-z
 
 # 設定主題和插件
 sed -i -e 's/ZSH_THEME="robbyrussell"/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
@@ -126,12 +118,9 @@ if [ ! -f ~/.p10k.zsh ]; then
     echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
 fi
 
-# 重新載入 zsh 配置
-. ~/.zshrc
-
 # 安裝 thefuck
-if ! command -v thefuck > /dev/null 2>&1; then
-    echo -e "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
+if ! command -v fuck > /dev/null 2>&1; then
+    echo "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
     sudo apt install -y python3-dev python3-pip python3-setuptools
     pip install git+https://github.com/nvbn/thefuck
     echo 'eval $(thefuck --alias)' >> ~/.zshrc
@@ -139,4 +128,7 @@ else
     echo "thefuck is already installed."
 fi
 
-echo -e "\033[36m########## Done! ##########\033[m"
+# 重新載入 zsh 配置
+. ~/.zshrc
+
+echo "\033[36m########## Done! ##########\033[m"
