@@ -1,5 +1,7 @@
 #!/bin/sh
 
+sudo -v
+
 # 設定時區
 printf "\033[36m##########\nSetting date\n##########\n\033[m"
 sudo timedatectl set-timezone "Asia/Taipei"
