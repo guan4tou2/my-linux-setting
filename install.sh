@@ -25,8 +25,9 @@ for pkg in "${packages[@]}"; do
     fi
 done
 
-echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.zshrc
-echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
+#echo 'export PATH=$PATH:$HOME/.local/bin' >> ~/.zshrc
+#echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
+sed -i -e 's/# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH/export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH/g' ~/.zshrc
 
 # 檢查並使用 snap 安裝的特殊套件
 if ! command -v btop &> /dev/null; then
