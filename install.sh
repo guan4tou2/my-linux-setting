@@ -8,6 +8,10 @@ while getopts "a" opt; do
     esac
 done
 
+if [ "$INSTALL_ALL" = true ]; then
+printf "\033[31m########## lazydocker is already installed. ##########\n\033[m"
+fi
+exit
 sudo -v
 # 設定時區
 printf "\033[36m########## Setting date ##########\n\033[m"
