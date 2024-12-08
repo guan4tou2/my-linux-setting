@@ -7,7 +7,7 @@ The default command installs only oh-my-zsh and thefuck.
 `sh -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)"`
 
 To install everything, use the -a option.  
-`sh -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)" -a`
+`sh -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)" -- -a`
 
 ## Tools setting
 To install the tools I commonly use.  
