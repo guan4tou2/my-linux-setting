@@ -10,11 +10,11 @@ done
 
 sudo -v
 # 設定時區
-printf "\033[36m##########\nSetting date\n##########\n\033[m"
+printf "\033[36m########## Setting date ##########\n\033[m"
 sudo timedatectl set-timezone "Asia/Taipei"
 
 # 更新並安裝套件
-printf "\033[36m##########\nInstalling packages\n##########\n\033[m"
+printf "\033[36m########## Installing packages ##########\n\033[m"
 sudo add-apt-repository universe -y
 sudo add-apt-repository ppa:neovim-ppa/unstable -y
 sudo apt update
@@ -28,7 +28,7 @@ for pkg in $packages; do
     if ! dpkg -l | grep -q "^ii  $pkg"; then
         sudo apt install -y "$pkg"
     else
-        echo "$pkg is already installed."
+        printf "\033[36m########## $pkg is already installed. ##########\n\033[m"
     fi
 done
 
@@ -37,26 +37,27 @@ ZSH_VERSION=$(zsh --version | awk '{print $2}')
 REQUIRED_VERSION="5.0.8"
 
 if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$ZSH_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
-    echo "Zsh version is $ZSH_VERSION. Please upgrade to version $REQUIRED_VERSION or newer."
+    printf "\033[36m Zsh version is $ZSH_VERSION. Please upgrade to version $REQUIRED_VERSION or newer. \n\033[m"
     exit 1
 else
-    echo "Zsh version is $ZSH_VERSION. It meets the required version."
+    printf "\033[36m Zsh version is $ZSH_VERSION. It meets the required version. \n\033[m"
 fi
 
 sudo -v
 # 安裝 oh-my-zsh
-printf "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
+printf "\033[36m########## Installing oh-my-zsh ##########\n\033[m"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     sudo -k chsh -s "$(command -v zsh)" "$USER"
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
     ZSH_CUSTOM="$HOME/.oh-my-zsh/custom"
     export ZSH_CUSTOM
 fi
+
 # 檢查 ~/.zshrc 是否存在
 if [ -f "$HOME/.zshrc" ]; then
-    echo "檔案 ~/.zshrc 存在。"
+    printf "\033[36m File ~/.zshrc exist. \n\033[m"
 else
-    echo "檔案 ~/.zshrc 不存在。"
+    printf "\033[36m File ~/.zshrc not exist. \n\033[m"
     exit 1
 fi
 
@@ -65,7 +66,7 @@ if ! grep -q "export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin
     # 如果沒設定過，則修改 ~/.zshrc
     sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
 else
-    echo "PATH is already set in ~/.zshrc."
+    printf "\033[36m PATH is already set in ~/.zshrc. \n\033[m"
 fi
 
 # 安裝 zsh 插件
@@ -78,7 +79,7 @@ git clone https://github.com/MichaelAquilina/zsh-you-should-use.git ${ZSH_CUSTOM
 if ! grep -q "zsh-autosuggestions" ~/.zshrc; then
     sed -i 's/^plugins=(.*)/plugins=(git thefuck zsh-autosuggestions zsh-syntax-highlighting zsh-history-substring-search you-should-use)/g' ~/.zshrc
 else
-    echo "Plugins are already set in ~/.zshrc."
+    printf "\033[36m Plugins are already set in ~/.zshrc. \n\033[m"
 fi
 
 # 設定 Powerlevel10k
@@ -93,11 +94,11 @@ fi
 
 # 檢查 ~/.zshrc 是否已經設定過 PATH
 if ! grep -q "eval $(thefuck --alias)" ~/.zshrc; then
-    printf "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
+    printf "\033[36m########## Installing thefuck ##########\n\033[m"
     pip install git+https://github.com/nvbn/thefuck
     echo 'eval $(thefuck --alias)' >> ~/.zshrc
 else
-    printf "thefuck is already installed."
+    printf "\033[36m thefuck is already installed. \n\033[m"
 fi
 
 if [ "$INSTALL_ALL" = true ]; then
@@ -110,7 +111,7 @@ if [ "$INSTALL_ALL" = true ]; then
         if ! dpkg -l | grep -q "^ii  $pkg"; then
             sudo apt install -y "$pkg"
         else
-            echo "$pkg is already installed."
+            printf "\033[36m########## $pkg is already installed. ##########\n\033[m"
         fi
     done
     
@@ -120,7 +121,7 @@ if [ "$INSTALL_ALL" = true ]; then
         if ! pip list --format=columns | grep -q "$pip_pkg"; then
             pip install "$pip_pkg"
         else
-            echo "$pip_pkg is already installed."
+            printf "\033[36m########## $pkg is already installed. ##########\n\033[m"
         fi
     done
     
@@ -128,15 +129,15 @@ if [ "$INSTALL_ALL" = true ]; then
     printf "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
     sudo systemctl enable --now fail2ban
     
-    # 安裝 neovim
-    if ! command -v nvim > /dev/null 2>&1; then
+    # 安裝 lzayvim
+    if ! command -v neovim > /dev/null 2>&1; then
         printf "\033[36m##########\nInstalling nvim\n##########\n\033[m"
         git clone https://github.com/LazyVim/starter ~/.config/nvim
         rm -rf ~/.config/nvim/.git
         npm install -g neovim
         echo 'alias nv="nvim"' >> ~/.zshrc
     else
-        printf "nvim is already installed."
+        printf "\033[36m########## lzayvim is already installed. ##########\n\033[m"
     fi
 
     # 安裝 lazygit
@@ -148,7 +149,7 @@ if [ "$INSTALL_ALL" = true ]; then
         sudo install lazygit /usr/local/bin
         rm -rf lazygit lazygit.tar.gz
     else
-        printf "lazygit is already installed."
+        printf "\033[36m########## lazygit is already installed. ##########\n\033[m"
     fi
     
     # 安裝 Docker
@@ -158,7 +159,7 @@ if [ "$INSTALL_ALL" = true ]; then
         sh get-docker.sh
         rm get-docker.sh
     else
-        echo "Docker is already installed."
+        printf "\033[36m########## Docker is already installed. ##########\n\033[m"
     fi
     
     # 安裝 lazydocker
@@ -167,7 +168,7 @@ if [ "$INSTALL_ALL" = true ]; then
         curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | sh
         echo 'alias lzd="lazydocker"' >> ~/.zshrc
     else
-        printf "lazydocker is already installed."
+        printf "\033[36m########## lazydocker is already installed. ##########\n\033[m"
     fi
 fi
 printf "\033[36m########## Done! ##########\033[m"
