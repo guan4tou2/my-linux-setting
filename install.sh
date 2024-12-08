@@ -21,7 +21,7 @@ packages="zsh git fail2ban ca-certificates curl
         python3-venv python3-dev python3-pip python3-setuptools"
 for pkg in $packages; do
     if ! dpkg -l | grep -q "^ii  $pkg"; then
-        apt install -y "$pkg"
+        sudo apt install -y "$pkg"
     else
         echo "$pkg is already installed."
     fi
@@ -76,7 +76,7 @@ if ! command -v lazygit > /dev/null 2>&1; then
     LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
     curl -Lo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
     tar xf lazygit.tar.gz lazygit
-    install lazygit /usr/local/bin
+    sudo install lazygit /usr/local/bin
     rm -rf lazygit lazygit.tar.gz
 else
     printf "lazygit is already installed."
@@ -134,7 +134,7 @@ if [ ! -f ~/.p10k.zsh ]; then
     wget https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh -O ~/.p10k.zsh
     git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k
     sed -i 's/^ZSH_THEME=.*/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
-    printf 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
+    echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
 fi
 
 # 安裝 thefuck
@@ -146,8 +146,10 @@ else
     printf "thefuck is already installed."
 fi
 
+printf "\033[36m########## Done! ##########\033[m"
+
 # 切換到 zsh 並載入配置
 exec zsh
 source ~/.zshrc
 
-printf "\033[36m########## Done! ##########\033[m"
+
