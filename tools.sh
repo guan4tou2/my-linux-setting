@@ -26,3 +26,10 @@ for pip_pkg in $pip_packages; do
         echo "$pip_pkg is already installed."
     fi
 done
+
+# 檢查並使用 snap 安裝的特殊套件
+if ! command -v btop > /dev/null 2>&1; then
+    sudo snap install btop
+else
+    echo "btop is already installed."
+fi
