@@ -15,7 +15,7 @@ sudo apt remove -y nvim
 # 檢查並安裝必要的套件
 packages="zsh git fail2ban ca-certificates curl 
         gnupg nodejs npm unzip cargo gem fd-find ripgrep 
-        net-tools tldr fzf ncdu lua5.3 stress pipx iftop lnav logwatch 
+        net-tools tldr fzf ncdu lua5.3 pipx iftop lnav
         fonts-firacode vim httpie neovim 
         python-is-python3 python3-pip python3-neovim 
         python3-venv python3-dev python3-pip python3-setuptools"
