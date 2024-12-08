@@ -1,5 +1,13 @@
 #!/bin/sh
 
+INSTALL_ALL=false
+while getopts "a" opt; do
+    case $opt in
+        a) INSTALL_DOCKER=true ;;
+        *) echo "Usage: $0 [-a]" ; exit 1 ;;
+    esac
+done
+
 sudo -v
 # 設定時區
 printf "\033[36m##########\nSetting date\n##########\n\033[m"
@@ -11,13 +19,8 @@ sudo add-apt-repository universe -y
 sudo add-apt-repository ppa:neovim-ppa/unstable -y
 sudo apt update
 sudo apt remove -y nvim
-    
-# 檢查並安裝必要的套件
-packages="zsh git fail2ban curl 
-        nodejs npm unzip cargo gem lua5.3 pipx
-        fonts-firacode vim neovim 
-        python-is-python3 python3-pip python3-neovim 
-        python3-venv python3-dev python3-pip python3-setuptools"
+
+packages="zsh git fonts-firacode"
 for pkg in $packages; do
     if ! dpkg -l | grep -q "^ii  $pkg"; then
         sudo apt install -y "$pkg"
@@ -25,21 +28,6 @@ for pkg in $packages; do
         echo "$pkg is already installed."
     fi
 done
-
-sudo -v
-# 安裝 Python 套件
-pip_packages="ranger-fm"
-for pip_pkg in $pip_packages; do
-    if ! pip list --format=columns | grep -q "$pip_pkg"; then
-        pip install "$pip_pkg"
-    else
-        echo "$pip_pkg is already installed."
-    fi
-done
-
-# 啟動 fail2ban
-printf "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
-sudo systemctl enable --now fail2ban
 
 # Check Zsh version
 ZSH_VERSION=$(zsh --version | awk '{print $2}')
@@ -52,54 +40,11 @@ else
     echo "Zsh version is $ZSH_VERSION. It meets the required version."
 fi
 
-# 安裝 neovim
-if ! command -v nvim > /dev/null 2>&1; then
-    printf "\033[36m##########\nInstalling nvim\n##########\n\033[m"
-    git clone https://github.com/LazyVim/starter ~/.config/nvim
-    rm -rf ~/.config/nvim/.git
-    npm install -g neovim
-    echo 'alias nv="nvim"' >> ~/.zshrc
-else
-    printf "nvim is already installed."
-fi
-
-sudo -v
-# 安裝 lazygit
-if ! command -v lazygit > /dev/null 2>&1; then
-    printf "\033[36m##########\nInstalling lazygit\n##########\n\033[m"
-    LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
-    curl -Lo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
-    tar xf lazygit.tar.gz lazygit
-    sudo install lazygit /usr/local/bin
-    rm -rf lazygit lazygit.tar.gz
-else
-    printf "lazygit is already installed."
-fi
-
-# 安裝 Docker
-if ! command -v docker > /dev/null 2>&1; then
-    printf "\033[36m##########\nInstalling Docker\n##########\n\033[m"
-    curl -fsSL https://get.docker.com -o get-docker.sh
-    sh get-docker.sh
-    rm get-docker.sh
-else
-    echo "Docker is already installed."
-fi
-
-# 安裝 lazydocker
-if ! command -v lazydocker > /dev/null 2>&1; then
-    printf "\033[36m##########\nInstalling lazydocker\n##########\n\033[m"
-    curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | sh
-    echo 'alias lzd="lazydocker"' >> ~/.zshrc
-else
-    printf "lazydocker is already installed."
-fi
-
 sudo -v
 # 安裝 oh-my-zsh
 printf "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    chsh -s "$(command -v zsh)" 
+    sudo -k chsh -s "$(command -v zsh)" "$USER"
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
     ZSH_CUSTOM="$HOME/.oh-my-zsh/custom"
     export ZSH_CUSTOM
@@ -131,15 +76,89 @@ if [ ! -f ~/.p10k.zsh ]; then
     echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
 fi
 
-# 安裝 thefuck
-if ! command -v fuck > /dev/null 2>&1; then
-    printf "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
-    pip install git+https://github.com/nvbn/thefuck
-    echo 'eval $(thefuck --alias)' >> ~/.zshrc
-else
-    printf "thefuck is already installed."
-fi
 
+
+if [ "$INSTALL_ALL" = true ]; then
+    # 檢查並安裝必要的套件
+    packages="zsh git fail2ban curl 
+            nodejs npm unzip cargo gem lua5.3 pipx
+            fonts-firacode vim neovim 
+            python-is-python3 python3-pip python3-neovim 
+            python3-venv python3-dev python3-pip python3-setuptools"
+    for pkg in $packages; do
+        if ! dpkg -l | grep -q "^ii  $pkg"; then
+            sudo apt install -y "$pkg"
+        else
+            echo "$pkg is already installed."
+        fi
+    done
+    
+    # 安裝 Python 套件
+    pip_packages="ranger-fm"
+    for pip_pkg in $pip_packages; do
+        if ! pip list --format=columns | grep -q "$pip_pkg"; then
+            pip install "$pip_pkg"
+        else
+            echo "$pip_pkg is already installed."
+        fi
+    done
+    
+    # 啟動 fail2ban
+    printf "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
+    sudo systemctl enable --now fail2ban
+    
+    # 安裝 neovim
+    if ! command -v nvim > /dev/null 2>&1; then
+        printf "\033[36m##########\nInstalling nvim\n##########\n\033[m"
+        git clone https://github.com/LazyVim/starter ~/.config/nvim
+        rm -rf ~/.config/nvim/.git
+        npm install -g neovim
+        echo 'alias nv="nvim"' >> ~/.zshrc
+    else
+        printf "nvim is already installed."
+    fi
+    
+    sudo -v
+    # 安裝 lazygit
+    if ! command -v lazygit > /dev/null 2>&1; then
+        printf "\033[36m##########\nInstalling lazygit\n##########\n\033[m"
+        LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
+        curl -Lo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
+        tar xf lazygit.tar.gz lazygit
+        sudo install lazygit /usr/local/bin
+        rm -rf lazygit lazygit.tar.gz
+    else
+        printf "lazygit is already installed."
+    fi
+    
+    # 安裝 Docker
+    if ! command -v docker > /dev/null 2>&1; then
+        printf "\033[36m##########\nInstalling Docker\n##########\n\033[m"
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        rm get-docker.sh
+    else
+        echo "Docker is already installed."
+    fi
+    
+    # 安裝 lazydocker
+    if ! command -v lazydocker > /dev/null 2>&1; then
+        printf "\033[36m##########\nInstalling lazydocker\n##########\n\033[m"
+        curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | sh
+        echo 'alias lzd="lazydocker"' >> ~/.zshrc
+    else
+        printf "lazydocker is already installed."
+    fi
+    
+    # 安裝 thefuck
+    if ! command -v fuck > /dev/null 2>&1; then
+        printf "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
+        pip install git+https://github.com/nvbn/thefuck
+        echo 'eval $(thefuck --alias)' >> ~/.zshrc
+    else
+        printf "thefuck is already installed."
+    fi
+fi
 printf "\033[36m########## Done! ##########\033[m"
 
 # 切換到 zsh 並載入配置
