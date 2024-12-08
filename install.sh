@@ -42,6 +42,17 @@ done
 printf "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
 sudo systemctl enable --now fail2ban
 
+# Check Zsh version
+ZSH_VERSION=$(zsh --version | awk '{print $2}')
+REQUIRED_VERSION="5.0.8"
+
+if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$ZSH_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
+    echo "Zsh version is $ZSH_VERSION. Please upgrade to version $REQUIRED_VERSION or newer."
+    exit 1
+else
+    echo "Zsh version is $ZSH_VERSION. It meets the required version."
+fi
+
 # 安裝 neovim
 if ! command -v nvim > /dev/null 2>&1; then
     printf "\033[36m##########\nInstalling nvim\n##########\n\033[m"
