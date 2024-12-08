@@ -20,7 +20,7 @@ sudo add-apt-repository ppa:neovim-ppa/unstable -y
 sudo apt update
 sudo apt remove -y nvim
 
-packages="zsh git fonts-firacode"
+packages="zsh git fonts-firacode python-is-python3 python3-pip"
 for pkg in $packages; do
     if ! dpkg -l | grep -q "^ii  $pkg"; then
         sudo apt install -y "$pkg"
@@ -90,8 +90,7 @@ if [ "$INSTALL_ALL" = true ]; then
     packages="zsh git fail2ban curl 
             nodejs npm unzip cargo gem lua5.3 pipx
             fonts-firacode vim neovim 
-            python-is-python3 python3-pip python3-neovim 
-            python3-venv python3-dev python3-pip python3-setuptools"
+            python3-neovim python3-venv python3-dev python3-setuptools"
     for pkg in $packages; do
         if ! dpkg -l | grep -q "^ii  $pkg"; then
             sudo apt install -y "$pkg"
