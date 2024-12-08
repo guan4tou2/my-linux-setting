@@ -15,7 +15,7 @@ sudo apt remove -y nvim
 # 檢查並安裝必要的套件
 packages="zsh git fail2ban curl 
         nodejs npm unzip cargo gem lua5.3 pipx
-        fonts-firacode vim  neovim 
+        fonts-firacode vim neovim 
         python-is-python3 python3-pip python3-neovim 
         python3-venv python3-dev python3-pip python3-setuptools"
 for pkg in $packages; do
@@ -25,13 +25,6 @@ for pkg in $packages; do
         echo "$pkg is already installed."
     fi
 done
-
-# 檢查並使用 snap 安裝的特殊套件
-if ! command -v btop > /dev/null 2>&1; then
-    sudo snap install btop
-else
-    echo "btop is already installed."
-fi
 
 sudo -v
 # 安裝 Python 套件
