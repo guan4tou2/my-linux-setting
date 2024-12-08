@@ -34,6 +34,7 @@ else
     echo "btop is already installed."
 fi
 
+sudo -v
 # 安裝 Python 套件
 pip_packages="ranger-fm s-tui"
 for pip_pkg in $pip_packages; do
@@ -46,7 +47,7 @@ done
 
 # 啟動 fail2ban
 printf "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
-systemctl enable --now fail2ban
+sudo systemctl enable --now fail2ban
 
 # Check Zsh version
 ZSH_VERSION=$(zsh --version | awk '{print $2}')
@@ -70,6 +71,7 @@ else
     printf "nvim is already installed."
 fi
 
+sudo -v
 # 安裝 lazygit
 if ! command -v lazygit > /dev/null 2>&1; then
     printf "\033[36m##########\nInstalling lazygit\n##########\n\033[m"
@@ -101,7 +103,7 @@ else
     printf "lazydocker is already installed."
 fi
 
-
+sudo -v
 # 安裝 oh-my-zsh
 printf "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
