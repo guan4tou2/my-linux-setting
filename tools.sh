@@ -16,3 +16,13 @@ for pkg in $packages; do
         echo "$pkg is already installed."
     fi
 done
+
+# 安裝 Python 套件
+pip_packages="ranger-fm s-tui"
+for pip_pkg in $pip_packages; do
+    if ! pip list --format=columns | grep -q "$pip_pkg"; then
+        pip install "$pip_pkg"
+    else
+        echo "$pip_pkg is already installed."
+    fi
+done
