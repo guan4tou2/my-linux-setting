@@ -8,10 +8,6 @@ while getopts "a" opt; do
     esac
 done
 
-if [ "$INSTALL_ALL" = true ]; then
-printf "\033[31m########## lazydocker is already installed. ##########\n\033[m"
-fi
-exit
 sudo -v
 # 設定時區
 printf "\033[36m########## Setting date ##########\n\033[m"
@@ -106,8 +102,6 @@ else
 fi
 
 if [ "$INSTALL_ALL" = true ]; then
-printf "\033[31m########## lazydocker is already installed. ##########\n\033[m"
-
     # 檢查並安裝必要的套件
     packages="zsh git fail2ban curl 
             nodejs npm unzip cargo gem lua5.3 pipx
