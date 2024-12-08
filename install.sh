@@ -137,7 +137,7 @@ if [ "$INSTALL_ALL" = true ]; then
         npm install -g neovim
         echo 'alias nv="nvim"' >> ~/.zshrc
     else
-        printf "\033[36m##########lzayvim is already installed. ##########\n\033[m"
+        printf "\033[36mlzayvim is already installed. \n\033[m"
     fi
 
     # 安裝 lazygit
@@ -149,7 +149,7 @@ if [ "$INSTALL_ALL" = true ]; then
         sudo install lazygit /usr/local/bin
         rm -rf lazygit lazygit.tar.gz
     else
-        printf "\033[36m##########lazygit is already installed. ##########\n\033[m"
+        printf "\033[36mlazygit is already installed. \n\033[m"
     fi
     
     # 安裝 Docker
@@ -159,7 +159,7 @@ if [ "$INSTALL_ALL" = true ]; then
         sh get-docker.sh
         rm get-docker.sh
     else
-        printf "\033[36m##########Docker is already installed. ##########\n\033[m"
+        printf "\033[36mDocker is already installed. \n\033[m"
     fi
     
     # 安裝 lazydocker
@@ -168,10 +168,10 @@ if [ "$INSTALL_ALL" = true ]; then
         curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | sh
         echo 'alias lzd="lazydocker"' >> ~/.zshrc
     else
-        printf "\033[36m##########lazydocker is already installed. ##########\n\033[m"
+        printf "\033[36mlazydocker is already installed. \n\033[m"
     fi
 fi
-printf "\033[36m########## Done! ##########\033[m"
+printf "\033[36m########## Done! ##########\n\033[m"
 
 # 切換到 zsh 並載入配置
 exec zsh
