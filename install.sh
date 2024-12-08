@@ -7,7 +7,7 @@ sudo timedatectl set-timezone "Asia/Taipei"
 
 # 更新並安裝套件
 printf "\033[36m##########\nInstalling packages\n##########\n\033[m"
-sduo add-apt-repository universe -y
+sudo add-apt-repository universe -y
 sudo add-apt-repository ppa:neovim-ppa/unstable -y
 sudo apt update
 sudo apt remove -y nvim
