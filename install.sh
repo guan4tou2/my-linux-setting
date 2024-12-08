@@ -19,8 +19,6 @@ sudo add-apt-repository universe -y
 sudo add-apt-repository ppa:neovim-ppa/unstable -y
 sudo apt update
 
-
-# 安裝 Docker
 if command -v nvim > /dev/null 2>&1; then
     sudo apt remove -y nvim
 fi
@@ -53,43 +51,42 @@ if [ ! -d "$HOME/.oh-my-zsh" ]; then
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
     ZSH_CUSTOM="$HOME/.oh-my-zsh/custom"
     export ZSH_CUSTOM
+
+    # 檢查 ~/.zshrc 是否存在
+    if [ -f "$HOME/.zshrc" ]; then
+        echo "檔案 ~/.zshrc 存在。"
+    else
+        echo "檔案 ~/.zshrc 不存在。"
+        exit 1
+    fi
+
+    # 修改 PATH
+    sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
+
+    # 安裝 zsh 插件
+    git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
+    git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
+    git clone https://github.com/zsh-users/zsh-history-substring-search ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-history-substring-search
+    git clone https://github.com/MichaelAquilina/zsh-you-should-use.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/you-should-use
+    sed -i 's/^plugins=.*/plugins=(git\n thefuck\n zsh-autosuggestions\n zsh-syntax-highlighting\n zsh-history-substring-search\n you-should-use\n)/g' ~/.zshrc
+    
+    # 設定 Powerlevel10k
+    if [ ! -f ~/.p10k.zsh ]; then
+        wget https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh -O ~/.p10k.zsh
+        git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k
+        sed -i 's/^ZSH_THEME=.*/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
+        echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
+    fi
+    
+    # 安裝 thefuck
+    if ! command -v fuck > /dev/null 2>&1; then
+        printf "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
+        pip install git+https://github.com/nvbn/thefuck
+        echo 'eval $(thefuck --alias)' >> ~/.zshrc
+    else
+        printf "thefuck is already installed."
+    fi
 fi
-
-# 檢查 ~/.zshrc 是否存在
-if [ -f "$HOME/.zshrc" ]; then
-    echo "檔案 ~/.zshrc 存在。"
-else
-    echo "檔案 ~/.zshrc 不存在。"
-    exit 1
-fi
-
-# 修改 PATH
-sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
-
-# 安裝 zsh 插件
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
-git clone https://github.com/zsh-users/zsh-history-substring-search ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-history-substring-search
-git clone https://github.com/MichaelAquilina/zsh-you-should-use.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/you-should-use
-sed -i 's/^plugins=.*/plugins=(git\n thefuck\n zsh-autosuggestions\n zsh-syntax-highlighting\n zsh-history-substring-search\n you-should-use\n)/g' ~/.zshrc
-
-# 設定 Powerlevel10k
-if [ ! -f ~/.p10k.zsh ]; then
-    wget https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh -O ~/.p10k.zsh
-    git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k
-    sed -i 's/^ZSH_THEME=.*/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
-    echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
-fi
-
-# 安裝 thefuck
-if ! command -v fuck > /dev/null 2>&1; then
-    printf "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
-    pip install git+https://github.com/nvbn/thefuck
-    echo 'eval $(thefuck --alias)' >> ~/.zshrc
-else
-    printf "thefuck is already installed."
-fi
-
 if [ "$INSTALL_ALL" = true ]; then
     # 檢查並安裝必要的套件
     packages="zsh git fail2ban curl 
