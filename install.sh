@@ -76,7 +76,14 @@ if [ ! -f ~/.p10k.zsh ]; then
     echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
 fi
 
-
+# 安裝 thefuck
+if ! command -v fuck > /dev/null 2>&1; then
+    printf "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
+    pip install git+https://github.com/nvbn/thefuck
+    echo 'eval $(thefuck --alias)' >> ~/.zshrc
+else
+    printf "thefuck is already installed."
+fi
 
 if [ "$INSTALL_ALL" = true ]; then
     # 檢查並安裝必要的套件
@@ -117,8 +124,7 @@ if [ "$INSTALL_ALL" = true ]; then
     else
         printf "nvim is already installed."
     fi
-    
-    sudo -v
+
     # 安裝 lazygit
     if ! command -v lazygit > /dev/null 2>&1; then
         printf "\033[36m##########\nInstalling lazygit\n##########\n\033[m"
@@ -148,15 +154,6 @@ if [ "$INSTALL_ALL" = true ]; then
         echo 'alias lzd="lazydocker"' >> ~/.zshrc
     else
         printf "lazydocker is already installed."
-    fi
-    
-    # 安裝 thefuck
-    if ! command -v fuck > /dev/null 2>&1; then
-        printf "\033[36m##########\nInstalling thefuck\n##########\n\033[m"
-        pip install git+https://github.com/nvbn/thefuck
-        echo 'eval $(thefuck --alias)' >> ~/.zshrc
-    else
-        printf "thefuck is already installed."
     fi
 fi
 printf "\033[36m########## Done! ##########\033[m"
