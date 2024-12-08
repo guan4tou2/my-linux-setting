@@ -3,7 +3,7 @@
 INSTALL_ALL=false
 while getopts "a" opt; do
     case $opt in
-        a) INSTALL_DOCKER=true ;;
+        a) INSTALL_ALL=true ;;
         *) echo "Usage: $0 [-a]" ; exit 1 ;;
     esac
 done
