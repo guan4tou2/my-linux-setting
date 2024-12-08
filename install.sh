@@ -40,7 +40,7 @@ if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$ZSH_VERSION" | sort -V | head -n1)" 
     printf "\033[36m Zsh version is $ZSH_VERSION. Please upgrade to version $REQUIRED_VERSION or newer. \n\033[m"
     exit 1
 else
-    printf "\033[36m Zsh version is $ZSH_VERSION. It meets the required version. \n\033[m"
+    printf "\033[36mZsh version is $ZSH_VERSION. It meets the required version. \n\033[m"
 fi
 
 sudo -v
@@ -55,9 +55,9 @@ fi
 
 # 檢查 ~/.zshrc 是否存在
 if [ -f "$HOME/.zshrc" ]; then
-    printf "\033[36m File ~/.zshrc exist. \n\033[m"
+    printf "\033[36mFile ~/.zshrc exist. \n\033[m"
 else
-    printf "\033[36m File ~/.zshrc not exist. \n\033[m"
+    printf "\033[36mFile ~/.zshrc not exist. \n\033[m"
     exit 1
 fi
 
@@ -66,7 +66,7 @@ if ! grep -q "export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin
     # 如果沒設定過，則修改 ~/.zshrc
     sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
 else
-    printf "\033[36m PATH is already set in ~/.zshrc. \n\033[m"
+    printf "\033[36mPATH is already set in ~/.zshrc. \n\033[m"
 fi
 
 # 安裝 zsh 插件
@@ -76,10 +76,10 @@ git clone https://github.com/zsh-users/zsh-history-substring-search ${ZSH_CUSTOM
 git clone https://github.com/MichaelAquilina/zsh-you-should-use.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/you-should-use
 
 # 檢查 plugins 設定是否已經包含所需插件
-if ! grep -q "zsh-autosuggestions" ~/.zshrc; then
+if ! grep -q "zsh-autosuggestions zsh-syntax-highlighting zsh-history-substring-search you-should-use" ~/.zshrc; then
     sed -i 's/^plugins=(.*)/plugins=(git thefuck zsh-autosuggestions zsh-syntax-highlighting zsh-history-substring-search you-should-use)/g' ~/.zshrc
 else
-    printf "\033[36m Plugins are already set in ~/.zshrc. \n\033[m"
+    printf "\033[36mPlugins are already set in ~/.zshrc. \n\033[m"
 fi
 
 # 設定 Powerlevel10k
@@ -98,7 +98,7 @@ if ! grep -q "eval $(thefuck --alias)" ~/.zshrc; then
     pip install git+https://github.com/nvbn/thefuck
     echo 'eval $(thefuck --alias)' >> ~/.zshrc
 else
-    printf "\033[36m thefuck is already installed. \n\033[m"
+    printf "\033[36mthefuck is already installed. \n\033[m"
 fi
 
 if [ "$INSTALL_ALL" = true ]; then
@@ -130,14 +130,14 @@ if [ "$INSTALL_ALL" = true ]; then
     sudo systemctl enable --now fail2ban
     
     # 安裝 lzayvim
-    if ! command -v neovim > /dev/null 2>&1; then
+    if ! command -v nvim > /dev/null 2>&1; then
         printf "\033[36m##########\nInstalling nvim\n##########\n\033[m"
         git clone https://github.com/LazyVim/starter ~/.config/nvim
         rm -rf ~/.config/nvim/.git
         npm install -g neovim
         echo 'alias nv="nvim"' >> ~/.zshrc
     else
-        printf "\033[36m########## lzayvim is already installed. ##########\n\033[m"
+        printf "\033[36m##########lzayvim is already installed. ##########\n\033[m"
     fi
 
     # 安裝 lazygit
@@ -149,7 +149,7 @@ if [ "$INSTALL_ALL" = true ]; then
         sudo install lazygit /usr/local/bin
         rm -rf lazygit lazygit.tar.gz
     else
-        printf "\033[36m########## lazygit is already installed. ##########\n\033[m"
+        printf "\033[36m##########lazygit is already installed. ##########\n\033[m"
     fi
     
     # 安裝 Docker
@@ -159,7 +159,7 @@ if [ "$INSTALL_ALL" = true ]; then
         sh get-docker.sh
         rm get-docker.sh
     else
-        printf "\033[36m########## Docker is already installed. ##########\n\033[m"
+        printf "\033[36m##########Docker is already installed. ##########\n\033[m"
     fi
     
     # 安裝 lazydocker
@@ -168,7 +168,7 @@ if [ "$INSTALL_ALL" = true ]; then
         curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | sh
         echo 'alias lzd="lazydocker"' >> ~/.zshrc
     else
-        printf "\033[36m########## lazydocker is already installed. ##########\n\033[m"
+        printf "\033[36m##########lazydocker is already installed. ##########\n\033[m"
     fi
 fi
 printf "\033[36m########## Done! ##########\033[m"
