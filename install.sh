@@ -102,6 +102,8 @@ else
 fi
 
 if [ "$INSTALL_ALL" = true ]; then
+printf "\033[31m########## lazydocker is already installed. ##########\n\033[m"
+
     # 檢查並安裝必要的套件
     packages="zsh git fail2ban curl 
             nodejs npm unzip cargo gem lua5.3 pipx
