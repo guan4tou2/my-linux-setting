@@ -18,7 +18,12 @@ printf "\033[36m##########\nInstalling packages\n##########\n\033[m"
 sudo add-apt-repository universe -y
 sudo add-apt-repository ppa:neovim-ppa/unstable -y
 sudo apt update
-sudo apt remove -y nvim
+
+
+# 安裝 Docker
+if command -v nvim > /dev/null 2>&1; then
+    sudo apt remove -y nvim
+fi
 
 packages="zsh git fonts-firacode python3 python-is-python3 python3-pip"
 for pkg in $packages; do
