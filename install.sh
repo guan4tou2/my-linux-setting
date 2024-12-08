@@ -35,7 +35,7 @@ fi
 
 sudo -v
 # 安裝 Python 套件
-pip_packages="ranger-fm s-tui"
+pip_packages="ranger-fm"
 for pip_pkg in $pip_packages; do
     if ! pip list --format=columns | grep -q "$pip_pkg"; then
         pip install "$pip_pkg"
