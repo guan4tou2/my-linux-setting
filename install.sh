@@ -105,7 +105,7 @@ sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|expor
 # 安裝 oh-my-zsh
 printf "\033[36m##########\nInstalling oh-my-zsh\n##########\n\033[m"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    sudo -k chsh -s "$(command -v zsh)" "$USER"
+    chsh -s "$(command -v zsh)" 
     sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --skip-chsh
 fi
 
