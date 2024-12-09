@@ -165,7 +165,7 @@ if [ "$INSTALL_ALL" = true ]; then
     # 安裝 lazydocker
     if ! command -v lazydocker > /dev/null 2>&1; then
         printf "\033[36m##########\nInstalling lazydocker\n##########\n\033[m"
-        curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | sh
+        curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
         echo 'alias lzd="lazydocker"' >> ~/.zshrc
     else
         printf "\033[36mlazydocker is already installed. \n\033[m"
