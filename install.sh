@@ -23,7 +23,7 @@ if command -v nvim > /dev/null 2>&1; then
     sudo apt remove -y nvim
 fi
 
-packages="zsh git fonts-firacode python3 python-is-python3 python3-pip"
+packages="zsh git fonts-firacode python3 python-is-python3 python3-pip lsd bat"
 for pkg in $packages; do
     if ! dpkg -l | grep -q "^ii  $pkg"; then
         sudo apt install -y "$pkg"
@@ -160,6 +160,15 @@ if [ "$INSTALL_ALL" = true ]; then
         rm get-docker.sh
     else
         printf "\033[36mDocker is already installed. \n\033[m"
+    fi
+
+    # 安裝 bat
+    if ! command -v bat > /dev/null 2>&1; then
+        printf "\033[36m##########\nInstalling bat\n##########\n\033[m"
+        mkdir -p ~/.local/bin
+        ln -s /usr/bin/batcat ~/.local/bin/bat
+    else
+        printf "\033[36mbat is already installed. \n\033[m"
     fi
     
     # 安裝 lazydocker
