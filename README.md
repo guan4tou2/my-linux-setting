@@ -18,13 +18,11 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setti
 
 ## 自定義安裝
 
-如果你想使用自己的配置，有兩種方式：
+如果你想修改成自己的配置，有兩種方式：
 
 1. 通過環境變數設定：
 ```bash
 export REPO_URL="你的倉庫URL"
-export SCRIPTS_URL="$REPO_URL/scripts"
-export P10K_CONFIG_URL="$REPO_URL/.p10k.zsh"
 ```
 
 2. 克隆後修改：
