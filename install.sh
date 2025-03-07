@@ -96,7 +96,7 @@ setup_logging() {
 }
 
 # 定義模組陣列
-MODULES="base terminal dev monitoring python docker"
+MODULES="python docker base terminal dev monitoring"
 selected_modules=""
 installed_modules=""
 
@@ -120,7 +120,7 @@ main() {
         mkdir -p "$SCRIPT_DIR"
         
         # 下載所有腳本
-        for script in python_setup.sh docker_setup.sh base_tools.sh terminal_setup.sh dev_tools.sh monitoring_tools.sh; do
+        for script in base_tools.sh terminal_setup.sh dev_tools.sh monitoring_tools.sh python_setup.sh docker_setup.sh; do
             printf "${BLUE}下載 $script...${NC}\n"
             curl -fsSL "$SCRIPTS_URL/$script" -o "$SCRIPT_DIR/$script"
             chmod +x "$SCRIPT_DIR/$script"
@@ -159,12 +159,12 @@ main() {
 # 顯示菜單函數
 show_menu() {
     printf "\n${CYAN}請選擇要安裝的組件（可多選，用空格分隔）：${NC}\n"
-    printf "1) 基礎工具 (git, curl, wget 等)\n"
-    printf "2) 終端機設定 (zsh, oh-my-zsh, powerlevel10k)\n"
-    printf "3) 開發工具 (neovim, lazyvim, lazygit 等)\n"
-    printf "4) 系統監控工具 (btop, iftop, nethogs 等)\n"
-    printf "5) Python 開發環境\n"
-    printf "6) Docker 相關工具\n"
+    printf "1) Python 開發環境\n"
+    printf "2) Docker 相關工具\n"
+    printf "3) 基礎工具 (git, curl, wget 等)\n"
+    printf "4) 終端機設定 (zsh, oh-my-zsh, powerlevel10k)\n"
+    printf "5) 開發工具 (neovim, lazyvim, lazygit 等)\n"
+    printf "6) 系統監控工具 (btop, iftop, nethogs 等)\n"
     printf "7) 安裝所有組件\n"
     printf "0) 退出\n"
     printf "\n${GREEN}當前選擇的模組：$selected_modules${NC}\n"
@@ -195,12 +195,12 @@ execute_script() {
 add_module() {
     local num=$1
     case $num in
-        1) selected_modules="$selected_modules base" ;;
-        2) selected_modules="$selected_modules terminal" ;;
-        3) selected_modules="$selected_modules dev" ;;
-        4) selected_modules="$selected_modules monitoring" ;;
-        5) selected_modules="$selected_modules python" ;;
-        6) selected_modules="$selected_modules docker" ;;
+        1) selected_modules="$selected_modules python" ;;
+        2) selected_modules="$selected_modules docker" ;;
+        3) selected_modules="$selected_modules base" ;;
+        4) selected_modules="$selected_modules terminal" ;;
+        5) selected_modules="$selected_modules dev" ;;
+        6) selected_modules="$selected_modules monitoring" ;;
         7) selected_modules="$MODULES" ;;
         *) printf "${RED}無效的選項：$num${NC}\n" ;;
     esac
