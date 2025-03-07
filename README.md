@@ -13,7 +13,7 @@
 使用以下命令進行安裝：
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)"
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/refs/heads/test/install.sh)"
 ```
 
 ## 自定義安裝
