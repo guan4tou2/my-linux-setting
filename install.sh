@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # 錯誤處理
 set -e
@@ -12,7 +12,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # 配置下載網址（可根據需要修改）
-REPO_URL=${REPO_URL:-"https://raw.githubusercontent.com/guan4tou2/my-linux-setting/refs/heads/test"}
+REPO_URL=${REPO_URL:-"https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main"}
 SCRIPTS_URL=${SCRIPTS_URL:-"$REPO_URL/scripts"}
 P10K_CONFIG_URL=${P10K_CONFIG_URL:-"$REPO_URL/.p10k.zsh"}
 
@@ -178,7 +178,7 @@ execute_script() {
     local module_name=$2
     if [ -f "$SCRIPT_DIR/$script" ]; then
         printf "${CYAN}########## 開始安裝 $module_name ##########${NC}\n"
-        if sh "$SCRIPT_DIR/$script"; then
+        if bash "$SCRIPT_DIR/$script"; then
             installed_modules="$installed_modules $module_name"
             printf "${GREEN}$module_name 安裝完成${NC}\n"
         else

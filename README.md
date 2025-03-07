@@ -13,7 +13,7 @@
 使用以下命令進行安裝：
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/refs/heads/test/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)"
 ```
 
 ## 自定義安裝
@@ -25,7 +25,7 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting
 export REPO_URL="你的倉庫URL"
 export SCRIPTS_URL="$REPO_URL/scripts"
 export P10K_CONFIG_URL="$REPO_URL/.p10k.zsh"
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)"
 ```
 
 2. 克隆後修改：
@@ -33,7 +33,7 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting
 git clone https://github.com/guan4tou2/my-linux-setting.git
 cd my-linux-setting
 # 編輯 install.sh 中的 REPO_URL 等變數
-./install.sh
+bash install.sh
 ```
 
 ## 配置文件位置
