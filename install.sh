@@ -120,7 +120,7 @@ main() {
         mkdir -p "$SCRIPT_DIR"
         
         # 下載所有腳本
-        for script in base_tools.sh terminal_setup.sh dev_tools.sh monitoring_tools.sh python_setup.sh docker_setup.sh; do
+        for script in python_setup.sh docker_setup.sh base_tools.sh terminal_setup.sh dev_tools.sh monitoring_tools.sh ; do
             printf "${BLUE}下載 $script...${NC}\n"
             curl -fsSL "$SCRIPTS_URL/$script" -o "$SCRIPT_DIR/$script"
             chmod +x "$SCRIPT_DIR/$script"
