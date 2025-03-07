@@ -1,189 +1,297 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
-INSTALL_ALL=false
-while getopts "a" opt; do
-    case $opt in
-        a) INSTALL_ALL=true ;;
-        *) echo "Usage: $0 [-a]" ; exit 1 ;;
+# 錯誤處理
+set -e
+trap 'handle_error $?' ERR
+
+# 定義顏色
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# 配置下載網址（可根據需要修改）
+REPO_URL=${REPO_URL:-"https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh"}
+SCRIPTS_URL=${SCRIPTS_URL:-"$REPO_URL/scripts"}
+P10K_CONFIG_URL=${P10K_CONFIG_URL:-"$REPO_URL/.p10k.zsh"}
+
+# 導出變數供子腳本使用
+export REPO_URL
+export SCRIPTS_URL
+export P10K_CONFIG_URL
+
+# 錯誤處理函數
+handle_error() {
+    printf "${RED}安裝過程出錯（錯誤碼：$1）\n"
+    printf "請檢查日誌文件：$LOG_FILE${NC}\n"
+    cleanup
+    exit 1
+}
+
+# 清理函數
+cleanup() {
+    if [ "$REMOTE_INSTALL" = true ] && [ -d "$TEMP_DIR" ]; then
+        printf "${BLUE}清理臨時文件...${NC}\n"
+        rm -rf "$TEMP_DIR"
+    fi
+}
+
+# 環境檢查函數
+check_environment() {
+    printf "${BLUE}檢查系統環境...${NC}\n"
+    
+    # 檢查系統類型
+    if [ ! -f /etc/os-release ] || ! grep -q 'Ubuntu\|Debian' /etc/os-release; then
+        printf "${RED}錯誤：此腳本僅支持 Ubuntu/Debian 系統${NC}\n"
+    exit 1
+fi
+
+    # 檢查網絡連接
+    if ! ping -c 1 google.com >/dev/null 2>&1; then
+        printf "${RED}錯誤：無法連接到網絡${NC}\n"
+        exit 1
+    fi
+    
+    # 檢查磁盤空間（至少需要 5GB 可用空間）
+    available_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+    if [ "$available_space" -lt 5 ]; then
+        printf "${RED}錯誤：磁盤空間不足，至少需要 5GB 可用空間${NC}\n"
+        exit 1
+    fi
+    
+    # 檢查必要命令
+    for cmd in curl wget sudo apt-get; do
+        if ! command -v $cmd >/dev/null 2>&1; then
+            printf "${RED}錯誤：找不到必要的命令：$cmd${NC}\n"
+            exit 1
+        fi
+    done
+    
+    printf "${GREEN}環境檢查通過${NC}\n"
+}
+
+# 備份配置文件
+backup_config_files() {
+    printf "${BLUE}備份配置文件...${NC}\n"
+    BACKUP_DIR="$HOME/.config/linux-setting-backup/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$BACKUP_DIR"
+    
+    # 備份現有的配置文件
+    for file in ~/.zshrc ~/.p10k.zsh ~/.config/nvim; do
+        if [ -e "$file" ]; then
+            cp -r "$file" "$BACKUP_DIR/"
+            printf "${GREEN}已備份：$file${NC}\n"
+        fi
+    done
+}
+
+# 設置日誌
+setup_logging() {
+    LOG_DIR="$HOME/.local/log/linux-setting"
+    mkdir -p "$LOG_DIR"
+    LOG_FILE="$LOG_DIR/install_$(date +%Y%m%d_%H%M%S).log"
+    exec 1> >(tee -a "$LOG_FILE") 2>&1
+    printf "${GREEN}安裝日誌將保存到：$LOG_FILE${NC}\n"
+}
+
+# 定義模組陣列
+MODULES="python docker base terminal dev monitoring"
+selected_modules=""
+installed_modules=""
+
+# 檢查是否為遠程安裝
+REMOTE_INSTALL=false
+SCRIPT_DIR="$PWD/scripts"
+
+# 主要安裝函數
+main() {
+    # 初始化
+    setup_logging
+    check_environment
+    backup_config_files
+    
+    if [ ! -d "$SCRIPT_DIR" ]; then
+        REMOTE_INSTALL=true
+        TEMP_DIR=$(mktemp -d)
+        SCRIPT_DIR="$TEMP_DIR/scripts"
+        
+        printf "${CYAN}########## 下載安裝腳本 ##########${NC}\n"
+        mkdir -p "$SCRIPT_DIR"
+        
+        # 下載所有腳本
+        for script in python_setup.sh docker_setup.sh terminal_setup.sh base_tools.sh dev_tools.sh monitoring_tools.sh; do
+            printf "${BLUE}下載 $script...${NC}\n"
+            curl -fsSL "$SCRIPTS_URL/$script" -o "$SCRIPT_DIR/$script"
+            chmod +x "$SCRIPT_DIR/$script"
+        done
+    fi
+    
+    # 進入主循環
+    while true; do
+        show_menu
+        read -r input
+        case $input in
+            [0-9]*)
+                for num in $input; do
+                    add_module "$num"
+                done
+                ;;
+            i|I)
+                install_selected_modules
+                ;;
+            c|C)
+                selected_modules=""
+                printf "${CYAN}已清除所有選擇${NC}\n"
+                ;;
+            q|Q)
+                cleanup
+                printf "${CYAN}退出安裝程序${NC}\n"
+                exit 0
+                ;;
+            *)
+                printf "${RED}無效的輸入，請重試${NC}\n"
+                ;;
+        esac
+    done
+}
+
+# 顯示菜單函數
+show_menu() {
+    printf "\n${CYAN}請選擇要安裝的組件（可多選，用空格分隔）：${NC}\n"
+    printf "1) Python 開發環境\n"
+    printf "2) Docker 相關工具\n"
+    printf "3) 基礎工具 (git, curl, wget 等)\n"
+    printf "4) 終端機設定 (zsh, oh-my-zsh, powerlevel10k)\n"
+    printf "5) 開發工具 (neovim, lazyvim, lazygit 等)\n"
+    printf "6) 系統監控工具 (btop, iftop, nethogs 等)\n"
+    printf "7) 安裝所有組件\n"
+    printf "0) 退出\n"
+    printf "\n${GREEN}當前選擇的模組：$selected_modules${NC}\n"
+    printf "\n請輸入選項 (例如: 1 3 4 表示選擇1,3,4號模組)\n"
+    printf "輸入 'c' 清除選擇，輸入 'i' 開始安裝，輸入 'q' 退出: "
+}
+
+# 執行安裝腳本函數
+execute_script() {
+    local script=$1
+    local module_name=$2
+    if [ -f "$SCRIPT_DIR/$script" ]; then
+        printf "${CYAN}########## 開始安裝 $module_name ##########${NC}\n"
+        if bash "$SCRIPT_DIR/$script"; then
+            installed_modules="$installed_modules $module_name"
+            printf "${GREEN}$module_name 安裝完成${NC}\n"
+        else
+            printf "${RED}$module_name 安裝失敗${NC}\n"
+            return 1
+        fi
+    else
+        printf "${RED}錯誤：找不到腳本 $SCRIPT_DIR/$script${NC}\n"
+        return 1
+    fi
+}
+
+# 添加模組到選擇列表
+add_module() {
+    local num=$1
+    case $num in
+        1) selected_modules="$selected_modules python" ;;
+        2) selected_modules="$selected_modules docker" ;;
+        3) selected_modules="$selected_modules base" ;;
+        4) selected_modules="$selected_modules terminal" ;;
+        5) selected_modules="$selected_modules dev" ;;
+        6) selected_modules="$selected_modules monitoring" ;;
+        7) selected_modules="$MODULES" ;;
+        *) printf "${RED}無效的選項：$num${NC}\n" ;;
     esac
-done
+}
 
-sudo -v
-# 設定時區
-printf "\033[36m########## Setting date ##########\n\033[m"
-sudo timedatectl set-timezone "Asia/Taipei"
-
-# 更新並安裝套件
-printf "\033[36m########## Installing packages ##########\n\033[m"
-sudo add-apt-repository universe -y
-sudo add-apt-repository ppa:neovim-ppa/unstable -y
-sudo apt update
-
-if command -v nvim > /dev/null 2>&1; then
-    sudo apt remove -y nvim
-fi
-
-packages="zsh git fonts-firacode python3 python-is-python3 python3-pip lsd bat"
-for pkg in $packages; do
-    if ! dpkg -l | grep -q "^ii  $pkg"; then
-        sudo apt install -y "$pkg"
-    else
-        printf "\033[36m########## $pkg is already installed. ##########\n\033[m"
+# 顯示安裝報告
+show_installation_report() {
+    printf "\n${CYAN}########## 安裝報告 ##########${NC}\n"
+    printf "${GREEN}已安裝的模組：${NC}\n"
+    
+    if echo "$installed_modules" | grep -q "base"; then
+        printf "✓ 基礎工具\n"
+        printf "    git, curl, wget, lsd, bat 等\n"
     fi
-done
+    
+    if echo "$installed_modules" | grep -q "terminal"; then
+        printf "✓ 終端機設定\n"
+        printf "    zsh, oh-my-zsh, powerlevel10k\n"
+        printf "    zsh 插件：autosuggestions, syntax-highlighting, history-substring-search, you-should-use\n"
+    fi
+    
+    if echo "$installed_modules" | grep -q "dev"; then
+        printf "✓ 開發工具\n"
+        printf "    neovim (LazyVim)\n"
+        printf "    lazygit\n"
+        printf "    nodejs, npm, cargo, lua\n"
+    fi
+    
+    if echo "$installed_modules" | grep -q "monitoring"; then
+        printf "✓ 系統監控工具\n"
+        printf "    btop, iftop, nethogs, fail2ban\n"
+    fi
+    
+    if echo "$installed_modules" | grep -q "python"; then
+        printf "✓ Python 環境\n"
+        printf "    python3, pip, venv\n"
+        printf "    ranger-fm, s-tui\n"
+    fi
+    
+    if echo "$installed_modules" | grep -q "docker"; then
+        printf "✓ Docker 相關工具\n"
+        printf "    docker\n"
+        printf "    lazydocker\n"
+    fi
+    
+    printf "\n${BLUE}設定檔位置：${NC}\n"
+    printf "zsh 配置：%s\n" "~/.zshrc"
+    printf "powerlevel10k 配置：%s\n" "~/.p10k.zsh"
+    printf "neovim 配置：%s\n" "~/.config/nvim"
+    
+    printf "\n${BLUE}別名設定：${NC}\n"
+    printf "nvim -> nv\n"
+    printf "lazydocker -> lzd\n"
+    
+    printf "\n${BLUE}備份位置：${NC}\n"
+    printf "%s\n" "$BACKUP_DIR"
+    
+    printf "\n${BLUE}日誌文件：${NC}\n"
+    printf "%s\n" "$LOG_FILE"
+    
+    printf "\n${CYAN}########## 安裝完成 ##########${NC}\n"
+    printf "${GREEN}請重新開啟終端機以套用所有更改${NC}\n"
+}
 
-# Check Zsh version
-ZSH_VERSION=$(zsh --version | awk '{print $2}')
-REQUIRED_VERSION="5.0.8"
+# 安裝選中的模組
+install_selected_modules() {
+    if [ -z "$selected_modules" ]; then
+        printf "${RED}未選擇任何模組${NC}\n"
+        return
+    fi
 
-if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$ZSH_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
-    printf "\033[36m Zsh version is $ZSH_VERSION. Please upgrade to version $REQUIRED_VERSION or newer. \n\033[m"
-    exit 1
-else
-    printf "\033[36mZsh version is $ZSH_VERSION. It meets the required version. \n\033[m"
-fi
-
-sudo -v
-# 安裝 oh-my-zsh
-printf "\033[36m########## Installing oh-my-zsh ##########\n\033[m"
-if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    sudo -k chsh -s "$(command -v zsh)" "$USER"
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
-    ZSH_CUSTOM="$HOME/.oh-my-zsh/custom"
-    export ZSH_CUSTOM
-fi
-
-# 檢查 ~/.zshrc 是否存在
-if [ -f "$HOME/.zshrc" ]; then
-    printf "\033[36mFile ~/.zshrc exist. \n\033[m"
-else
-    printf "\033[36mFile ~/.zshrc not exist. \n\033[m"
-    exit 1
-fi
-
-# 檢查 ~/.zshrc 是否已經設定過 PATH
-if ! grep -q "export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH" ~/.zshrc; then
-    # 如果沒設定過，則修改 ~/.zshrc
-    sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
-else
-    printf "\033[36mPATH is already set in ~/.zshrc. \n\033[m"
-fi
-
-# 安裝 zsh 插件
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
-git clone https://github.com/zsh-users/zsh-history-substring-search ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-history-substring-search
-git clone https://github.com/MichaelAquilina/zsh-you-should-use.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/you-should-use
-
-# 檢查 plugins 設定是否已經包含所需插件
-if ! grep -q "zsh-autosuggestions zsh-syntax-highlighting zsh-history-substring-search you-should-use" ~/.zshrc; then
-    sed -i 's/^plugins=(.*)/plugins=(git thefuck zsh-autosuggestions zsh-syntax-highlighting zsh-history-substring-search you-should-use)/g' ~/.zshrc
-else
-    printf "\033[36mPlugins are already set in ~/.zshrc. \n\033[m"
-fi
-
-# 設定 Powerlevel10k
-if [ ! -f ~/.p10k.zsh ]; then
-    wget https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh -O ~/.p10k.zsh
-    git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k
-    sed -i 's/^ZSH_THEME=.*/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
-    echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
-fi
-
-# 安裝 thefuck ###
-
-# 檢查 ~/.zshrc 是否已經設定過 PATH
-if ! grep -q "eval $(thefuck --alias)" ~/.zshrc; then
-    printf "\033[36m########## Installing thefuck ##########\n\033[m"
-    pip install git+https://github.com/nvbn/thefuck
-    echo 'eval $(thefuck --alias)' >> ~/.zshrc
-else
-    printf "\033[36mthefuck is already installed. \n\033[m"
-fi
-
-if [ "$INSTALL_ALL" = true ]; then
-    # 檢查並安裝必要的套件
-    packages="zsh git fail2ban curl 
-            nodejs npm unzip cargo gem lua5.3 pipx
-            fonts-firacode vim neovim 
-            python3-neovim python3-venv python3-dev python3-setuptools"
-    for pkg in $packages; do
-        if ! dpkg -l | grep -q "^ii  $pkg"; then
-            sudo apt install -y "$pkg"
-        else
-            printf "\033[36m########## $pkg is already installed. ##########\n\033[m"
-        fi
+    printf "${CYAN}開始安裝以下模組：$selected_modules${NC}\n"
+    for module in $selected_modules; do
+        case $module in
+            base) execute_script "base_tools.sh" "base" ;;
+            terminal) execute_script "terminal_setup.sh" "terminal" ;;
+            dev) execute_script "dev_tools.sh" "dev" ;;
+            monitoring) execute_script "monitoring_tools.sh" "monitoring" ;;
+            python) execute_script "python_setup.sh" "python" ;;
+            docker) execute_script "docker_setup.sh" "docker" ;;
+        esac || {
+            printf "${RED}安裝過程中出現錯誤，中止安裝${NC}\n"
+            return 1
+        }
     done
     
-    # 安裝 Python 套件
-    pip_packages="ranger-fm"
-    for pip_pkg in $pip_packages; do
-        if ! pip list --format=columns | grep -q "$pip_pkg"; then
-            pip install "$pip_pkg"
-        else
-            printf "\033[36m########## $pkg is already installed. ##########\n\033[m"
-        fi
-    done
-    
-    # 啟動 fail2ban
-    printf "\033[36m##########\nSetting fail2ban\n##########\n\033[m"
-    sudo systemctl enable --now fail2ban
-    
-    # 安裝 lzayvim
-    if ! command -v nvim > /dev/null 2>&1; then
-        printf "\033[36m##########\nInstalling nvim\n##########\n\033[m"
-        git clone https://github.com/LazyVim/starter ~/.config/nvim
-        rm -rf ~/.config/nvim/.git
-        npm install -g neovim
-        echo 'alias nv="nvim"' >> ~/.zshrc
-    else
-        printf "\033[36mlzayvim is already installed. \n\033[m"
-    fi
+    show_installation_report
+    selected_modules=""
+}
 
-    # 安裝 lazygit
-    if ! command -v lazygit > /dev/null 2>&1; then
-        printf "\033[36m##########\nInstalling lazygit\n##########\n\033[m"
-        LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
-        curl -Lo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
-        tar xf lazygit.tar.gz lazygit
-        sudo install lazygit /usr/local/bin
-        rm -rf lazygit lazygit.tar.gz
-    else
-        printf "\033[36mlazygit is already installed. \n\033[m"
-    fi
-    
-    # 安裝 Docker
-    if ! command -v docker > /dev/null 2>&1; then
-        printf "\033[36m##########\nInstalling Docker\n##########\n\033[m"
-        curl -fsSL https://get.docker.com -o get-docker.sh
-        sh get-docker.sh
-        rm get-docker.sh
-    else
-        printf "\033[36mDocker is already installed. \n\033[m"
-    fi
-
-    # 安裝 bat
-    if ! command -v bat > /dev/null 2>&1; then
-        printf "\033[36m##########\nInstalling bat\n##########\n\033[m"
-        mkdir -p ~/.local/bin
-        ln -s /usr/bin/batcat ~/.local/bin/bat
-    else
-        printf "\033[36mbat is already installed. \n\033[m"
-    fi
-    
-    # 安裝 lazydocker
-    if ! command -v lazydocker > /dev/null 2>&1; then
-        printf "\033[36m##########\nInstalling lazydocker\n##########\n\033[m"
-        curl https://raw.githubusercontent.com/jesseduffield/lazydocker/master/scripts/install_update_linux.sh | bash
-        echo 'alias lzd="lazydocker"' >> ~/.zshrc
-    else
-        printf "\033[36mlazydocker is already installed. \n\033[m"
-    fi
-fi
-printf "\033[36m########## Done! ##########\n\033[m"
-
-# 切換到 zsh 並載入配置
-exec zsh
-source ~/.zshrc
+# 執行主函數
+main
 
 
