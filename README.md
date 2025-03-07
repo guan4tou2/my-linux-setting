@@ -22,7 +22,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setti
 
 1. 通過環境變數設定：
 ```bash
-export REPO_URL="你的倉庫URL"
+export REPO_URL="https://raw.githubusercontent.com/{github name}/{repo name}/main"
 ```
 
 2. 克隆後修改：
