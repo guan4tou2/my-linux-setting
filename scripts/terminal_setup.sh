@@ -62,7 +62,7 @@ if [ ! -f ~/.p10k.zsh ]; then
 fi
 
 # 安裝 thefuck
-if ! grep -q "eval \$(thefuck --alias)" ~/.zshrc; then
+if ! command -v nvim > /dev/null 2>&1; then
     printf "\033[36m安裝 thefuck\033[0m\n"
     pip install git+https://github.com/nvbn/thefuck
     echo 'eval $(thefuck --alias)' >> ~/.zshrc

@@ -44,9 +44,9 @@ check_environment() {
     # 檢查系統類型
     if [ ! -f /etc/os-release ] || ! grep -q 'Ubuntu\|Debian' /etc/os-release; then
         printf "${RED}錯誤：此腳本僅支持 Ubuntu/Debian 系統${NC}\n"
-        exit 1
-    fi
-    
+    exit 1
+fi
+
     # 檢查網絡連接
     if ! ping -c 1 google.com >/dev/null 2>&1; then
         printf "${RED}錯誤：無法連接到網絡${NC}\n"
@@ -120,7 +120,7 @@ main() {
         mkdir -p "$SCRIPT_DIR"
         
         # 下載所有腳本
-        for script in python_setup.sh docker_setup.sh base_tools.sh terminal_setup.sh dev_tools.sh monitoring_tools.sh ; do
+        for script in base_tools.sh terminal_setup.sh dev_tools.sh monitoring_tools.sh python_setup.sh docker_setup.sh; do
             printf "${BLUE}下載 $script...${NC}\n"
             curl -fsSL "$SCRIPTS_URL/$script" -o "$SCRIPT_DIR/$script"
             chmod +x "$SCRIPT_DIR/$script"
@@ -213,53 +213,53 @@ show_installation_report() {
     
     if echo "$installed_modules" | grep -q "base"; then
         printf "✓ 基礎工具\n"
-        printf "  - git, curl, wget, lsd, bat 等\n"
+        printf "    git, curl, wget, lsd, bat 等\n"
     fi
     
     if echo "$installed_modules" | grep -q "terminal"; then
         printf "✓ 終端機設定\n"
-        printf "  - zsh, oh-my-zsh, powerlevel10k\n"
-        printf "  - zsh 插件：autosuggestions, syntax-highlighting, history-substring-search, you-should-use\n"
+        printf "    zsh, oh-my-zsh, powerlevel10k\n"
+        printf "    zsh 插件：autosuggestions, syntax-highlighting, history-substring-search, you-should-use\n"
     fi
     
     if echo "$installed_modules" | grep -q "dev"; then
         printf "✓ 開發工具\n"
-        printf "  - neovim (LazyVim)\n"
-        printf "  - lazygit\n"
-        printf "  - nodejs, npm, cargo, lua\n"
+        printf "    neovim (LazyVim)\n"
+        printf "    lazygit\n"
+        printf "    nodejs, npm, cargo, lua\n"
     fi
     
     if echo "$installed_modules" | grep -q "monitoring"; then
         printf "✓ 系統監控工具\n"
-        printf "  - btop, iftop, nethogs, fail2ban\n"
+        printf "    btop, iftop, nethogs, fail2ban\n"
     fi
     
     if echo "$installed_modules" | grep -q "python"; then
         printf "✓ Python 環境\n"
-        printf "  - python3, pip, venv\n"
-        printf "  - ranger-fm, s-tui\n"
+        printf "    python3, pip, venv\n"
+        printf "    ranger-fm, s-tui\n"
     fi
     
     if echo "$installed_modules" | grep -q "docker"; then
         printf "✓ Docker 相關工具\n"
-        printf "  - docker\n"
-        printf "  - lazydocker\n"
+        printf "    docker\n"
+        printf "    lazydocker\n"
     fi
     
     printf "\n${BLUE}設定檔位置：${NC}\n"
-    printf "- zsh：~/.zshrc\n"
-    printf "- powerlevel10k：~/.p10k.zsh\n"
-    printf "- neovim：~/.config/nvim\n"
+    printf "zsh 配置：%s\n" "~/.zshrc"
+    printf "powerlevel10k 配置：%s\n" "~/.p10k.zsh"
+    printf "neovim 配置：%s\n" "~/.config/nvim"
     
     printf "\n${BLUE}別名設定：${NC}\n"
-    printf "- nv：nvim\n"
-    printf "- lzd：lazydocker\n"
+    printf "nvim -> nv\n"
+    printf "lazydocker -> lzd\n"
     
     printf "\n${BLUE}備份位置：${NC}\n"
-    printf "- $BACKUP_DIR\n"
+    printf "%s\n" "$BACKUP_DIR"
     
     printf "\n${BLUE}日誌文件：${NC}\n"
-    printf "- $LOG_FILE\n"
+    printf "%s\n" "$LOG_FILE"
     
     printf "\n${CYAN}########## 安裝完成 ##########${NC}\n"
     printf "${GREEN}請重新開啟終端機以套用所有更改${NC}\n"
