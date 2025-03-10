@@ -18,7 +18,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setti
 
 ![img](img/SCR-20250310-mmxt.png)
 
-## 如果你想 fork，有兩種方式：
+## 如果你想 fork：
 
 1. 記得修改 install.sh：
 ```bash
