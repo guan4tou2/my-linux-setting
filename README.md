@@ -16,22 +16,15 @@
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)"
 ```
 
-## 自定義安裝
+![img](img/SCR-20250310-mmxt.png)
 
-如果你想修改成自己的配置，有兩種方式：
+## 如果你想 fork，有兩種方式：
 
-1. 通過環境變數設定：
+1. 記得修改 install.sh：
 ```bash
 export REPO_URL="https://raw.githubusercontent.com/{github name}/{repo name}/main"
 ```
 
-2. 克隆後修改：
-```bash
-git clone https://github.com/guan4tou2/my-linux-setting.git
-cd my-linux-setting
-# 編輯 install.sh 中的 REPO_URL 等變數
-bash install.sh
-```
 
 ## 配置文件位置
 
