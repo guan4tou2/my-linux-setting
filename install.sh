@@ -55,8 +55,8 @@ fi
     
     # 檢查磁盤空間（至少需要 5GB 可用空間）
     available_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
-    if [ "$available_space" -lt 5 ]; then
-        printf "${RED}錯誤：磁盤空間不足，至少需要 5GB 可用空間${NC}\n"
+    if [ "$available_space" -lt 2 ]; then
+        printf "${RED}錯誤：磁盤空間不足，至少需要 2GB 可用空間${NC}\n"
         exit 1
     fi
     
