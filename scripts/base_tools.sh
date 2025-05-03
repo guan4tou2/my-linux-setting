@@ -3,10 +3,11 @@
 printf "\033[36m########## 安裝基礎工具 ##########\n\033[m"
 
 # 更新套件庫
+echo "deb [trusted=yes] https://ppa.ipinfo.net/ /" | sudo tee  "/etc/apt/sources.list.d/ipinfo.ppa.list" # ipinfo
 sudo apt update
 
 # 基礎套件
-base_packages="git curl wget ca-certificates gnupg2 software-properties-common lsd bat tldr lnav fzf ripgrep"
+base_packages="git curl wget ca-certificates gnupg2 software-properties-common lsd bat tldr lnav fzf ripgrep ipinfo"
 
 for pkg in $base_packages; do
     if ! dpkg -l | grep -q "^ii  $pkg"; then
