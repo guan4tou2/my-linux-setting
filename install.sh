@@ -173,11 +173,17 @@ check_environment() {
     
     # 檢查 Python 版本，如果不滿足要求則嘗試安裝
     if ! check_python_version "3.8"; then
-        log_warning "Python 版本不滿足要求，嘗試安裝 Python 3.8+"
-        if apt-get update && apt-get install -y python3.8 python3.8-venv python3-pip; then
-            log_success "Python 3.8 安裝完成"
+        log_warning "Python 版本不滿足要求，嘗試安裝 Python 3+"
+        if apt-get update && apt-get install -y python3 python3-venv python3-pip; then
+            log_success "Python 3 安裝完成"
+            # Try the check again, but don't fail if it still doesn't pass
+            if check_python_version "3.8"; then
+                log_success "Python 版本現在滿足要求"
+            else
+                log_warning "Python 版本仍不滿足要求，但繼續安裝"
+            fi
         else
-            log_warning "無法安裝 Python 3.8，繼續使用系統 Python"
+            log_warning "無法安裝 Python 3，繼續使用系統 Python"
         fi
     else
         log_success "Python 版本檢查通過"
@@ -185,10 +191,10 @@ check_environment() {
     
     # 檢查網絡連接
     if ! check_network; then
-        log_error "無法連接到網絡"
-        exit 1
+        log_warning "網絡連接檢查失敗，但繼續安裝（可能是容器環境限制）"
+    else
+        log_success "網絡連接正常"
     fi
-    log_success "網絡連接正常"
     
     # 檢查網絡速度並選擇最佳鏡像
     if [ "$MIRROR_MODE" = "auto" ]; then

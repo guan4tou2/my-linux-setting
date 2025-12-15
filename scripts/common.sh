@@ -145,8 +145,15 @@ check_disk_space() {
 
 check_network() {
     local timeout="${1:-5}"
-    timeout "$timeout" ping -c 1 google.com >/dev/null 2>&1 ||
-    timeout "$timeout" ping -c 1 baidu.com >/dev/null 2>&1
+    # Try curl first (more reliable in containers)
+    if command -v curl >/dev/null 2>&1; then
+        curl -s --max-time "$timeout" --connect-timeout "$timeout" https://www.google.com >/dev/null 2>&1 ||
+        curl -s --max-time "$timeout" --connect-timeout "$timeout" https://www.baidu.com >/dev/null 2>&1
+    else
+        # Fallback to ping if curl unavailable
+        timeout "$timeout" ping -c 1 google.com >/dev/null 2>&1 ||
+        timeout "$timeout" ping -c 1 baidu.com >/dev/null 2>&1
+    fi
 }
 
 check_internet_speed() {
