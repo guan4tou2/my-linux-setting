@@ -305,15 +305,10 @@ main() {
     check_environment
     backup_config_files
     
-    if [ ! -d "$SCRIPT_DIR" ]; then
-        REMOTE_INSTALL=true
-        TEMP_DIR=$(mktemp -d)
-        SCRIPT_DIR="$TEMP_DIR/scripts"
-        
+    if [ "$REMOTE_INSTALL" = true ]; then
         printf "${CYAN}########## 下載安裝腳本 ##########${NC}\n"
-        mkdir -p "$SCRIPT_DIR"
         
-        # 下載所有腳本
+        # 下載所有模組腳本（common.sh 已經在初始化時下載）
         for script in python_setup.sh docker_setup.sh terminal_setup.sh base_tools.sh dev_tools.sh monitoring_tools.sh; do
             printf "${BLUE}下載 $script...${NC}\n"
             curl -fsSL "$SCRIPTS_URL/$script" -o "$SCRIPT_DIR/$script"
