@@ -41,7 +41,13 @@ show_progress "安裝 Oh-my-zsh"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     log_info "安裝 oh-my-zsh"
     backup_file "$HOME/.zshrc"
-    sudo -k chsh -s "$(command -v zsh)" "$USER"
+    # 在部分容器 / 非互動環境中，$USER 可能為空，改用 whoami 作為後備
+    target_user="${USER:-$(id -un 2>/dev/null || whoami)}"
+    if command -v run_as_root >/dev/null 2>&1; then
+        run_as_root chsh -s "$(command -v zsh)" "$target_user"
+    else
+        sudo -k chsh -s "$(command -v zsh)" "$target_user"
+    fi
     if [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
         bash "$SCRIPT_DIR/secure_download.sh" oh-my-zsh
     else
@@ -75,8 +81,15 @@ fi
 # 安裝 Powerlevel10k
 if [ ! -f ~/.p10k.zsh ]; then
     printf "\033[36m安裝 Powerlevel10k\033[0m\n"
-    wget "$P10K_CONFIG_URL" -O ~/.p10k.zsh
-    git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k
+    if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
+        wget -q "$P10K_CONFIG_URL" -O ~/.p10k.zsh >/dev/null 2>&1
+        git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
+            "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k" >/dev/null 2>&1 || true
+    else
+        wget "$P10K_CONFIG_URL" -O ~/.p10k.zsh
+        git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
+            "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k" || true
+    fi
     sed -i 's/^ZSH_THEME=.*/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
     echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
 fi
@@ -92,16 +105,37 @@ if ! command -v fuck > /dev/null 2>&1; then
     
     # 使用 uv 安裝 thefuck，如果失敗則使用 pip
     if command -v uv > /dev/null 2>&1; then
-        uv tool install thefuck || pip install git+https://github.com/nvbn/thefuck
+        if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
+            uv tool install thefuck >/dev/null 2>&1 || \
+                pip install git+https://github.com/nvbn/thefuck >/dev/null 2>&1
+        else
+            uv tool install thefuck || \
+                pip install git+https://github.com/nvbn/thefuck
+        fi
     else
         printf "\033[33muv 未找到，使用 pip 安裝 thefuck\033[0m\n"
-        pip install git+https://github.com/nvbn/thefuck
+        if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
+            pip install git+https://github.com/nvbn/thefuck >/dev/null 2>&1
+        else
+            pip install git+https://github.com/nvbn/thefuck
+        fi
     fi
     
     # 添加 thefuck alias 到配置文件
     if ! grep -q 'eval $(thefuck --alias)' ~/.zshrc; then
         echo 'eval $(thefuck --alias)' >> ~/.zshrc
     fi
+fi
+
+# 設定 lsd 別名（若已安裝 lsd）
+if command -v lsd > /dev/null 2>&1; then
+    log_info "設定 lsd 別名 (ls / ll / la)"
+    safe_append_to_file 'alias ls="lsd"' "$HOME/.zshrc" 'alias ls="lsd"'
+    safe_append_to_file 'alias ll="lsd -l"' "$HOME/.zshrc" 'alias ll="lsd -l"'
+    safe_append_to_file 'alias la="lsd -a"' "$HOME/.zshrc" 'alias la="lsd -a"'
+    safe_append_to_file 'alias ls="lsd"' "$HOME/.bashrc" 'alias ls="lsd"'
+    safe_append_to_file 'alias ll="lsd -l"' "$HOME/.bashrc" 'alias ll="lsd -l"'
+    safe_append_to_file 'alias la="lsd -a"' "$HOME/.bashrc" 'alias la="lsd -a"'
 fi
 
 printf "\033[36m########## 終端機環境設定完成 ##########\n\033[m"

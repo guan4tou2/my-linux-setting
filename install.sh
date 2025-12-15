@@ -5,17 +5,14 @@
 # ==============================================================================
 
 # 解析命令行參數
-MIRROR_MODE="auto"
+# 鏡像模式固定為全球官方源（不再提供 --mirror 選項）
+MIRROR_MODE="global"
 INSTALL_MODE="full"
 UPDATE_MODE=false
 VERBOSE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --mirror)
-            MIRROR_MODE="$2"
-            shift 2
-            ;;
         --minimal)
             INSTALL_MODE="minimal"
             shift
@@ -82,7 +79,6 @@ Linux Setting Scripts - 自動安裝腳本
 用法: $0 [選項]
 
 選項:
-  --mirror <auto|china|global>    選擇鏡像源 (預設: auto)
   --minimal                       最小安裝模式
   --update                        更新已安裝的組件
   -v, --verbose                   顯示詳細日誌
@@ -198,12 +194,6 @@ check_environment() {
         log_success "網絡連接正常"
     fi
     
-    # 設定鏡像模式
-    if [ "$MIRROR_MODE" = "auto" ]; then
-        MIRROR_MODE="global"
-        log_info "使用全球鏡像源（如需使用中國鏡像，請使用 --mirror china）"
-    fi
-    
     # 檢查磁盤空間
     if ! check_disk_space 3; then
         log_error "磁盤空間不足，至少需要 3GB 可用空間"
@@ -284,7 +274,10 @@ installed_modules=""
 
 # 檢查是否為遠程安裝
 REMOTE_INSTALL=false
-SCRIPT_DIR="$PWD/scripts"
+# 注意：SCRIPT_DIR 在上方載入 common.sh 的流程中已根據實際情況設定
+# - 本地安裝：SCRIPT_DIR="$PWD/scripts"
+# - 遠端安裝：SCRIPT_DIR="$TEMP_DIR/scripts"
+# 這裡不要再次覆蓋，避免遠端模式下模組腳本與 common.sh 不在同一目錄
 
 # 主要安裝函數
 main() {
@@ -516,13 +509,26 @@ install_selected_modules() {
     fi
 
     printf "${CYAN}開始安裝以下模組：$selected_modules${NC}\n"
-    for module in $selected_modules; do
+
+    # 為了確保依賴順序，實際安裝順序固定為：
+    # 1. base       - 提供 git/curl/wget 等基礎工具與 APT 相關套件
+    # 2. dev        - 安裝 cargo / nodejs 等開發工具，供後續模組使用
+    # 3. python     - 建立 Python/uv/虛擬環境，供終端工具使用
+    # 4. terminal   - 依賴前面模組提供的工具（例如 thefuck、uv）
+    # 5. monitoring - 最後安裝監控與安全工具
+    # 6. docker     - 可選的 Docker 工具，放在最末
+    for module in base dev python terminal monitoring docker; do
+        case " $selected_modules " in
+            *" $module "*) ;;
+            *) continue ;;
+        esac
+
         case $module in
             base) execute_script "base_tools.sh" "base" ;;
-            terminal) execute_script "terminal_setup.sh" "terminal" ;;
             dev) execute_script "dev_tools.sh" "dev" ;;
-            monitoring) execute_script "monitoring_tools.sh" "monitoring" ;;
             python) execute_script "python_setup.sh" "python" ;;
+            terminal) execute_script "terminal_setup.sh" "terminal" ;;
+            monitoring) execute_script "monitoring_tools.sh" "monitoring" ;;
             docker) execute_script "docker_setup.sh" "docker" ;;
         esac || {
             printf "${RED}安裝過程中出現錯誤，中止安裝${NC}\n"
@@ -532,6 +538,13 @@ install_selected_modules() {
     
     show_installation_report
     selected_modules=""
+
+    # 如果是在「非互動環境」（例如：管線 / here-doc / Docker 自動化測試），
+    # 完成一次安裝後就直接結束腳本，避免迴圈再次 read 造成 EOF 而觸發錯誤處理。
+    if [ ! -t 0 ]; then
+        printf "${CYAN}偵測到非互動環境，自動結束安裝流程${NC}\n"
+        exit 0
+    fi
 }
 
 # 執行主函數
