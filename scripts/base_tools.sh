@@ -23,10 +23,14 @@ if command -v batcat > /dev/null 2>&1; then
     ln -s /usr/bin/batcat ~/.local/bin/bat
 fi
 
-# 安裝 superfile
+# 安裝 superfile（使用安全下載機制）
 if ! command -v spf > /dev/null 2>&1; then
     printf "\033[36m安裝 superfile\033[0m\n"
-    bash -c "$(curl -sLo- https://superfile.netlify.app/install.sh)"
+    if [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
+        bash "$SCRIPT_DIR/secure_download.sh" superfile
+    else
+        printf "\033[33m警告: 安全下載工具不可用，跳過 superfile 安裝\033[0m\n"
+    fi
 fi
 
 printf "\033[36m########## 基礎工具安裝完成 ##########\n\033[m" 

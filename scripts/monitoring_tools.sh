@@ -1,22 +1,40 @@
-#!/bin/sh
+#!/bin/bash
 
-printf "\033[36m########## 安裝系統監控工具 ##########\n\033[m"
+# 載入共用函數庫
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh" || {
+    echo "錯誤: 無法載入共用函數庫"
+    exit 1
+}
+
+log_info "########## 安裝系統監控工具 ##########"
+
+# 初始化進度
+init_progress 3
 
 # 安裝系統監控工具
-monitoring_packages="net-tools iftop nethogs iptraf nload vnstat fail2ban"
+show_progress "安裝基礎監控套件"
+monitoring_packages="net-tools iftop nethogs iptraf nload vnstat fail2ban htop"
+
 for pkg in $monitoring_packages; do
-    if ! dpkg -l | grep -q "^ii  $pkg"; then
-        sudo apt install -y "$pkg"
-    else
-        printf "\033[36m$pkg 已安裝\033[0m\n"
-    fi
+    install_arch_specific_package "$pkg"
 done
 
-# 安裝 btop
-if ! command -v btop > /dev/null 2>&1; then
-    printf "\033[36m安裝 btop\033[0m\n"
-    sudo snap install btop
+# 安裝 btop（現代系統監控工具）
+show_progress "安裝 btop"
+if ! check_command btop; then
+    log_info "安裝 btop"
+    # 嘗試多種安裝方式
+    if command -v snap >/dev/null 2>&1; then
+        sudo snap install btop || install_apt_package btop
+    else
+        install_apt_package btop
+    fi
+else
+    log_info "btop 已安裝"
 fi
+
+show_progress "監控工具安裝完成"
 
 # 啟動 fail2ban
 printf "\033[36m設定 fail2ban\033[0m\n"

@@ -1,74 +1,229 @@
 #!/usr/bin/env bash
 
-# 錯誤處理
-set -e
-trap 'handle_error $?' ERR
+# ==============================================================================
+# Linux Setting Scripts - Enhanced Installation Script
+# ==============================================================================
 
-# 定義顏色
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+# 解析命令行參數
+MIRROR_MODE="auto"
+INSTALL_MODE="full"
+UPDATE_MODE=false
+VERBOSE=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --mirror)
+            MIRROR_MODE="$2"
+            shift 2
+            ;;
+        --minimal)
+            INSTALL_MODE="minimal"
+            shift
+            ;;
+        --update)
+            UPDATE_MODE=true
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            DEBUG=true
+            shift
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "未知參數: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+# 錯誤處理
+set -eE
+trap 'handle_error $? $LINENO' ERR
 
 # 配置下載網址（可根據需要修改）
 REPO_URL=${REPO_URL:-"https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main"}
 SCRIPTS_URL=${SCRIPTS_URL:-"$REPO_URL/scripts"}
 P10K_CONFIG_URL=${P10K_CONFIG_URL:-"$REPO_URL/.p10k.zsh"}
+REQUIREMENTS_URL=${REQUIREMENTS_URL:-"$REPO_URL/requirements.txt"}
 
 # 導出變數供子腳本使用
-export REPO_URL
-export SCRIPTS_URL
-export P10K_CONFIG_URL
+export REPO_URL SCRIPTS_URL P10K_CONFIG_URL REQUIREMENTS_URL
+export MIRROR_MODE INSTALL_MODE UPDATE_MODE VERBOSE DEBUG
+
+# 載入共用函數庫
+SCRIPT_DIR="$PWD/scripts"
+if [ -f "$SCRIPT_DIR/common.sh" ]; then
+    source "$SCRIPT_DIR/common.sh"
+elif [ -f "./scripts/common.sh" ]; then
+    source "./scripts/common.sh"
+else
+    # 遠程下載共用函數庫
+    TEMP_DIR=$(mktemp -d)
+    SCRIPT_DIR="$TEMP_DIR/scripts"
+    mkdir -p "$SCRIPT_DIR"
+    curl -fsSL "$SCRIPTS_URL/common.sh" -o "$SCRIPT_DIR/common.sh"
+    source "$SCRIPT_DIR/common.sh"
+    REMOTE_INSTALL=true
+fi
+
+# 初始化環境
+init_common_env
+
+# 幫助函數
+show_help() {
+    cat << EOF
+Linux Setting Scripts - 自動安裝腳本
+
+用法: $0 [選項]
+
+選項:
+  --mirror <auto|china|global>    選擇鏡像源 (預設: auto)
+  --minimal                       最小安裝模式
+  --update                        更新已安裝的組件
+  -v, --verbose                   顯示詳細日誌
+  -h, --help                      顯示此幫助訊息
+
+範例:
+  $0                             # 標準安裝
+  $0 --mirror china              # 使用中國鏡像源
+  $0 --minimal                   # 最小安裝
+  $0 --update                    # 更新模式
+  $0 --verbose                   # 詳細模式
+
+EOF
+}
 
 # 錯誤處理函數
 handle_error() {
-    printf "${RED}安裝過程出錯（錯誤碼：$1）\n"
-    printf "請檢查日誌文件：$LOG_FILE${NC}\n"
-    cleanup
-    exit 1
+    local exit_code=$1
+    local line_number=$2
+    log_error "腳本在第 $line_number 行出錯（錯誤碼：$exit_code）"
+    log_error "請檢查日誌文件：${LOG_FILE:-/tmp/install.log}"
+    
+    # 嘗試回滾
+    if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
+        read -p "是否要回滾到安裝前狀態？(y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            rollback_installation
+        fi
+    fi
+    
+    cleanup_temp_files
+    exit $exit_code
 }
 
-# 清理函數
-cleanup() {
-    if [ "$REMOTE_INSTALL" = true ] && [ -d "$TEMP_DIR" ]; then
-        printf "${BLUE}清理臨時文件...${NC}\n"
-        rm -rf "$TEMP_DIR"
+# 回滾機制
+rollback_installation() {
+    log_info "開始回滾安裝..."
+    
+    if [ -d "$BACKUP_DIR" ]; then
+        for backup_file in "$BACKUP_DIR"/*; do
+            if [ -f "$backup_file" ]; then
+                local original_name
+                original_name=$(basename "$backup_file" | sed 's/\.backup\.[0-9_]*$//')
+                local original_path="$HOME/$original_name"
+                
+                if [[ "$original_name" == .* ]]; then
+                    original_path="$HOME/$original_name"
+                else
+                    original_path="$HOME/.$original_name"
+                fi
+                
+                cp "$backup_file" "$original_path"
+                log_info "已回滾: $original_path"
+            fi
+        done
+        log_success "回滾完成"
+    else
+        log_warning "找不到備份目錄，無法回滾"
     fi
 }
 
-# 環境檢查函數
+# 清理函數  
+cleanup() {
+    cleanup_temp_files
+}
+
+# 增強的環境檢查函數
 check_environment() {
-    printf "${BLUE}檢查系統環境...${NC}\n"
+    log_info "檢查系統環境..."
     
     # 檢查系統類型
     if [ ! -f /etc/os-release ] || ! grep -q 'Ubuntu\|Debian' /etc/os-release; then
-        printf "${RED}錯誤：此腳本僅支持 Ubuntu/Debian 系統${NC}\n"
-    exit 1
-fi
-
-    # 檢查網絡連接
-    if ! ping -c 1 google.com >/dev/null 2>&1; then
-        printf "${RED}錯誤：無法連接到網絡${NC}\n"
+        log_error "此腳本僅支持 Ubuntu/Debian 系統"
         exit 1
     fi
     
-    # 檢查磁盤空間（至少需要 5GB 可用空間）
-    available_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
-    if [ "$available_space" -lt 2 ]; then
-        printf "${RED}錯誤：磁盤空間不足，至少需要 2GB 可用空間${NC}\n"
+    # 檢查系統版本
+    local os_version
+    os_version=$(grep VERSION_ID /etc/os-release | cut -d'"' -f2)
+    log_info "檢測到系統版本: $os_version"
+    
+    # 檢查系統架構兼容性
+    if ! check_architecture_compatibility; then
+        log_error "系統架構不受支援"
         exit 1
     fi
+    
+    # 檢查 Python 版本
+    if ! check_python_version "3.8"; then
+        log_error "需要 Python 3.8 或更新版本"
+        exit 1
+    fi
+    log_success "Python 版本檢查通過"
+    
+    # 檢查網絡連接
+    if ! check_network; then
+        log_error "無法連接到網絡"
+        exit 1
+    fi
+    log_success "網絡連接正常"
+    
+    # 檢查網絡速度並選擇最佳鏡像
+    if [ "$MIRROR_MODE" = "auto" ]; then
+        log_info "檢測網絡速度並選擇最佳鏡像..."
+        local speed
+        speed=$(check_internet_speed)
+        if (( $(echo "$speed < 0.5" | bc -l) )); then
+            MIRROR_MODE="china"
+            log_info "網速較慢，切換到中國鏡像源"
+        else
+            MIRROR_MODE="global"
+            log_info "網速正常，使用全球鏡像源"
+        fi
+    fi
+    
+    # 檢查磁盤空間
+    if ! check_disk_space 3; then
+        log_error "磁盤空間不足，至少需要 3GB 可用空間"
+        exit 1
+    fi
+    log_success "磁盤空間充足"
     
     # 檢查必要命令
-    for cmd in curl wget sudo apt-get; do
-        if ! command -v $cmd >/dev/null 2>&1; then
-            printf "${RED}錯誤：找不到必要的命令：$cmd${NC}\n"
+    local required_commands="curl wget sudo apt-get"
+    for cmd in $required_commands; do
+        if ! check_command "$cmd"; then
+            log_error "找不到必要的命令：$cmd"
             exit 1
         fi
     done
+    log_success "必要命令檢查通過"
     
-    printf "${GREEN}環境檢查通過${NC}\n"
+    # 檢查 sudo 權限
+    if ! check_sudo_access; then
+        log_error "無法獲取 sudo 權限"
+        exit 1
+    fi
+    log_success "sudo 權限檢查通過"
+    
+    log_success "環境檢查完成"
 }
 
 # 備份配置文件
@@ -106,6 +261,18 @@ SCRIPT_DIR="$PWD/scripts"
 
 # 主要安裝函數
 main() {
+    # 檢查更新模式
+    if [ "$UPDATE_MODE" = true ]; then
+        log_info "更新模式：執行系統更新"
+        if [ -f "$SCRIPT_DIR/update_tools.sh" ]; then
+            bash "$SCRIPT_DIR/update_tools.sh"
+            exit $?
+        else
+            log_error "找不到更新腳本"
+            exit 1
+        fi
+    fi
+    
     # 初始化
     setup_logging
     check_environment
@@ -163,6 +330,7 @@ show_menu() {
     printf "   • Python3 與相關工具：\n"
     printf "     - python3, pip, python3-venv\n"
     printf "     - python3-dev, python3-setuptools\n"
+    printf "     - uv (現代 Python 包管理器)\n"
     printf "   • 檔案管理器與系統工具：\n"
     printf "     - ranger-fm (終端檔案管理器)\n"
     printf "     - s-tui (系統監控工具)\n"
@@ -289,7 +457,7 @@ show_installation_report() {
     
     if echo "$installed_modules" | grep -q "python"; then
         printf "✓ Python 環境\n"
-        printf "    python3, pip, venv\n"
+        printf "    python3, pip, venv, uv\n"
         printf "    ranger-fm, s-tui\n"
     fi
     

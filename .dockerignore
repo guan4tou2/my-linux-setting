@@ -1,0 +1,57 @@
+# Docker ignore 文件
+# 忽略不需要複製到容器的文件
+
+# Git 相關
+.git/
+.gitignore
+
+# 日誌文件
+*.log
+logs/
+
+# 臨時文件
+*.tmp
+*.temp
+*~
+.DS_Store
+Thumbs.db
+
+# 測試報告
+test_report_*.txt
+
+# 備份文件
+*.backup
+*.bak
+backup/
+
+# IDE 文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系統文件
+.env
+.env.local
+
+# 已編譯文件
+*.pyc
+__pycache__/
+
+# Docker 相關
+.dockerignore
+Dockerfile.*
+
+# 文檔圖片（減少容器大小）
+img/
+docs/
+
+# README 圖片
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# 本地配置
+local_config/
+*.local

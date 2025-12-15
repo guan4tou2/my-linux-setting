@@ -1,0 +1,112 @@
+# Docker Compose 測試環境配置
+version: '3.8'
+
+services:
+  # Ubuntu 22.04 測試環境
+  ubuntu-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: linux-setting-test:ubuntu22
+    container_name: linux-setting-ubuntu-test
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - TZ=Asia/Taipei
+      - TEST_ENVIRONMENT=docker
+    volumes:
+      - .:/opt/linux-setting
+      - ubuntu-test-home:/home/testuser
+    working_dir: /opt/linux-setting
+    command: tail -f /dev/null  # 保持容器運行
+    healthcheck:
+      test: ["CMD", "python3", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Ubuntu 20.04 測試環境
+  ubuntu20-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.ubuntu20
+    image: linux-setting-test:ubuntu20
+    container_name: linux-setting-ubuntu20-test
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - TZ=Asia/Taipei
+      - TEST_ENVIRONMENT=docker
+    volumes:
+      - .:/opt/linux-setting
+      - ubuntu20-test-home:/home/testuser
+    working_dir: /opt/linux-setting
+    command: tail -f /dev/null
+    profiles:
+      - legacy  # 使用 profile 控制是否啟動
+    healthcheck:
+      test: ["CMD", "python3", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Debian 測試環境
+  debian-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.debian
+    image: linux-setting-test:debian
+    container_name: linux-setting-debian-test
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - TZ=Asia/Taipei
+      - TEST_ENVIRONMENT=docker
+    volumes:
+      - .:/opt/linux-setting
+      - debian-test-home:/home/testuser
+    working_dir: /opt/linux-setting
+    command: tail -f /dev/null
+    profiles:
+      - debian
+    healthcheck:
+      test: ["CMD", "python3", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 測試執行器
+  test-runner:
+    image: linux-setting-test:ubuntu22
+    container_name: linux-setting-test-runner
+    depends_on:
+      ubuntu-test:
+        condition: service_healthy
+    volumes:
+      - .:/opt/linux-setting
+      - test-reports:/opt/reports
+    working_dir: /opt/linux-setting
+    environment:
+      - REPORT_DIR=/opt/reports
+    command: >
+      /bin/bash -c "
+        echo '=== 開始自動測試 ===' &&
+        mkdir -p /opt/reports &&
+        ./tests/run_all_tests.sh > /opt/reports/test_report_$(date +%Y%m%d_%H%M%S).log 2>&1 &&
+        echo '=== 測試完成 ==='
+      "
+    profiles:
+      - test
+
+volumes:
+  ubuntu-test-home:
+    driver: local
+  ubuntu20-test-home:
+    driver: local
+  debian-test-home:
+    driver: local
+  test-reports:
+    driver: local
+
+networks:
+  default:
+    name: linux-setting-test-network
+    driver: bridge

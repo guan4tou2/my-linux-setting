@@ -1,38 +1,58 @@
-#!/bin/sh
+#!/bin/bash
+
+# 載入共用函數庫
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh" || {
+    echo "錯誤: 無法載入共用函數庫"
+    exit 1
+}
 
 # 如果未定義 URL，使用默認值
 if [ -z "$P10K_CONFIG_URL" ]; then
     P10K_CONFIG_URL="https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh"
 fi
 
-printf "\033[36m########## 設定終端機環境 ##########\n\033[m"
+log_info "########## 設定終端機環境 ##########"
+
+# 初始化進度
+init_progress 8
 
 # 安裝必要套件
+show_progress "安裝終端基礎套件"
 terminal_packages="zsh fonts-firacode"
+
 for pkg in $terminal_packages; do
-    if ! dpkg -l | grep -q "^ii  $pkg"; then
-        sudo apt install -y "$pkg"
-    else
-        printf "\033[36m$pkg 已安裝\033[0m\n"
-    fi
+    install_apt_package "$pkg"
 done
 
 # 檢查 Zsh 版本
+show_progress "檢查 Zsh 版本"
 ZSH_VERSION=$(zsh --version | awk '{print $2}')
 REQUIRED_VERSION="5.0.8"
 
-if [ "$(printf '%s\n' "$REQUIRED_VERSION" "$ZSH_VERSION" | sort -V | head -n1)" != "$REQUIRED_VERSION" ]; then
-    printf "\033[31mZsh 版本 $ZSH_VERSION 不符合要求，請升級到 $REQUIRED_VERSION 或更新版本\033[0m\n"
+if ! version_greater_equal "$ZSH_VERSION" "$REQUIRED_VERSION"; then
+    log_error "Zsh 版本 $ZSH_VERSION 不符合要求，請升級到 $REQUIRED_VERSION 或更新版本"
     exit 1
 fi
+log_success "Zsh 版本檢查通過: $ZSH_VERSION"
 
 # 安裝 oh-my-zsh
+show_progress "安裝 Oh-my-zsh"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
-    printf "\033[36m安裝 oh-my-zsh\033[0m\n"
+    log_info "安裝 oh-my-zsh"
+    backup_file "$HOME/.zshrc"
     sudo -k chsh -s "$(command -v zsh)" "$USER"
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+    if [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
+        bash "$SCRIPT_DIR/secure_download.sh" oh-my-zsh
+    else
+        log_warning "找不到安全下載腳本，使用傳統安裝方式"
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+    fi
     ZSH_CUSTOM="$HOME/.oh-my-zsh/custom"
     export ZSH_CUSTOM
+    log_success "Oh-my-zsh 安裝完成"
+else
+    log_info "Oh-my-zsh 已安裝"
 fi
 
 # 安裝 zsh 插件
@@ -63,9 +83,25 @@ fi
 
 # 安裝 thefuck
 if ! command -v fuck > /dev/null 2>&1; then
-    printf "\033[36m安裝 thefuck\033[0m\n"
-    pip install git+https://github.com/nvbn/thefuck
-    echo 'eval $(thefuck --alias)' >> ~/.zshrc
+    printf "\033[36m安裝 thefuck (使用 uv)\033[0m\n"
+    
+    # 確保 uv 在 PATH 中
+    if [ -f "$HOME/.cargo/env" ]; then
+        . "$HOME/.cargo/env"
+    fi
+    
+    # 使用 uv 安裝 thefuck，如果失敗則使用 pip
+    if command -v uv > /dev/null 2>&1; then
+        uv tool install thefuck || pip install git+https://github.com/nvbn/thefuck
+    else
+        printf "\033[33muv 未找到，使用 pip 安裝 thefuck\033[0m\n"
+        pip install git+https://github.com/nvbn/thefuck
+    fi
+    
+    # 添加 thefuck alias 到配置文件
+    if ! grep -q 'eval $(thefuck --alias)' ~/.zshrc; then
+        echo 'eval $(thefuck --alias)' >> ~/.zshrc
+    fi
 fi
 
 printf "\033[36m########## 終端機環境設定完成 ##########\n\033[m"

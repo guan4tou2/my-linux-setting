@@ -1,25 +1,113 @@
-#!/bin/sh
+#!/bin/bash
 
-printf "\033[36m########## 設定 Python 環境 ##########\n\033[m"
+# 載入共用函數庫
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh" || {
+    echo "錯誤: 無法載入共用函數庫"
+    exit 1
+}
+
+log_info "########## 設定 Python 環境 ##########"
+
+# 初始化進度
+init_progress 6
 
 # 安裝 Python 相關套件
+show_progress "安裝 Python 基礎套件"
 python_packages="python3 python-is-python3 python3-pip python3-venv python3-dev python3-setuptools python3-neovim"
+
 for pkg in $python_packages; do
-    if ! dpkg -l | grep -q "^ii  $pkg"; then
-        sudo apt install -y "$pkg"
-    else
-        printf "\033[36m$pkg 已安裝\033[0m\n"
-    fi
+    install_apt_package "$pkg"
 done
+
+# 安裝 uv (現代 Python 包管理器)
+show_progress "安裝 uv Python 包管理器"
+if ! check_command uv; then
+    log_info "安裝 uv (Python 包管理器)"
+    if [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
+        bash "$SCRIPT_DIR/secure_download.sh" uv
+    else
+        log_warning "找不到安全下載腳本，使用傳統安裝方式"
+        if curl -LsSf https://astral.sh/uv/install.sh | sh; then
+            log_success "uv 安裝成功"
+        else
+            log_error "uv 安裝失敗"
+            exit 1
+        fi
+    fi
+    
+    # 將 uv 添加到 PATH
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    fi
+    
+    # 添加 uv 到 shell 配置文件
+    safe_append_to_file 'export PATH="$HOME/.cargo/bin:$PATH"' ~/.zshrc
+    safe_append_to_file 'export PATH="$HOME/.cargo/bin:$PATH"' ~/.bashrc
+else
+    log_info "uv 已安裝"
+fi
+
+# 配置 uv 鏡像源
+show_progress "配置 uv 鏡像源"
+if [ "$MIRROR_MODE" = "china" ]; then
+    log_info "配置中國鏡像源"
+    uv config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/ || true
+    uv config set global.extra-index-url https://pypi.org/simple/ || true
+else
+    log_info "使用全球鏡像源"
+    uv config set global.index-url https://pypi.org/simple/ || true
+fi
+
+# 創建系統工具虛擬環境
+show_progress "創建虛擬環境"
+VENV_DIR="$HOME/.local/venv/system-tools"
+if [ ! -d "$VENV_DIR" ]; then
+    log_info "創建系統工具虛擬環境"
+    uv venv "$VENV_DIR" || python3 -m venv "$VENV_DIR"
+    log_success "虛擬環境創建成功: $VENV_DIR"
+fi
+
+# 下載 requirements.txt
+show_progress "下載套件需求文件"
+if [ -n "$REQUIREMENTS_URL" ]; then
+    safe_download "$REQUIREMENTS_URL" "/tmp/requirements.txt"
+    REQUIREMENTS_FILE="/tmp/requirements.txt"
+elif [ -f "$(dirname "$SCRIPT_DIR")/requirements.txt" ]; then
+    REQUIREMENTS_FILE="$(dirname "$SCRIPT_DIR")/requirements.txt"
+else
+    log_warning "未找到 requirements.txt，使用預設套件"
+    REQUIREMENTS_FILE=""
+fi
 
 # 安裝 Python 工具
-pip_packages="ranger-fm s-tui"
-for pip_pkg in $pip_packages; do
-    if ! pip list --format=columns | grep -q "$pip_pkg"; then
-        pip install "$pip_pkg"
+show_progress "安裝 Python 工具"
+if [ -n "$REQUIREMENTS_FILE" ] && [ -f "$REQUIREMENTS_FILE" ]; then
+    log_info "使用 requirements.txt 安裝套件"
+    if check_command uv; then
+        uv pip install -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python" || {
+            log_warning "uv 安裝失敗，使用傳統方式"
+            "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+        }
     else
-        printf "\033[36m$pip_pkg 已安裝\033[0m\n"
+        "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+    fi
+else
+    # 回退到單個套件安裝
+    uv_packages="thefuck ranger-fm s-tui"
+    for uv_pkg in $uv_packages; do
+        install_with_fallback "$uv_pkg"
+    done
+fi
+
+# 創建工具軟連結
+show_progress "創建工具軟連結"
+mkdir -p "$HOME/.local/bin"
+for tool in ranger s-tui thefuck; do
+    if [ -f "$VENV_DIR/bin/$tool" ]; then
+        ln -sf "$VENV_DIR/bin/$tool" "$HOME/.local/bin/$tool"
+        log_info "創建軟連結: $tool"
     fi
 done
 
-printf "\033[36m########## Python 環境設定完成 ##########\n\033[m" 
+log_success "########## Python 環境設定完成 ##########" 

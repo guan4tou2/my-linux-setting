@@ -1,0 +1,17 @@
+# Linux Setting Scripts - Python Package Requirements
+# 此文件鎖定關鍵 Python 包的版本以確保穩定性
+
+# 終端增強工具
+thefuck==3.32
+
+# 文件管理器
+ranger-fm==1.9.3
+
+# 系統監控工具  
+s-tui==1.1.4
+
+# 可選：其他常用工具
+# ipython==8.18.1
+# black==23.12.1
+# flake8==7.0.0
+# pytest==7.4.4

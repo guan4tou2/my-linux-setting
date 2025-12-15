@@ -1,6 +1,16 @@
-#!/bin/sh
+#!/bin/bash
 
-printf "\033[36m########## 安裝開發工具 ##########\n\033[m"
+# 載入共用函數庫
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh" || {
+    echo "錯誤: 無法載入共用函數庫"
+    exit 1
+}
+
+log_info "########## 安裝開發工具 ##########"
+
+# 初始化進度
+init_progress 8
 
 # 添加 neovim ppa
 sudo add-apt-repository ppa:neovim-ppa/unstable -y
