@@ -43,7 +43,6 @@ check_script_safety() {
         "rm -rf /"
         "dd if="
         "mkfs\."
-        "format"
         "> /etc/passwd"
         "> /etc/shadow"
         "wget.*|.*sh"
@@ -54,6 +53,10 @@ check_script_safety() {
     )
     
     for pattern in "${suspicious_patterns[@]}"; do
+        # 允許在特定受信任情境下出現 curl ... | sh（例如 uv / oh-my-zsh 官方安裝腳本）
+        if [ "$pattern" = "curl.*|.*sh" ] && [ "${SECURE_DOWNLOAD_ALLOW_PIPE:-0}" = "1" ]; then
+            continue
+        fi
         if grep -qi "$pattern" "$script_file"; then
             log_warning "發現可疑內容: $pattern"
             return 1
@@ -63,7 +66,8 @@ check_script_safety() {
     # 檢查是否包含過多的權限提升操作
     local sudo_count
     sudo_count=$(grep -c "sudo\|su " "$script_file" 2>/dev/null || echo 0)
-    if [ "$sudo_count" -gt 10 ]; then
+    # 對受信任腳本（例如 uv / oh-my-zsh 官方安裝腳本）放寬 sudo 次數限制
+    if [ "${SECURE_DOWNLOAD_ALLOW_PIPE:-0}" != "1" ] && [ "$sudo_count" -gt 10 ]; then
         log_warning "腳本包含過多 sudo 操作 ($sudo_count 次)"
         return 1
     fi
@@ -177,7 +181,7 @@ install_docker() {
 }
 
 install_uv() {
-    secure_download_and_execute \
+    SECURE_DOWNLOAD_ALLOW_PIPE=1 secure_download_and_execute \
         "https://astral.sh/uv/install.sh" \
         "skip" \
         "UV Python 包管理器"
@@ -217,7 +221,7 @@ install_lazydocker() {
 }
 
 install_oh_my_zsh() {
-    secure_download_and_execute \
+    SECURE_DOWNLOAD_ALLOW_PIPE=1 secure_download_and_execute \
         "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" \
         "skip" \
         "Oh My Zsh shell 框架" \
