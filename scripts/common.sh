@@ -17,6 +17,15 @@ SCRIPT_START_TIME=$(date +%s)
 TOTAL_STEPS=0
 CURRENT_STEP=0
 
+# Helper function to run commands with or without sudo
+run_as_root() {
+    if [ "$EUID" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
 # 預設日誌文件路徑
 if [ -z "${LOG_FILE:-}" ]; then
     LOG_FILE="$HOME/.local/log/linux-setting/common_$(date +%Y%m%d).log"
@@ -889,7 +898,7 @@ init_common_env() {
 # ==============================================================================
 
 # Export all functions safely for subshells
-func_list="log_error log_info log_success log_warning log_debug init_progress show_progress"
+func_list="log_error log_info log_success log_warning log_debug init_progress show_progress run_as_root"
 func_list="$func_list check_command check_package_installed check_python_version check_disk_space check_network check_internet_speed"
 func_list="$func_list install_with_fallback install_apt_package install_apt_packages_parallel"
 func_list="$func_list backup_file safe_append_to_file"

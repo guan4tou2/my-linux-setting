@@ -176,7 +176,7 @@ check_environment() {
         log_info "跳過 Python 版本檢查（環境變數設定）"
     elif ! check_python_version "3.8"; then
         log_warning "Python 版本不滿足要求，嘗試安裝 Python 3+"
-        if apt-get update && apt-get install -y python3 python3-venv python3-pip; then
+        if run_as_root apt-get update && run_as_root apt-get install -y python3 python3-venv python3-pip; then
             log_success "Python 3 安裝完成"
             # Try the check again, but don't fail if it still doesn't pass
             if check_python_version "3.8"; then
@@ -212,8 +212,14 @@ check_environment() {
     log_success "磁盤空間充足"
     
     # 檢查必要命令
-    local required_commands="curl sudo apt-get"
+    local required_commands="curl apt-get"
     local optional_commands="wget"
+    
+    # Check if running as root or if sudo is available
+    if [ "$EUID" -ne 0 ] && ! check_command "sudo"; then
+        log_error "找不到必要的命令：sudo（或請以 root 身份運行）"
+        exit 1
+    fi
     
     for cmd in $required_commands; do
         if ! check_command "$cmd"; then
@@ -227,7 +233,7 @@ check_environment() {
             log_warning "建議安裝的命令未找到：$cmd（將嘗試自動安裝）"
             # Try to install wget if missing
             if command -v apt-get >/dev/null 2>&1; then
-                sudo apt-get update && sudo apt-get install -y wget >/dev/null 2>&1 || log_warning "無法安裝 $cmd"
+                run_as_root apt-get update && run_as_root apt-get install -y wget >/dev/null 2>&1 || log_warning "無法安裝 $cmd"
             fi
         fi
     done
@@ -235,11 +241,14 @@ check_environment() {
     log_success "必要命令檢查通過"
     
     # 檢查 sudo 權限
-    if ! check_sudo_access; then
+    if [ "$EUID" -eq 0 ]; then
+        log_success "以 root 身份運行，跳過 sudo 檢查"
+    elif ! check_sudo_access; then
         log_error "無法獲取 sudo 權限"
         exit 1
+    else
+        log_success "sudo 權限檢查通過"
     fi
-    log_success "sudo 權限檢查通過"
     
     log_success "環境檢查完成"
 }
