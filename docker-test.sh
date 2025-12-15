@@ -124,7 +124,10 @@ run_script_tests() {
     echo '=== 所有測試完成 ==='
     "
     
-    if docker run --rm "$IMAGE_NAME" /bin/bash -c "$test_script"; then
+    if docker run --rm \
+        -e TEST_ENVIRONMENT=docker \
+        -e SKIP_NETWORK_TESTS=true \
+        "$IMAGE_NAME" /bin/bash -c "$test_script"; then
         log_success "Docker 中的腳本測試通過"
         return 0
     else
@@ -161,6 +164,8 @@ run_full_installation_test() {
     
     if docker run --rm \
         -e DEBIAN_FRONTEND=noninteractive \
+        -e TEST_ENVIRONMENT=docker \
+        -e SKIP_NETWORK_TESTS=true \
         "$IMAGE_NAME" /bin/bash -c "$install_script"; then
         log_success "Docker 中的完整安裝測試通過"
         return 0
@@ -195,7 +200,10 @@ run_benchmark() {
     echo \"基準測試完成，耗時: \${duration} 秒\"
     "
     
-    docker run --rm "$IMAGE_NAME" /bin/bash -c "$benchmark_script"
+    docker run --rm \
+        -e TEST_ENVIRONMENT=docker \
+        -e SKIP_NETWORK_TESTS=true \
+        "$IMAGE_NAME" /bin/bash -c "$benchmark_script"
 }
 
 # 清理 Docker 資源
