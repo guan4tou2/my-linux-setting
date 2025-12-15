@@ -192,7 +192,12 @@ install_apt_packages_parallel() {
         } > "$log_file" 2>&1
     }
     
-    export -f install_single_package install_apt_package check_package_installed log_info log_success log_error
+    # Export functions for subshells (only if they exist)
+    for func in install_single_package install_apt_package check_package_installed log_info log_success log_error; do
+        if declare -f "$func" > /dev/null 2>&1; then
+            export -f "$func" 2>/dev/null || true
+        fi
+    done
     
     # 啟動並行任務
     local job_count=0
@@ -284,7 +289,12 @@ download_files_parallel() {
         } > "$log_file" 2>&1
     }
     
-    export -f download_single_file safe_download log_info log_success log_error
+    # Export functions for subshells (only if they exist)
+    for func in download_single_file safe_download log_info log_success log_error; do
+        if declare -f "$func" > /dev/null 2>&1; then
+            export -f "$func" 2>/dev/null || true
+        fi
+    done
     
     # 啟動並行下載任務
     for url in "${!url_file_map[@]}"; do
@@ -870,13 +880,19 @@ init_common_env() {
 # 導出所有函數
 # ==============================================================================
 
-export -f log_error log_info log_success log_warning log_debug
-export -f init_progress show_progress
-export -f check_command check_package_installed check_python_version check_disk_space check_network check_internet_speed
-export -f install_with_fallback install_apt_package install_apt_packages_parallel
-export -f backup_file safe_append_to_file
-export -f init_cache_system is_cache_valid get_from_cache save_to_cache cleanup_cache
-export -f safe_download download_files_parallel get_best_mirror
-export -f optimize_apt_performance cleanup_apt_system select_fastest_apt_mirror
-export -f version_greater_equal check_architecture_compatibility install_arch_specific_package
-export -f cleanup_temp_files get_elapsed_time check_sudo_access init_common_env
+# Export all functions safely for subshells
+func_list="log_error log_info log_success log_warning log_debug init_progress show_progress"
+func_list="$func_list check_command check_package_installed check_python_version check_disk_space check_network check_internet_speed"
+func_list="$func_list install_with_fallback install_apt_package install_apt_packages_parallel"
+func_list="$func_list backup_file safe_append_to_file"
+func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_cache cleanup_cache"
+func_list="$func_list safe_download download_files_parallel get_best_mirror"
+func_list="$func_list optimize_apt_performance cleanup_apt_system select_fastest_apt_mirror"
+func_list="$func_list version_greater_equal check_architecture_compatibility install_arch_specific_package"
+func_list="$func_list cleanup_temp_files get_elapsed_time check_sudo_access init_common_env"
+
+for func in $func_list; do
+    if declare -f "$func" > /dev/null 2>&1; then
+        export -f "$func" 2>/dev/null || true
+    fi
+done

@@ -171,12 +171,17 @@ check_environment() {
         exit 1
     fi
     
-    # 檢查 Python 版本
+    # 檢查 Python 版本，如果不滿足要求則嘗試安裝
     if ! check_python_version "3.8"; then
-        log_error "需要 Python 3.8 或更新版本"
-        exit 1
+        log_warning "Python 版本不滿足要求，嘗試安裝 Python 3.8+"
+        if apt-get update && apt-get install -y python3.8 python3.8-venv python3-pip; then
+            log_success "Python 3.8 安裝完成"
+        else
+            log_warning "無法安裝 Python 3.8，繼續使用系統 Python"
+        fi
+    else
+        log_success "Python 版本檢查通過"
     fi
-    log_success "Python 版本檢查通過"
     
     # 檢查網絡連接
     if ! check_network; then
