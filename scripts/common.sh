@@ -12,6 +12,11 @@ readonly CYAN='\033[0;36m'
 readonly YELLOW='\033[0;33m'
 readonly NC='\033[0m'
 
+# TUI 顯示模式（normal / quiet）
+# - quiet : （預設）僅顯示關鍵步驟與結果，隱藏 apt 安裝細節
+# - normal: 顯示完整日誌與 apt 安裝輸出
+TUI_MODE="${TUI_MODE:-quiet}"
+
 # 全局變數
 SCRIPT_START_TIME=$(date +%s)
 TOTAL_STEPS=0
@@ -19,10 +24,25 @@ CURRENT_STEP=0
 
 # Helper function to run commands with or without sudo
 run_as_root() {
+    # 統一處理提權邏輯，並在 TUI_MODE=quiet 時自動壓縮 apt 輸出
+    local cmd="$1"
+    shift || true
+
+    # 在安靜模式下，針對 apt / apt-get 自動加上 -qq，並隱藏標準輸出（保留錯誤訊息）
+    if [ "${TUI_MODE:-quiet}" = "quiet" ] && { [ "$cmd" = "apt" ] || [ "$cmd" = "apt-get" ]; }; then
+        if [ "$EUID" -eq 0 ]; then
+            "$cmd" -qq "$@" >/dev/null
+        else
+            sudo "$cmd" -qq "$@" >/dev/null
+        fi
+        return $?
+    fi
+
+    # 其他命令維持原本行為
     if [ "$EUID" -eq 0 ]; then
-        "$@"
+        "$cmd" "$@"
     else
-        sudo "$@"
+        sudo "$cmd" "$@"
     fi
 }
 
@@ -414,6 +434,20 @@ install_apt_package() {
     fi
     
     log_info "安裝 $package"
+
+    # 根據 TUI_MODE 控制輸出詳細程度
+    if [ "${TUI_MODE:-normal}" = "quiet" ]; then
+        # 靜默模式：隱藏 apt 的詳細輸出（錯誤仍會透過返回值回報）
+        if sudo apt install -y "$package" >/dev/null 2>&1; then
+            log_success "$package 安裝成功"
+            return 0
+        else
+            log_error "$package 安裝失敗"
+            return 1
+        fi
+    fi
+
+    # 一般模式：顯示完整 apt 安裝輸出
     if sudo apt install -y "$package"; then
         log_success "$package 安裝成功"
         return 0
@@ -434,6 +468,12 @@ backup_file() {
     if [ -f "$file" ] || [ -d "$file" ]; then
         local backup_name
         backup_name="$(basename "$file").backup.$(date +%Y%m%d_%H%M%S)"
+        # 如果沒有預設備份目錄，使用 ~/.config/linux-setting-backup/<當前時間>
+        if [ -z "$backup_dir" ]; then
+            local ts
+            ts="$(date +%Y%m%d_%H%M%S)"
+            backup_dir="$HOME/.config/linux-setting-backup/$ts"
+        fi
         mkdir -p "$backup_dir"
         cp -r "$file" "$backup_dir/$backup_name"
         log_info "已備份 $file 到 $backup_dir/$backup_name"

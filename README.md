@@ -140,6 +140,29 @@ docker-compose -f docker-compose.test.yml --profile debian up debian-test
 
 # 自動測試
 docker-compose -f docker-compose.test.yml --profile test up test-runner
+
+# 使用本機程式碼模擬「遠端安裝 + 互動選單」（推薦）
+./tests/test_full_simulation.sh
+# 這會在本機啟動一個 HTTP server，Docker 容器內透過 curl 抓取目前專案裡的 install.sh，
+# 自動輸入安裝選單（預設安裝：Python / 基礎工具 / 終端機 / 開發工具 / 監控工具，略過 Docker），
+# 用來驗證「最新本機程式碼」的實際安裝流程。
+```
+
+### 輸出顯示模式（TUI）
+
+安裝腳本內建兩種 TUI 模式，可透過環境變數 `TUI_MODE` 控制：
+
+- `quiet`（預設）：只顯示關鍵步驟與成功/失敗結果，隱藏 apt 的詳細輸出
+- `normal`：顯示完整的安裝與 apt 輸出（除錯時建議使用）
+
+範例：
+
+```bash
+# 預設安靜模式（不用特別設定）
+./install.sh
+
+# 切換為完整輸出模式
+TUI_MODE=normal ./install.sh --verbose
 ```
 
 ### CI/CD 支援

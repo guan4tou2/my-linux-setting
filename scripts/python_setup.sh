@@ -48,16 +48,10 @@ else
     log_info "uv 已安裝"
 fi
 
-# 配置 uv 鏡像源
+# 配置 uv 鏡像源（簡化為固定使用官方 PyPI）
 show_progress "配置 uv 鏡像源"
-if [ "$MIRROR_MODE" = "china" ]; then
-    log_info "配置中國鏡像源"
-    uv config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple/ || true
-    uv config set global.extra-index-url https://pypi.org/simple/ || true
-else
-    log_info "使用全球鏡像源"
-    uv config set global.index-url https://pypi.org/simple/ || true
-fi
+log_info "使用全球鏡像源 (https://pypi.org/simple/)"
+uv config set global.index-url https://pypi.org/simple/ || true
 
 # 創建系統工具虛擬環境
 show_progress "創建虛擬環境"
@@ -84,13 +78,27 @@ fi
 show_progress "安裝 Python 工具"
 if [ -n "$REQUIREMENTS_FILE" ] && [ -f "$REQUIREMENTS_FILE" ]; then
     log_info "使用 requirements.txt 安裝套件"
-    if check_command uv; then
-        uv pip install -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python" || {
-            log_warning "uv 安裝失敗，使用傳統方式"
-            "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
-        }
+
+    # 在安靜模式下，隱藏 uv / pip 的詳細輸出，只保留錯誤碼與我們自己的 log
+    if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
+        if check_command uv; then
+            if ! uv pip install -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python" >/dev/null 2>&1; then
+                log_warning "uv 安裝失敗，使用傳統方式"
+                "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE" >/dev/null 2>&1
+            fi
+        else
+            "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE" >/dev/null 2>&1
+        fi
     else
-        "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+        # 一般模式下保留完整輸出，方便除錯
+        if check_command uv; then
+            uv pip install -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python" || {
+                log_warning "uv 安裝失敗，使用傳統方式"
+                "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+            }
+        else
+            "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+        fi
     fi
 else
     # 回退到單個套件安裝

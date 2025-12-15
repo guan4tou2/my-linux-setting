@@ -1,21 +1,70 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
-printf "\033[36m########## 安裝基礎工具 ##########\n\033[m"
+# 載入共用函數庫（使用與其他模組一致的 TUI / 日誌 / 安裝行為）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh" 2>/dev/null || {
+    # 在極簡環境下找不到 common.sh 時，仍然盡量完成基礎安裝
+    printf "\033[33m警告: 無法載入共用函數庫，將使用簡化模式安裝基礎工具\033[0m\n"
+}
 
-# 更新套件庫
-echo "deb [trusted=yes] https://ppa.ipinfo.net/ /" | sudo tee  "/etc/apt/sources.list.d/ipinfo.ppa.list" # ipinfo
-sudo apt update
+log_info "########## 安裝基礎工具 ##########"
 
-# 基礎套件
-base_packages="git curl wget ca-certificates gnupg2 software-properties-common lsd bat tldr lnav fzf ripgrep ipinfo"
+# 更新套件庫（使用 run_as_root + apt-get，TUI_MODE=quiet 時將自動隱藏細節）
+if command -v run_as_root >/dev/null 2>&1; then
+    # 寫入 ipinfo PPA（避免 sudo 直接出現在腳本裡）
+    run_as_root sh -c 'echo "deb [trusted=yes] https://ppa.ipinfo.net/ /" > /etc/apt/sources.list.d/ipinfo.ppa.list'
+    run_as_root apt-get update
+else
+    echo "deb [trusted=yes] https://ppa.ipinfo.net/ /" | sudo tee "/etc/apt/sources.list.d/ipinfo.ppa.list"
+    sudo apt-get update
+fi
+
+# 基礎套件（不再透過 APT 安裝 lsd，改用專門流程處理）
+base_packages="git curl wget ca-certificates gnupg2 software-properties-common bat tldr lnav fzf ripgrep ipinfo"
 
 for pkg in $base_packages; do
-    if ! dpkg -l | grep -q "^ii  $pkg"; then
-        sudo apt install -y "$pkg"
-    else
+    if dpkg -l | grep -q "^ii  $pkg"; then
         printf "\033[36m$pkg 已安裝\033[0m\n"
+        continue
+    fi
+
+    if command -v install_apt_package >/dev/null 2>&1; then
+        # 使用共用安裝函數（會自動尊重 TUI_MODE）
+        install_apt_package "$pkg" || true
+    else
+        # 後備路徑：直接用 apt-get 安裝
+        sudo apt-get install -y "$pkg"
     fi
 done
+
+# 安裝 lsd（next-gen ls）。
+# 流程：
+#   1. 若系統尚未安裝 cargo，先透過 APT 安裝 cargo
+#   2. 使用 cargo install lsd
+if ! command -v lsd >/dev/null 2>&1; then
+    log_info "安裝 lsd (下一代 ls 指令，來源: github.com/lsd-rs/lsd)"
+
+    # 若沒有 cargo，先安裝
+    if ! command -v cargo >/dev/null 2>&1; then
+        log_info "找不到 cargo，嘗試透過 APT 安裝 cargo..."
+        if command -v install_apt_package >/dev/null 2>&1; then
+            install_apt_package "cargo" || log_warning "cargo 安裝可能失敗，稍後再檢查"
+        else
+            sudo apt-get install -y cargo || log_warning "cargo 安裝可能失敗，稍後再檢查"
+        fi
+    fi
+
+    # 再次檢查 cargo 是否可用
+    if command -v cargo >/dev/null 2>&1; then
+        if cargo install lsd >/dev/null 2>&1; then
+            log_success "lsd 安裝成功 (cargo)"
+        else
+            log_warning "lsd 安裝失敗 (cargo)，可參考官方安裝說明：github.com/lsd-rs/lsd"
+        fi
+    else
+        log_warning "仍然找不到 cargo，略過自動安裝 lsd，可之後手動安裝：參考 github.com/lsd-rs/lsd"
+    fi
+fi
 
 # 設定 bat 別名
 if command -v batcat > /dev/null 2>&1; then

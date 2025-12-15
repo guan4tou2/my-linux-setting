@@ -77,18 +77,35 @@ run_container() {
     
     if [ "$interactive" = "true" ]; then
         log_info "啟動互動式測試容器..."
-        docker run -it --rm \
-            --name "$CONTAINER_NAME" \
-            -v "$SCRIPT_DIR:/opt/linux-setting" \
-            "$IMAGE_NAME" \
-            ${command:-/bin/bash}
+        if [ -n "$command" ]; then
+            # 將整個命令字串交給 bash -lc，避免在宿主 shell / docker 之間的引號被拆解
+            docker run -it --rm \
+                --name "$CONTAINER_NAME" \
+                -v "$SCRIPT_DIR:/opt/linux-setting" \
+                "$IMAGE_NAME" \
+                /bin/bash -lc "$command"
+        else
+            docker run -it --rm \
+                --name "$CONTAINER_NAME" \
+                -v "$SCRIPT_DIR:/opt/linux-setting" \
+                "$IMAGE_NAME" \
+                /bin/bash
+        fi
     else
         log_info "運行測試容器..."
-        docker run --rm \
-            --name "$CONTAINER_NAME" \
-            -v "$SCRIPT_DIR:/opt/linux-setting" \
-            "$IMAGE_NAME" \
-            ${command:-/bin/bash -c "echo 'Container is ready!'"}
+        if [ -n "$command" ]; then
+            docker run --rm \
+                --name "$CONTAINER_NAME" \
+                -v "$SCRIPT_DIR:/opt/linux-setting" \
+                "$IMAGE_NAME" \
+                /bin/bash -lc "$command"
+        else
+            docker run --rm \
+                --name "$CONTAINER_NAME" \
+                -v "$SCRIPT_DIR:/opt/linux-setting" \
+                "$IMAGE_NAME" \
+                /bin/bash -c "echo 'Container is ready!'"
+        fi
     fi
 }
 
@@ -145,7 +162,7 @@ run_full_installation_test() {
     cd /opt/linux-setting
     
     echo '=== 測試最小安裝模式 ==='
-    echo 'y' | timeout 300 ./install.sh --minimal --mirror china --verbose || {
+    echo 'y' | timeout 300 ./install.sh --minimal --verbose || {
         echo '安裝超時或失敗，但這可能是正常的'
         exit 0
     }
