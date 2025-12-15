@@ -163,8 +163,9 @@ check_internet_speed() {
     start_time=$(date +%s.%N)
     if curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" | grep -q "200"; then
         end_time=$(date +%s.%N)
-        duration=$(echo "$end_time - $start_time" | bc)
-        speed=$(echo "scale=2; 1 / $duration" | bc)
+        # Use awk instead of bc for floating point arithmetic
+        duration=$(awk "BEGIN {print $end_time - $start_time}")
+        speed=$(awk "BEGIN {printf \"%.2f\", 1 / $duration}")
         echo "$speed"
     else
         echo "0"
@@ -706,7 +707,7 @@ select_fastest_apt_mirror() {
         local response_time
         response_time=$(curl -o /dev/null -s -w "%{time_total}" --max-time 5 "$mirror" 2>/dev/null || echo "999")
         
-        if [ "$response_time" != "999" ] && [ "$(echo "$response_time < $best_time" | bc)" = "1" ]; then
+        if [ "$response_time" != "999" ] && [ "$(awk "BEGIN {print ($response_time < $best_time)}" )" = "1" ]; then
             best_time="$response_time"
             fastest_mirror="$mirror"
         fi
@@ -740,7 +741,7 @@ get_best_mirror() {
         local speed
         speed=$(curl -o /dev/null -s -w "%{time_total}" --max-time 5 "$mirror" 2>/dev/null || echo "999")
         
-        if [ "$speed" != "999" ] && ([ "$best_speed" = "0" ] || [ "$(echo "$speed < $best_speed" | bc)" = "1" ]); then
+        if [ "$speed" != "999" ] && ([ "$best_speed" = "0" ] || [ "$(awk "BEGIN {print ($speed < $best_speed)}" )" = "1" ]); then
             best_speed="$speed"
             best_mirror="$mirror"
         fi

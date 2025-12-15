@@ -198,18 +198,10 @@ check_environment() {
         log_success "網絡連接正常"
     fi
     
-    # 檢查網絡速度並選擇最佳鏡像
+    # 設定鏡像模式
     if [ "$MIRROR_MODE" = "auto" ]; then
-        log_info "檢測網絡速度並選擇最佳鏡像..."
-        local speed
-        speed=$(check_internet_speed)
-        if (( $(echo "$speed < 0.5" | bc -l) )); then
-            MIRROR_MODE="china"
-            log_info "網速較慢，切換到中國鏡像源"
-        else
-            MIRROR_MODE="global"
-            log_info "網速正常，使用全球鏡像源"
-        fi
+        MIRROR_MODE="global"
+        log_info "使用全球鏡像源（如需使用中國鏡像，請使用 --mirror china）"
     fi
     
     # 檢查磁盤空間
@@ -220,13 +212,26 @@ check_environment() {
     log_success "磁盤空間充足"
     
     # 檢查必要命令
-    local required_commands="curl wget sudo apt-get"
+    local required_commands="curl sudo apt-get"
+    local optional_commands="wget"
+    
     for cmd in $required_commands; do
         if ! check_command "$cmd"; then
             log_error "找不到必要的命令：$cmd"
             exit 1
         fi
     done
+    
+    for cmd in $optional_commands; do
+        if ! check_command "$cmd"; then
+            log_warning "建議安裝的命令未找到：$cmd（將嘗試自動安裝）"
+            # Try to install wget if missing
+            if command -v apt-get >/dev/null 2>&1; then
+                sudo apt-get update && sudo apt-get install -y wget >/dev/null 2>&1 || log_warning "無法安裝 $cmd"
+            fi
+        fi
+    done
+    
     log_success "必要命令檢查通過"
     
     # 檢查 sudo 權限

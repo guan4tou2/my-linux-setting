@@ -17,6 +17,7 @@ RUN apt-get update && \
     apt-get install -y \
         curl \
         wget \
+        bc \
         git \
         sudo \
         python3 \
