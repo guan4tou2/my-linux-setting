@@ -5,7 +5,7 @@
 setuptools
 
 # 終端增強工具
-thefuck==3.32
+thefuck
 
 # 文件管理器
 ranger-fm==1.9.3
