@@ -1,0 +1,25 @@
+name: Test Installation
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build Docker Image
+        run: ./docker-test.sh build
+        
+      - name: Run Basic Script Tests
+        run: ./docker-test.sh test
+        
+      - name: Run Full Installation Simulation
+        run: |
+          # Use host IP in CI for the remote simulation test
+          export HOST_FOR_CONTAINER=$(hostname -I | awk '{print $1}')
+          ./tests/test_full_simulation.sh

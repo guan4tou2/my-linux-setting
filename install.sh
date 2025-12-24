@@ -272,8 +272,10 @@ MODULES="python docker base terminal dev monitoring"
 selected_modules=""
 installed_modules=""
 
-# 檢查是否為遠程安裝
-# 注意：REMOTE_INSTALL 可能已在上方載入 common.sh 的流程中根據實際情況設定
+# 確保遠程安裝標記正確（如果 SCRIPT_DIR 在 /tmp 下也視為遠程安裝）
+if [[ "$SCRIPT_DIR" == /tmp/* ]]; then
+    REMOTE_INSTALL=true
+fi
 REMOTE_INSTALL=${REMOTE_INSTALL:-false}
 
 # 主要安裝函數
