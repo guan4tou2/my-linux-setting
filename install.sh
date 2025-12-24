@@ -497,7 +497,15 @@ show_installation_report() {
     printf "%s\n" "$LOG_FILE"
     
     printf "\n${CYAN}########## 安裝完成 ##########${NC}\n"
-    printf "${GREEN}請重新開啟終端機以套用所有更改${NC}\n"
+
+    # 如果安裝了 terminal 模組，提示用戶重新載入 shell
+    if echo "$installed_modules" | grep -q "terminal"; then
+        printf "\n${YELLOW}注意：終端機環境已更新${NC}\n"
+        printf "${GREEN}請執行以下命令以套用變更：${NC}\n"
+        printf "  ${CYAN}exec zsh -l${NC}  # 或重新開啟終端機\n"
+    else
+        printf "${GREEN}請重新開啟終端機以套用所有更改${NC}\n"
+    fi
 }
 
 # 安裝選中的模組
