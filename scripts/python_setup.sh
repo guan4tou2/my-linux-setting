@@ -70,6 +70,11 @@ if [ ! -d "$VENV_DIR" ]; then
     log_success "虛擬環境創建成功: $VENV_DIR"
 fi
 
+# 強制確保基礎依賴存在（處理已存在的 venv）
+if [ -x "$VENV_DIR/bin/pip" ]; then
+    "$VENV_DIR/bin/pip" install setuptools >/dev/null 2>&1 || true
+fi
+
 # 下載 requirements.txt
 show_progress "下載套件需求文件"
 if [ -n "$REQUIREMENTS_URL" ]; then

@@ -52,6 +52,12 @@ if ! command -v lsd >/dev/null 2>&1; then
         else
             sudo apt-get install -y cargo || log_warning "cargo 安裝可能失敗，稍後再檢查"
         fi
+        
+        # 嘗試載入 cargo 環境導出
+        if [ -f "$HOME/.cargo/env" ]; then
+            source "$HOME/.cargo/env"
+        fi
+        export PATH="$HOME/.cargo/bin:$PATH"
     fi
 
     # 再次檢查 cargo 是否可用
