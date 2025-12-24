@@ -498,12 +498,9 @@ show_installation_report() {
     
     printf "\n${CYAN}########## 安裝完成 ##########${NC}\n"
 
-    # 如果安裝了 terminal 模組，提示用戶重新載入 shell
-    if echo "$installed_modules" | grep -q "terminal"; then
-        printf "\n${YELLOW}注意：終端機環境已更新${NC}\n"
-        printf "${GREEN}請執行以下命令以套用變更：${NC}\n"
-        printf "  ${CYAN}exec zsh -l${NC}  # 或重新開啟終端機\n"
-    else
+    # 如果安裝了 terminal 模組，shell 會自動重新載入（exec zsh -l）
+    # 如果沒有安裝 terminal 模組，提示用戶重新開啟終端機
+    if ! echo "$installed_modules" | grep -q "terminal"; then
         printf "${GREEN}請重新開啟終端機以套用所有更改${NC}\n"
     fi
 }
@@ -521,10 +518,10 @@ install_selected_modules() {
     # 1. base       - 提供 git/curl/wget 等基礎工具與 APT 相關套件
     # 2. dev        - 安裝 cargo / nodejs 等開發工具，供後續模組使用
     # 3. python     - 建立 Python/uv/虛擬環境，供終端工具使用
-    # 4. terminal   - 依賴前面模組提供的工具（例如 thefuck、uv）
-    # 5. monitoring - 最後安裝監控與安全工具
-    # 6. docker     - 可選的 Docker 工具，放在最末
-    for module in base dev python terminal monitoring docker; do
+    # 4. monitoring - 安裝監控與安全工具
+    # 5. docker     - 可選的 Docker 工具
+    # 6. terminal   - 最後安裝，因為會執行 exec zsh 重新載入 shell
+    for module in base dev python monitoring docker terminal; do
         case " $selected_modules " in
             *" $module "*) ;;
             *) continue ;;
