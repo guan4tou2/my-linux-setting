@@ -608,7 +608,7 @@ safe_download() {
     local max_retries="${3:-3}"
     local use_cache="${4:-true}"
     
-    # 嘗試從快取獲取
+    # 嘗試從快取獲取 (僅當 use_cache 為 true 時)
     if [ "$use_cache" = "true" ] && get_from_cache "$url" "$output"; then
         return 0
     fi

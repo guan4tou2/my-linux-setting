@@ -75,10 +75,10 @@ if [ -x "$VENV_DIR/bin/pip" ]; then
     "$VENV_DIR/bin/pip" install setuptools >/dev/null 2>&1 || true
 fi
 
-# 下載 requirements.txt
+# 下載 requirements.txt (不使用快取以確保獲取最新版本)
 show_progress "下載套件需求文件"
 if [ -n "$REQUIREMENTS_URL" ]; then
-    safe_download "$REQUIREMENTS_URL" "/tmp/requirements.txt"
+    safe_download "$REQUIREMENTS_URL" "/tmp/requirements.txt" 3 false
     REQUIREMENTS_FILE="/tmp/requirements.txt"
 elif [ -f "$(dirname "$SCRIPT_DIR")/requirements.txt" ]; then
     REQUIREMENTS_FILE="$(dirname "$SCRIPT_DIR")/requirements.txt"
@@ -95,12 +95,12 @@ if [ -n "$REQUIREMENTS_FILE" ] && [ -f "$REQUIREMENTS_FILE" ]; then
     # 在安靜模式下，隱藏 uv / pip 的詳細輸出，只保留錯誤碼與我們自己的 log
     if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
         if check_command uv; then
-            if ! uv pip install -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python" >/dev/null 2>&1; then
+            if ! uv pip install -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python"; then
                 log_warning "uv 安裝失敗，使用傳統方式"
-                "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE" >/dev/null 2>&1
+                "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
             fi
         else
-            "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE" >/dev/null 2>&1
+            "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
         fi
     else
         # 一般模式下保留完整輸出，方便除錯
