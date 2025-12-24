@@ -36,13 +36,42 @@ for pkg in $dev_packages; do
     fi
 done
 
-# 安裝 lazyvim
-if ! command -v nvim > /dev/null 2>&1; then
-    printf "\033[36m安裝 LazyVim\033[0m\n"
+# 安裝 LazyVim 配置
+if [ ! -d ~/.config/nvim ]; then
+    printf "\033[36m安裝 LazyVim 配置\033[0m\n"
+
+    # 備份現有配置（如果存在）
+    if [ -d ~/.config/nvim ]; then
+        mv ~/.config/nvim ~/.config/nvim.bak.$(date +%Y%m%d_%H%M%S)
+    fi
+
+    # 克隆 LazyVim starter
     git clone https://github.com/LazyVim/starter ~/.config/nvim
     rm -rf ~/.config/nvim/.git
-    npm install -g neovim
-    echo 'alias nv="nvim"' >> ~/.zshrc
+
+    # 安裝 neovim npm 包（用於某些插件）
+    if command -v npm > /dev/null 2>&1; then
+        npm install -g neovim
+    fi
+
+    # 添加 nvim 函數包裝器（修復目錄切換問題）
+    if ! grep -q 'function nvim_wrapper' ~/.zshrc 2>/dev/null; then
+        cat >> ~/.zshrc << 'EOF'
+
+# Nvim wrapper to preserve working directory
+function nvim_wrapper() {
+    local current_dir="$PWD"
+    command nvim "$@"
+    local exit_code=$?
+    cd "$current_dir" 2>/dev/null || true
+    return $exit_code
+}
+alias nvim='nvim_wrapper'
+alias nv='nvim_wrapper'
+EOF
+    fi
+
+    log_success "LazyVim 配置安裝完成"
 fi
 
 # 安裝 lazygit

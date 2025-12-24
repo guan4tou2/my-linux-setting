@@ -78,6 +78,16 @@ if ! grep -q "export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin
     sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
 fi
 
+# 設定終端環境變數（修復 nvim 顯示問題）
+if ! grep -q 'export TERM=' ~/.zshrc; then
+    cat >> ~/.zshrc << 'EOF'
+
+# 終端環境設定
+export TERM=xterm-256color
+export COLORTERM=truecolor
+EOF
+fi
+
 # 安裝 Powerlevel10k
 if [ ! -f ~/.p10k.zsh ]; then
     printf "\033[36m安裝 Powerlevel10k\033[0m\n"
