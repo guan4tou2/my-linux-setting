@@ -273,11 +273,8 @@ selected_modules=""
 installed_modules=""
 
 # 檢查是否為遠程安裝
-REMOTE_INSTALL=false
-# 注意：SCRIPT_DIR 在上方載入 common.sh 的流程中已根據實際情況設定
-# - 本地安裝：SCRIPT_DIR="$PWD/scripts"
-# - 遠端安裝：SCRIPT_DIR="$TEMP_DIR/scripts"
-# 這裡不要再次覆蓋，避免遠端模式下模組腳本與 common.sh 不在同一目錄
+# 注意：REMOTE_INSTALL 可能已在上方載入 common.sh 的流程中根據實際情況設定
+REMOTE_INSTALL=${REMOTE_INSTALL:-false}
 
 # 主要安裝函數
 main() {
