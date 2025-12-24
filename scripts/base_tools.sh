@@ -20,7 +20,7 @@ else
 fi
 
 # 基礎套件（不再透過 APT 安裝 lsd，改用專門流程處理）
-base_packages="git curl wget ca-certificates gnupg2 software-properties-common build-essential pkg-config bat tldr lnav fzf ripgrep ipinfo"
+base_packages="git curl wget ca-certificates gnupg2 software-properties-common build-essential pkg-config libssl-dev bat tldr lnav fzf ripgrep ipinfo"
 
 for pkg in $base_packages; do
     if dpkg -l | grep -q "^ii  $pkg"; then
@@ -62,7 +62,7 @@ if ! command -v lsd >/dev/null 2>&1; then
 
     # 再次檢查 cargo 是否可用
     if command -v cargo >/dev/null 2>&1; then
-        if cargo install lsd >/dev/null 2>&1; then
+        if cargo install lsd; then
             log_success "lsd 安裝成功 (cargo)"
         else
             log_warning "lsd 安裝失敗 (cargo)，可參考官方安裝說明：github.com/lsd-rs/lsd"
