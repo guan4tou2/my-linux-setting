@@ -4,8 +4,9 @@
 # 基礎依賴 (用於相容性)
 setuptools
 
-# 終端增強工具
-thefuck==3.32
+# 終端增強工具 (固定到最新 master commit 以支援 Python 3.12+)
+# 使用特定 commit hash 確保版本穩定性
+git+https://github.com/nvbn/thefuck.git@c7e7e1d884d3bb241ea6448f72a989434c2a35ec
 
 # 文件管理器
 ranger-fm==1.9.3
