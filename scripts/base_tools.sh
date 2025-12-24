@@ -39,43 +39,65 @@ done
 
 # 安裝 lsd（next-gen ls）。
 # 流程：
-#   1. 若系統尚未安裝 cargo，先透過 APT 安裝 cargo
-#   2. 使用 cargo install lsd
+#   1. 優先嘗試使用 APT 安裝預編譯版本（Ubuntu 21.10+）
+#   2. 如果 APT 安裝失敗，才使用 cargo 編譯安裝
 if ! command -v lsd >/dev/null 2>&1; then
     log_info "安裝 lsd (下一代 ls 指令，來源: github.com/lsd-rs/lsd)"
 
-    # 若沒有 cargo，先安裝
-    if ! command -v cargo >/dev/null 2>&1; then
-        log_info "找不到 cargo，嘗試透過 APT 安裝 cargo..."
-        if command -v install_apt_package >/dev/null 2>&1; then
-            install_apt_package "cargo" || log_warning "cargo 安裝可能失敗，稍後再檢查"
+    # 方法 1: 優先使用 APT 安裝（避免 Rust 版本問題）
+    if command -v install_apt_package >/dev/null 2>&1; then
+        if install_apt_package "lsd" 2>/dev/null; then
+            log_success "lsd 安裝成功 (apt)"
         else
-            sudo apt-get install -y cargo || log_warning "cargo 安裝可能失敗，稍後再檢查"
-        fi
-        
-        # 嘗試載入 cargo 環境導出
-        if [ -f "$HOME/.cargo/env" ]; then
-            source "$HOME/.cargo/env"
-        fi
-        export PATH="$HOME/.cargo/bin:$PATH"
-    fi
-
-    # 再次檢查 cargo 是否可用
-    if command -v cargo >/dev/null 2>&1; then
-        if cargo install lsd; then
-            log_success "lsd 安裝成功 (cargo)"
-        else
-            log_warning "lsd 安裝失敗 (cargo)，可參考官方安裝說明：github.com/lsd-rs/lsd"
+            log_info "APT 安裝失敗，嘗試使用 cargo..."
+            # 方法 2 的標記
+            APT_FAILED=1
         fi
     else
-        log_warning "仍然找不到 cargo，略過自動安裝 lsd，可之後手動安裝：參考 github.com/lsd-rs/lsd"
+        if sudo apt-get install -y lsd 2>/dev/null; then
+            log_success "lsd 安裝成功 (apt)"
+        else
+            log_info "APT 安裝失敗，嘗試使用 cargo..."
+            APT_FAILED=1
+        fi
+    fi
+
+    # 方法 2: 如果 APT 失敗，使用 cargo 編譯安裝
+    if [ "${APT_FAILED:-0}" = "1" ]; then
+        # 若沒有 cargo，先安裝
+        if ! command -v cargo >/dev/null 2>&1; then
+            log_info "找不到 cargo，嘗試透過 APT 安裝 cargo..."
+            if command -v install_apt_package >/dev/null 2>&1; then
+                install_apt_package "cargo" || log_warning "cargo 安裝可能失敗，稍後再檢查"
+            else
+                sudo apt-get install -y cargo || log_warning "cargo 安裝可能失敗，稍後再檢查"
+            fi
+
+            # 嘗試載入 cargo 環境導出
+            if [ -f "$HOME/.cargo/env" ]; then
+                source "$HOME/.cargo/env"
+            fi
+            export PATH="$HOME/.cargo/bin:$PATH"
+        fi
+
+        # 再次檢查 cargo 是否可用
+        if command -v cargo >/dev/null 2>&1; then
+            if cargo install lsd; then
+                log_success "lsd 安裝成功 (cargo)"
+            else
+                log_warning "lsd 安裝失敗 (cargo)，可參考官方安裝說明：github.com/lsd-rs/lsd"
+            fi
+        else
+            log_warning "仍然找不到 cargo，略過自動安裝 lsd，可之後手動安裝：參考 github.com/lsd-rs/lsd"
+        fi
     fi
 fi
 
 # 設定 bat 別名
 if command -v batcat > /dev/null 2>&1; then
     mkdir -p ~/.local/bin
-    ln -s /usr/bin/batcat ~/.local/bin/bat
+    # 使用 -f 強制覆蓋已存在的符號連結，避免警告訊息
+    ln -sf /usr/bin/batcat ~/.local/bin/bat
 fi
 
 # 安裝 superfile（使用安全下載機制）
