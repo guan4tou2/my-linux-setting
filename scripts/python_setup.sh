@@ -51,14 +51,22 @@ fi
 # 配置 uv 鏡像源（簡化為固定使用官方 PyPI）
 show_progress "配置 uv 鏡像源"
 log_info "使用全球鏡像源 (https://pypi.org/simple/)"
-uv config set global.index-url https://pypi.org/simple/ || true
+# 注意: uv 不再提供單獨的 'config' 子命令來設置 index-url，
+# 相關配置應透過 ~/.uv/config.toml 或環境變數處理。
+# 此處略過無效命令，uv 預設即使用 PyPI。
 
 # 創建系統工具虛擬環境
 show_progress "創建虛擬環境"
 VENV_DIR="$HOME/.local/venv/system-tools"
 if [ ! -d "$VENV_DIR" ]; then
     log_info "創建系統工具虛擬環境"
-    uv venv "$VENV_DIR" || python3 -m venv "$VENV_DIR"
+    if check_command uv; then
+        uv venv "$VENV_DIR"
+    else
+        python3 -m venv "$VENV_DIR"
+    fi
+    # 安裝基礎依賴（包含 setuptools 用於 thefuck）
+    "$VENV_DIR/bin/pip" install setuptools
     log_success "虛擬環境創建成功: $VENV_DIR"
 fi
 
