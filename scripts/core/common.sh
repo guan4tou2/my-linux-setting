@@ -22,7 +22,7 @@ SCRIPT_START_TIME=$(date +%s)
 TOTAL_STEPS=0
 CURRENT_STEP=0
 
-# Helper function to run commands with or without sudo
+# 統一處理 root 權限執行
 run_as_root() {
     # 統一處理提權邏輯，並在 TUI_MODE=quiet 時自動壓縮 apt 輸出
     local cmd="$1"
@@ -264,12 +264,12 @@ check_disk_space() {
 
 check_network() {
     local timeout="${1:-5}"
-    # Try curl first (more reliable in containers)
+    # 優先使用 curl（在容器中更可靠）
     if command -v curl >/dev/null 2>&1; then
         curl -s --max-time "$timeout" --connect-timeout "$timeout" https://www.google.com >/dev/null 2>&1 ||
         curl -s --max-time "$timeout" --connect-timeout "$timeout" https://www.baidu.com >/dev/null 2>&1
     else
-        # Fallback to ping if curl unavailable
+        # 若 curl 不可用則使用 ping
         timeout "$timeout" ping -c 1 google.com >/dev/null 2>&1 ||
         timeout "$timeout" ping -c 1 baidu.com >/dev/null 2>&1
     fi
@@ -282,7 +282,7 @@ check_internet_speed() {
     start_time=$(date +%s.%N)
     if curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" | grep -q "200"; then
         end_time=$(date +%s.%N)
-        # Use awk instead of bc for floating point arithmetic
+        # 使用 awk 進行浮點運算
         duration=$(awk "BEGIN {print $end_time - $start_time}")
         speed=$(awk "BEGIN {printf \"%.2f\", 1 / $duration}")
         echo "$speed"
@@ -319,7 +319,7 @@ install_apt_packages_parallel() {
         } > "$log_file" 2>&1
     }
     
-    # Export functions for subshells (only if they exist)
+    # 導出函數供子 shell 使用
     for func in install_single_package install_apt_package check_package_installed log_info log_success log_error; do
         if declare -f "$func" > /dev/null 2>&1; then
             export -f "$func" 2>/dev/null || true
@@ -416,7 +416,7 @@ download_files_parallel() {
         } > "$log_file" 2>&1
     }
     
-    # Export functions for subshells (only if they exist)
+    # 導出函數供子 shell 使用
     for func in download_single_file safe_download log_info log_success log_error; do
         if declare -f "$func" > /dev/null 2>&1; then
             export -f "$func" 2>/dev/null || true
@@ -1130,7 +1130,7 @@ init_common_env() {
 # 導出所有函數
 # ==============================================================================
 
-# Export all functions safely for subshells
+# 安全導出所有函數供子 shell 使用
 func_list="log_error log_info log_success log_warning log_debug init_progress show_progress run_as_root"
 func_list="$func_list check_command check_package_installed check_python_version check_disk_space check_network check_internet_speed"
 func_list="$func_list install_with_fallback install_apt_package install_apt_packages_parallel"

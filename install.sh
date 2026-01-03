@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # ==============================================================================
-# Linux Setting Scripts - Enhanced Installation Script
+# Linux 環境設定腳本 - 安裝工具
 # ==============================================================================
 
 # 解析命令行參數
@@ -201,7 +201,7 @@ check_environment() {
         fi
         if [ $? -eq 0 ]; then
             log_success "Python 3 安裝完成"
-            # Try the check again, but don't fail if it still doesn't pass
+            # 再次檢查，即使未通過也不中斷
             if check_python_version "3.8"; then
                 log_success "Python 版本現在滿足要求"
             else
@@ -232,7 +232,7 @@ check_environment() {
     local required_commands="curl"
     local optional_commands="wget"
 
-    # Check if running as root or if sudo is available
+    # 檢查是否為 root 或 sudo 可用
     if [ "$EUID" -ne 0 ] && ! check_command "sudo"; then
         log_error "找不到必要的命令：sudo（或請以 root 身份運行）"
         exit 1

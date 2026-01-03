@@ -58,7 +58,7 @@ if [ ! -d ~/.config/nvim ]; then
     if ! grep -q 'function nvim_wrapper' ~/.zshrc 2>/dev/null; then
         cat >> ~/.zshrc << 'EOF'
 
-# Nvim wrapper to preserve working directory
+# Nvim 包裝器：保持當前工作目錄
 function nvim_wrapper() {
     local current_dir="$PWD"
     command nvim "$@"

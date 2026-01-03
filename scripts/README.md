@@ -1,6 +1,6 @@
-# Scripts 目錄結構說明
+# Scripts 目錄結構
 
-本目錄包含所有安裝和維護腳本，已按功能分類到子目錄中以提高可維護性。
+安裝和維護腳本，按功能分類至子目錄。
 
 ## 目錄結構
 
@@ -88,33 +88,17 @@ scripts/
 
 ## 使用說明
 
-### 調用核心腳本
-
-在 `install.sh` 中：
-
 ```bash
 # 載入共用函數庫
 source "$SCRIPT_DIR/core/common.sh"
 
 # 執行模組安裝
 bash "$SCRIPT_DIR/core/base_tools.sh"
-bash "$SCRIPT_DIR/core/python_setup.sh"
-```
 
-### 調用維護腳本
-
-```bash
-# 更新工具
+# 維護腳本
 bash scripts/maintenance/update_tools.sh
 
-# 健康檢查
-bash scripts/maintenance/health_check.sh
-```
-
-### 調用測試腳本
-
-```bash
-# 系統測試
+# 測試腳本
 bash scripts/testing/system_test.sh
 ```
 
@@ -124,32 +108,14 @@ bash scripts/testing/system_test.sh
 
 ### 添加新腳本
 
-1. **確定腳本類別**：判斷應該放在哪個子目錄
-2. **遵循命名規範**：使用描述性的名稱，如 `xxx_setup.sh` 或 `xxx_tools.sh`
-3. **添加執行權限**：`chmod +x scripts/category/new_script.sh`
-4. **更新此 README**：在相應類別中添加說明
+1. 確定腳本類別
+2. 使用描述性名稱：`xxx_setup.sh` 或 `xxx_tools.sh`
+3. 添加執行權限：`chmod +x scripts/category/new_script.sh`
+4. 更新此 README
 
-### 修改現有腳本
-
-- 修改核心腳本後，請運行測試確保不影響安裝流程
-- 修改路徑引用時，記得同步更新 `install.sh` 和測試腳本
-
-### 測試腳本
+### 測試
 
 ```bash
-# 測試所有腳本
-./tests/run_all_tests.sh
-
-# 測試特定功能
-./tests/test_scripts.sh
-./tests/test_functionality.sh
+./tests/run_all_tests.sh       # 測試所有腳本
+./tests/test_scripts.sh        # 測試特定功能
 ```
-
----
-
-## 歷史變更
-
-- **2026-01-03**：重組 scripts 目錄，按功能分類到子目錄
-  - 創建 5 個子目錄：core, maintenance, config, testing, utils
-  - 移動所有腳本到相應類別
-  - 更新所有路徑引用
