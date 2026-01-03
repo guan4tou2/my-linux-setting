@@ -132,7 +132,7 @@ pre_check() {
     fi
     
     # 檢查共用函數庫
-    if [ -f "$SCRIPT_DIR/scripts/common.sh" ]; then
+    if [ -f "$SCRIPT_DIR/scripts/core/common.sh" ]; then
         echo -e "${GREEN}✓${NC} common.sh 存在"
     else
         echo -e "${RED}✗${NC} common.sh 不存在"

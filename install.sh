@@ -54,17 +54,17 @@ export MIRROR_MODE INSTALL_MODE UPDATE_MODE VERBOSE DEBUG
 
 # 載入共用函數庫
 SCRIPT_DIR="$PWD/scripts"
-if [ -f "$SCRIPT_DIR/common.sh" ]; then
-    source "$SCRIPT_DIR/common.sh"
-elif [ -f "./scripts/common.sh" ]; then
-    source "./scripts/common.sh"
+if [ -f "$SCRIPT_DIR/core/common.sh" ]; then
+    source "$SCRIPT_DIR/core/common.sh"
+elif [ -f "./scripts/core/common.sh" ]; then
+    source "./scripts/core/common.sh"
 else
     # 遠程下載共用函數庫
     TEMP_DIR=$(mktemp -d)
     SCRIPT_DIR="$TEMP_DIR/scripts"
-    mkdir -p "$SCRIPT_DIR"
-    curl -fsSL "$SCRIPTS_URL/common.sh" -o "$SCRIPT_DIR/common.sh"
-    source "$SCRIPT_DIR/common.sh"
+    mkdir -p "$SCRIPT_DIR/core"
+    curl -fsSL "$SCRIPTS_URL/core/common.sh" -o "$SCRIPT_DIR/core/common.sh"
+    source "$SCRIPT_DIR/core/common.sh"
     REMOTE_INSTALL=true
 fi
 
@@ -283,8 +283,8 @@ main() {
     # 檢查更新模式
     if [ "$UPDATE_MODE" = true ]; then
         log_info "更新模式：執行系統更新"
-        if [ -f "$SCRIPT_DIR/update_tools.sh" ]; then
-            bash "$SCRIPT_DIR/update_tools.sh"
+        if [ -f "$SCRIPT_DIR/maintenance/update_tools.sh" ]; then
+            bash "$SCRIPT_DIR/maintenance/update_tools.sh"
             exit $?
         else
             log_error "找不到更新腳本"
@@ -528,12 +528,12 @@ install_selected_modules() {
         esac
 
         case $module in
-            base) execute_script "base_tools.sh" "base" ;;
-            dev) execute_script "dev_tools.sh" "dev" ;;
-            python) execute_script "python_setup.sh" "python" ;;
-            terminal) execute_script "terminal_setup.sh" "terminal" ;;
-            monitoring) execute_script "monitoring_tools.sh" "monitoring" ;;
-            docker) execute_script "docker_setup.sh" "docker" ;;
+            base) execute_script "core/base_tools.sh" "base" ;;
+            dev) execute_script "core/dev_tools.sh" "dev" ;;
+            python) execute_script "core/python_setup.sh" "python" ;;
+            terminal) execute_script "core/terminal_setup.sh" "terminal" ;;
+            monitoring) execute_script "core/monitoring_tools.sh" "monitoring" ;;
+            docker) execute_script "core/docker_setup.sh" "docker" ;;
         esac || {
             printf "${RED}安裝過程中出現錯誤，中止安裝${NC}\n"
             return 1

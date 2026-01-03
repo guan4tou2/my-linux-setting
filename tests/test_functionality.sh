@@ -2,7 +2,7 @@
 
 # 功能測試工具
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$SCRIPT_DIR/scripts/common.sh" 2>/dev/null || {
+source "$SCRIPT_DIR/scripts/core/common.sh" 2>/dev/null || {
     RED='\033[0;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[0;33m'
@@ -34,9 +34,9 @@ log_warn() {
 test_common_functions() {
     log_test "測試共用函數庫功能..."
     
-    if [ -f "$SCRIPT_DIR/scripts/common.sh" ]; then
+    if [ -f "$SCRIPT_DIR/scripts/core/common.sh" ]; then
         # 測試載入
-        if source "$SCRIPT_DIR/scripts/common.sh" 2>/dev/null; then
+        if source "$SCRIPT_DIR/scripts/core/common.sh" 2>/dev/null; then
             log_pass "common.sh 載入成功"
             
             # 測試日誌函數
@@ -139,9 +139,9 @@ test_install_script_args() {
 test_preview_functionality() {
     log_test "測試配置預覽功能..."
     
-    if [ -f "$SCRIPT_DIR/scripts/preview_config.sh" ]; then
+    if [ -f "$SCRIPT_DIR/scripts/config/preview_config.sh" ]; then
         # 測試預覽腳本基本功能
-        if timeout 10 bash "$SCRIPT_DIR/scripts/preview_config.sh" --help >/dev/null 2>&1; then
+        if timeout 10 bash "$SCRIPT_DIR/scripts/config/preview_config.sh" --help >/dev/null 2>&1; then
             log_pass "preview_config.sh 基本功能正常"
         else
             log_warn "preview_config.sh 可能沒有 --help 選項"
@@ -150,7 +150,7 @@ test_preview_functionality() {
         # 測試模組預覽
         local modules=("python" "base" "terminal")
         for module in "${modules[@]}"; do
-            if timeout 10 bash "$SCRIPT_DIR/scripts/preview_config.sh" "$module" >/dev/null 2>&1; then
+            if timeout 10 bash "$SCRIPT_DIR/scripts/config/preview_config.sh" "$module" >/dev/null 2>&1; then
                 log_pass "$module 模組預覽正常"
             else
                 log_fail "$module 模組預覽失敗"
@@ -165,9 +165,9 @@ test_preview_functionality() {
 test_health_check_functionality() {
     log_test "測試健康檢查功能..."
     
-    if [ -f "$SCRIPT_DIR/scripts/health_check.sh" ]; then
+    if [ -f "$SCRIPT_DIR/scripts/maintenance/health_check.sh" ]; then
         # 執行健康檢查（使用短超時避免影響測試）
-        if timeout 30 bash "$SCRIPT_DIR/scripts/health_check.sh" >/dev/null 2>&1; then
+        if timeout 30 bash "$SCRIPT_DIR/scripts/maintenance/health_check.sh" >/dev/null 2>&1; then
             log_pass "health_check.sh 執行正常"
         else
             local exit_code=$?
@@ -186,9 +186,9 @@ test_health_check_functionality() {
 test_update_functionality() {
     log_test "測試更新腳本功能..."
     
-    if [ -f "$SCRIPT_DIR/scripts/update_tools.sh" ]; then
+    if [ -f "$SCRIPT_DIR/scripts/maintenance/update_tools.sh" ]; then
         # 檢查腳本語法
-        if bash -n "$SCRIPT_DIR/scripts/update_tools.sh"; then
+        if bash -n "$SCRIPT_DIR/scripts/maintenance/update_tools.sh"; then
             log_pass "update_tools.sh 語法正確"
         else
             log_fail "update_tools.sh 語法錯誤"
@@ -206,9 +206,9 @@ test_update_functionality() {
 test_python_script_functionality() {
     log_test "測試 Python 相關腳本功能..."
     
-    if [ -f "$SCRIPT_DIR/scripts/python_setup.sh" ]; then
+    if [ -f "$SCRIPT_DIR/scripts/core/python_setup.sh" ]; then
         # 檢查 Python 安裝腳本
-        if bash -n "$SCRIPT_DIR/scripts/python_setup.sh"; then
+        if bash -n "$SCRIPT_DIR/scripts/core/python_setup.sh"; then
             log_pass "python_setup.sh 語法正確"
         else
             log_fail "python_setup.sh 語法錯誤"
@@ -250,12 +250,12 @@ test_script_dependencies() {
     log_test "測試腳本間依賴關係..."
     
     local scripts=(
-        "scripts/python_setup.sh"
-        "scripts/terminal_setup.sh"
-        "scripts/base_tools.sh"
-        "scripts/dev_tools.sh"
-        "scripts/docker_setup.sh"
-        "scripts/monitoring_tools.sh"
+        "scripts/core/python_setup.sh"
+        "scripts/core/terminal_setup.sh"
+        "scripts/core/base_tools.sh"
+        "scripts/core/dev_tools.sh"
+        "scripts/core/docker_setup.sh"
+        "scripts/core/monitoring_tools.sh"
     )
     
     for script in "${scripts[@]}"; do
@@ -293,7 +293,7 @@ test_logging_and_backup() {
     # 測試備份功能（模擬）
     echo "test content" > "$test_dir/test_config"
     
-    if source "$SCRIPT_DIR/scripts/common.sh" 2>/dev/null; then
+    if source "$SCRIPT_DIR/scripts/core/common.sh" 2>/dev/null; then
         if declare -f backup_file >/dev/null 2>&1; then
             BACKUP_DIR="$test_dir/backup"
             if backup_file "$test_dir/test_config" >/dev/null 2>&1; then

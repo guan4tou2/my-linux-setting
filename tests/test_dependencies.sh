@@ -2,7 +2,7 @@
 
 # 依賴測試工具
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-source "$SCRIPT_DIR/scripts/common.sh" 2>/dev/null || {
+source "$SCRIPT_DIR/scripts/core/common.sh" 2>/dev/null || {
     # 基礎顏色定義（如果無法載入 common.sh）
     RED='\033[0;31m'
     GREEN='\033[0;32m'

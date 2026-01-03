@@ -33,7 +33,7 @@ log_warn() {
 test_script_syntax() {
     log_test "測試腳本語法..."
     
-    for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*.sh; do
+    for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*/*.sh; do
         if [ -f "$script" ]; then
             if bash -n "$script" 2>/dev/null; then
                 log_pass "$(basename "$script") 語法正確"
@@ -48,7 +48,7 @@ test_script_syntax() {
 test_script_permissions() {
     log_test "測試腳本權限..."
     
-    for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*.sh; do
+    for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*/*.sh; do
         if [ -f "$script" ]; then
             if [ -x "$script" ]; then
                 log_pass "$(basename "$script") 具有執行權限"
@@ -63,8 +63,8 @@ test_script_permissions() {
 test_common_library() {
     log_test "測試共用函數庫..."
     
-    if [ -f "$SCRIPT_DIR/scripts/common.sh" ]; then
-        if source "$SCRIPT_DIR/scripts/common.sh" 2>/dev/null; then
+    if [ -f "$SCRIPT_DIR/scripts/core/common.sh" ]; then
+        if source "$SCRIPT_DIR/scripts/core/common.sh" 2>/dev/null; then
             log_pass "common.sh 載入成功"
             
             # 測試關鍵函數是否存在
@@ -94,11 +94,11 @@ test_required_files() {
     required_files=(
         "install.sh"
         "requirements.txt"
-        "scripts/common.sh"
-        "scripts/python_setup.sh"
-        "scripts/terminal_setup.sh"
-        "scripts/health_check.sh"
-        "scripts/update_tools.sh"
+        "scripts/core/common.sh"
+        "scripts/core/python_setup.sh"
+        "scripts/core/terminal_setup.sh"
+        "scripts/maintenance/health_check.sh"
+        "scripts/maintenance/update_tools.sh"
         "README.md"
     )
     
