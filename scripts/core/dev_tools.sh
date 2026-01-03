@@ -21,9 +21,10 @@ else
     sudo apt-get update
 fi
 
-# 安裝開發工具
-dev_packages="vim neovim nodejs npm unzip cargo gem lua5.3 pipx httpie"
+# 安裝開發工具（從列表中移除 cargo，將單獨使用 rustup 安裝）
+dev_packages="vim neovim nodejs npm unzip gem lua5.3 pipx httpie"
 
+show_progress "安裝基礎開發工具"
 # 使用批量安裝（支持並行）
 if command -v install_packages_batch >/dev/null 2>&1; then
     IFS=' ' read -r -a dev_packages_array <<< "$dev_packages"
@@ -42,6 +43,29 @@ else
             sudo apt-get install -y "$pkg"
         fi
     done
+fi
+
+# 使用 rustup 安裝 Rust 和 cargo（比 APT 快得多）
+show_progress "安裝 Rust 和 cargo"
+if ! command -v cargo >/dev/null 2>&1; then
+    log_info "使用 rustup 安裝 Rust 和 cargo（官方推薦方式）"
+    log_info "這比通過 APT 安裝快得多，且版本更新"
+
+    # 下載並安裝 rustup（非互動模式）
+    if curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path; then
+        # 載入 cargo 環境
+        if [ -f "$HOME/.cargo/env" ]; then
+            source "$HOME/.cargo/env"
+        fi
+        export PATH="$HOME/.cargo/bin:$PATH"
+
+        log_success "Rust 和 cargo 安裝成功 (rustup)"
+        log_info "已安裝版本：$(rustc --version 2>/dev/null || echo '未知')"
+    else
+        log_warning "Rust 安裝失敗，如需手動安裝請訪問：https://rustup.rs"
+    fi
+else
+    log_success "cargo 已安裝，跳過"
 fi
 
 # 安裝 LazyVim 配置

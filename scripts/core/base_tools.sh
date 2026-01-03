@@ -146,39 +146,30 @@ if ! command -v lsd >/dev/null 2>&1; then
 fi
 
 # 安裝 tealdeer (快速 TLDR 客戶端)
-# 流程：優先使用 cargo 安裝，因為 tealdeer 在大多數 APT 倉庫中不可用
+# 注意：tealdeer 需要 cargo，但通過 APT 安裝 cargo 非常耗時
+# 如果用戶已經有 cargo 或在開發工具模組中安裝了 cargo，則會自動安裝 tealdeer
 if ! command -v tldr >/dev/null 2>&1; then
     log_info "安裝 tealdeer (快速 TLDR 客戶端，來源: github.com/dbrgn/tealdeer)"
 
     # 檢查是否有 cargo
-    if ! command -v cargo >/dev/null 2>&1; then
-        log_info "找不到 cargo，嘗試透過 APT 安裝 cargo..."
-        if command -v install_apt_package >/dev/null 2>&1; then
-            install_apt_package "cargo" || log_warning "cargo 安裝可能失敗"
-        else
-            sudo apt-get install -y cargo || log_warning "cargo 安裝可能失敗"
-        fi
-
-        # 嘗試載入 cargo 環境
-        if [ -f "$HOME/.cargo/env" ]; then
-            source "$HOME/.cargo/env"
-        fi
-        export PATH="$HOME/.cargo/bin:$PATH"
-    fi
-
-    # 使用 cargo 安裝 tealdeer
     if command -v cargo >/dev/null 2>&1; then
-        if cargo install tealdeer; then
+        # cargo 已存在，直接安裝 tealdeer
+        log_info "偵測到 cargo，開始安裝 tealdeer..."
+        if cargo install tealdeer 2>&1; then
             log_success "tealdeer 安裝成功 (cargo)"
             # 初始化 tldr 緩存
             if command -v tldr >/dev/null 2>&1; then
-                tldr --update || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
+                tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
             fi
         else
             log_warning "tealdeer 安裝失敗，可參考官方安裝說明：github.com/dbrgn/tealdeer"
         fi
     else
-        log_warning "找不到 cargo，略過自動安裝 tealdeer，可之後手動安裝"
+        # cargo 不存在，跳過 tealdeer 安裝以避免長時間等待
+        log_warning "找不到 cargo，跳過 tealdeer 安裝"
+        log_info "提示：如需安裝 tealdeer，請先安裝開發工具模組（包含 cargo）"
+        log_info "      或手動安裝：curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+        log_info "      然後執行：cargo install tealdeer"
     fi
 else
     log_success "tldr 命令已存在，跳過 tealdeer 安裝"
