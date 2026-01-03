@@ -48,7 +48,9 @@ if [ ! -d "$HOME/.oh-my-zsh" ]; then
     else
         sudo -k chsh -s "$(command -v zsh)" "$target_user"
     fi
-    if [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
+    if [ -f "$SCRIPT_DIR/../utils/secure_download.sh" ]; then
+        bash "$SCRIPT_DIR/../utils/secure_download.sh" oh-my-zsh
+    elif [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
         bash "$SCRIPT_DIR/utils/secure_download.sh" oh-my-zsh
     elif [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
         bash "$SCRIPT_DIR/secure_download.sh" oh-my-zsh

@@ -186,7 +186,10 @@ fi
 if ! command -v spf > /dev/null 2>&1; then
     printf "\033[36m安裝 superfile\033[0m\n"
     # 嘗試多個可能的路徑查找 secure_download.sh
-    if [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
+    # SCRIPT_DIR 通常是 scripts/core/，所以需要往上一層找 utils/
+    if [ -f "$SCRIPT_DIR/../utils/secure_download.sh" ]; then
+        bash "$SCRIPT_DIR/../utils/secure_download.sh" superfile
+    elif [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
         bash "$SCRIPT_DIR/utils/secure_download.sh" superfile
     elif [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
         bash "$SCRIPT_DIR/secure_download.sh" superfile
