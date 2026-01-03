@@ -1063,7 +1063,9 @@ install_arch_specific_package() {
             case "$package" in
                 "docker-ce")
                     log_info "ARM64: 安裝 Docker"
-                    if [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
+                    if [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
+                        bash "$SCRIPT_DIR/utils/secure_download.sh" docker
+                    elif [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
                         bash "$SCRIPT_DIR/secure_download.sh" docker
                     else
                         log_warning "找不到安全下載腳本，請手動安裝 Docker"

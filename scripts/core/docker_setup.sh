@@ -8,7 +8,9 @@ source "$SCRIPT_DIR/common.sh" || {
 }
 
 # 載入安全下載工具
-if [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
+if [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
+    source "$SCRIPT_DIR/utils/secure_download.sh"
+elif [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
     source "$SCRIPT_DIR/secure_download.sh"
 else
     log_error "安全下載工具不可用，無法安全安裝"

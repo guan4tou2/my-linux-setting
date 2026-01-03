@@ -166,18 +166,29 @@ test_config_management() {
 
 # 測試安全下載機制
 test_secure_download() {
-    if [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
+    local secure_download_path=""
+
+    # 嘗試多個可能的路徑
+    if [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
+        secure_download_path="$SCRIPT_DIR/utils/secure_download.sh"
+    elif [ -f "$SCRIPT_DIR/../utils/secure_download.sh" ]; then
+        secure_download_path="$SCRIPT_DIR/../utils/secure_download.sh"
+    elif [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
+        secure_download_path="$SCRIPT_DIR/secure_download.sh"
+    fi
+
+    if [ -n "$secure_download_path" ]; then
         # 測試腳本語法
-        bash -n "$SCRIPT_DIR/secure_download.sh" || return 1
-        
+        bash -n "$secure_download_path" || return 1
+
         # 測試安全檢查函數（如果可用）
-        if source "$SCRIPT_DIR/secure_download.sh" 2>/dev/null; then
+        if source "$secure_download_path" 2>/dev/null; then
             if declare -f verify_domain >/dev/null 2>&1; then
                 verify_domain "github.com" || return 1
             fi
         fi
     fi
-    
+
     return 0
 }
 

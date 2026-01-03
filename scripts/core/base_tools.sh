@@ -194,7 +194,10 @@ fi
 # 安裝 superfile（使用安全下載機制）
 if ! command -v spf > /dev/null 2>&1; then
     printf "\033[36m安裝 superfile\033[0m\n"
-    if [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
+    # 嘗試多個可能的路徑查找 secure_download.sh
+    if [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
+        bash "$SCRIPT_DIR/utils/secure_download.sh" superfile
+    elif [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
         bash "$SCRIPT_DIR/secure_download.sh" superfile
     else
         printf "\033[33m警告: 安全下載工具不可用，跳過 superfile 安裝\033[0m\n"

@@ -36,7 +36,11 @@ update_uv_packages() {
     show_progress "更新 uv 管理的套件"
     if check_command uv; then
         log_info "更新 uv 工具..."
-        if [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
+        if [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
+            bash "$SCRIPT_DIR/utils/secure_download.sh" uv
+        elif [ -f "$SCRIPT_DIR/../utils/secure_download.sh" ]; then
+            bash "$SCRIPT_DIR/../utils/secure_download.sh" uv
+        elif [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
             bash "$SCRIPT_DIR/secure_download.sh" uv
         else
             log_warning "找不到安全下載腳本，跳過 uv 更新"

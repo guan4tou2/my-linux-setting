@@ -31,7 +31,9 @@ fi
 show_progress "安裝 uv Python 包管理器"
 if ! check_command uv; then
     log_info "安裝 uv (Python 包管理器)"
-    if [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
+    if [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
+        bash "$SCRIPT_DIR/utils/secure_download.sh" uv
+    elif [ -f "$SCRIPT_DIR/secure_download.sh" ]; then
         bash "$SCRIPT_DIR/secure_download.sh" uv
     else
         log_warning "找不到安全下載腳本，使用傳統安裝方式"
