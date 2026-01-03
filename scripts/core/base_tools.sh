@@ -19,8 +19,8 @@ else
     sudo apt-get update
 fi
 
-# 基礎套件（不再透過 APT 安裝 lsd，改用專門流程處理）
-base_packages="git curl wget ca-certificates gnupg2 software-properties-common build-essential pkg-config libssl-dev bat tldr lnav fzf ripgrep ipinfo"
+# 基礎套件（不再透過 APT 安裝 lsd 和 tealdeer，改用專門流程處理）
+base_packages="git curl wget ca-certificates gnupg2 software-properties-common build-essential pkg-config libssl-dev bat lnav fzf ripgrep ipinfo"
 
 for pkg in $base_packages; do
     if dpkg -l | grep -q "^ii  $pkg"; then
@@ -91,6 +91,45 @@ if ! command -v lsd >/dev/null 2>&1; then
             log_warning "仍然找不到 cargo，略過自動安裝 lsd，可之後手動安裝：參考 github.com/lsd-rs/lsd"
         fi
     fi
+fi
+
+# 安裝 tealdeer (快速 TLDR 客戶端)
+# 流程：優先使用 cargo 安裝，因為 tealdeer 在大多數 APT 倉庫中不可用
+if ! command -v tldr >/dev/null 2>&1; then
+    log_info "安裝 tealdeer (快速 TLDR 客戶端，來源: github.com/dbrgn/tealdeer)"
+
+    # 檢查是否有 cargo
+    if ! command -v cargo >/dev/null 2>&1; then
+        log_info "找不到 cargo，嘗試透過 APT 安裝 cargo..."
+        if command -v install_apt_package >/dev/null 2>&1; then
+            install_apt_package "cargo" || log_warning "cargo 安裝可能失敗"
+        else
+            sudo apt-get install -y cargo || log_warning "cargo 安裝可能失敗"
+        fi
+
+        # 嘗試載入 cargo 環境
+        if [ -f "$HOME/.cargo/env" ]; then
+            source "$HOME/.cargo/env"
+        fi
+        export PATH="$HOME/.cargo/bin:$PATH"
+    fi
+
+    # 使用 cargo 安裝 tealdeer
+    if command -v cargo >/dev/null 2>&1; then
+        if cargo install tealdeer; then
+            log_success "tealdeer 安裝成功 (cargo)"
+            # 初始化 tldr 緩存
+            if command -v tldr >/dev/null 2>&1; then
+                tldr --update || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
+            fi
+        else
+            log_warning "tealdeer 安裝失敗，可參考官方安裝說明：github.com/dbrgn/tealdeer"
+        fi
+    else
+        log_warning "找不到 cargo，略過自動安裝 tealdeer，可之後手動安裝"
+    fi
+else
+    log_success "tldr 命令已存在，跳過 tealdeer 安裝"
 fi
 
 # 設定 bat 別名
