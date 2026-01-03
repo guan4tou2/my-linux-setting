@@ -58,6 +58,23 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setti
 - `-v / --verbose`：顯示詳細日誌
 - `-h / --help`：顯示幫助訊息
 
+### 性能優化選項
+
+透過環境變數控制性能優化功能：
+
+```bash
+# 停用並行安裝（預設啟用）
+ENABLE_PARALLEL_INSTALL=false ./install.sh
+
+# 調整並行任務數（預設 4）
+PARALLEL_JOBS=8 ./install.sh
+```
+
+**優化功能：**
+
+- 並行安裝：同時安裝多個套件（提升速度約 30%）
+- APT 優化：自動配置 APT 並行下載與快取（提升速度約 20%）
+
 ---
 
 ## 🧩 安裝模組

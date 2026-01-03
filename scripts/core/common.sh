@@ -577,17 +577,39 @@ install_apt_package() {
     install_package "$@"
 }
 
-# 批量安裝包（簡化版，消除代碼重複）
+# 批量安裝包（支持並行模式）
 install_packages_batch() {
     local packages=("$@")
     local failed_packages=()
 
+    # 過濾已安裝的包
+    local to_install=()
     for pkg in "${packages[@]}"; do
         if check_package_installed "$pkg" 2>/dev/null; then
             log_info "$pkg 已安裝，跳過"
-            continue
+        else
+            to_install+=("$pkg")
         fi
+    done
 
+    # 如果沒有需要安裝的包，直接返回
+    if [ ${#to_install[@]} -eq 0 ]; then
+        log_info "所有包都已安裝"
+        return 0
+    fi
+
+    # 如果啟用並行安裝且包數量 >= 3，使用並行模式
+    if [ "${ENABLE_PARALLEL_INSTALL:-false}" = "true" ] && [ ${#to_install[@]} -ge 3 ]; then
+        log_info "使用並行模式安裝 ${#to_install[@]} 個套件"
+        # 對於 Debian 系列，使用並行安裝
+        if [ "$DISTRO_FAMILY" = "debian" ] && command -v install_apt_packages_parallel >/dev/null 2>&1; then
+            install_apt_packages_parallel "${to_install[@]}"
+            return $?
+        fi
+    fi
+
+    # 串行安裝（默認或不支持並行）
+    for pkg in "${to_install[@]}"; do
         if ! install_package "$pkg"; then
             log_warning "$pkg 安裝失敗，記錄並繼續"
             failed_packages+=("$pkg")

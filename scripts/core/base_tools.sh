@@ -64,31 +64,30 @@ case "$DISTRO_FAMILY" in
         ;;
 esac
 
-# 安裝基礎套件
-for pkg in $base_packages; do
-    if check_package_installed "$pkg" 2>/dev/null; then
-        printf "\033[36m$pkg 已安裝\033[0m\n"
-        continue
-    fi
+# 安裝基礎套件（使用批量安裝支持並行）
+if command -v install_packages_batch >/dev/null 2>&1; then
+    # 將空格分隔的字符串轉換為數組
+    IFS=' ' read -r -a packages_array <<< "$base_packages"
+    install_packages_batch "${packages_array[@]}" || log_warning "部分基礎套件安裝失敗"
+else
+    # 後備：逐個安裝
+    for pkg in $base_packages; do
+        if check_package_installed "$pkg" 2>/dev/null; then
+            printf "\033[36m$pkg 已安裝\033[0m\n"
+            continue
+        fi
 
-    if command -v install_package >/dev/null 2>&1; then
-        # 使用通用安裝函數（會自動尊重 TUI_MODE 和包管理器）
-        install_package "$pkg" || true
-    else
-        # 後備路徑：根據包管理器直接安裝
-        case "${PKG_MANAGER:-apt}" in
-            apt)
-                sudo apt-get install -y "$pkg" || true
-                ;;
-            dnf|yum)
-                sudo ${PKG_MANAGER} install -y "$pkg" || true
-                ;;
-            pacman)
-                sudo pacman -S --noconfirm "$pkg" || true
-                ;;
-        esac
-    fi
-done
+        if command -v install_package >/dev/null 2>&1; then
+            install_package "$pkg" || true
+        else
+            case "${PKG_MANAGER:-apt}" in
+                apt) sudo apt-get install -y "$pkg" || true ;;
+                dnf|yum) sudo ${PKG_MANAGER} install -y "$pkg" || true ;;
+                pacman) sudo pacman -S --noconfirm "$pkg" || true ;;
+            esac
+        fi
+    done
+fi
 
 # 安裝 lsd（next-gen ls）。
 # 流程：

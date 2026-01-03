@@ -16,9 +16,16 @@ init_progress 6
 show_progress "安裝 Python 基礎套件"
 python_packages="python3 python-is-python3 python3-pip python3-venv python3-dev python3-setuptools python3-neovim"
 
-for pkg in $python_packages; do
-    install_apt_package "$pkg"
-done
+# 使用批量安裝（支持並行）
+if command -v install_packages_batch >/dev/null 2>&1; then
+    IFS=' ' read -r -a py_packages_array <<< "$python_packages"
+    install_packages_batch "${py_packages_array[@]}" || log_warning "部分 Python 套件安裝失敗"
+else
+    # 後備：逐個安裝
+    for pkg in $python_packages; do
+        install_apt_package "$pkg"
+    done
+fi
 
 # 安裝 uv (現代 Python 包管理器)
 show_progress "安裝 uv Python 包管理器"

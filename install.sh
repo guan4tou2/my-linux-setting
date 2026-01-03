@@ -51,9 +51,14 @@ SCRIPTS_URL=${SCRIPTS_URL:-"$REPO_URL/scripts"}
 P10K_CONFIG_URL=${P10K_CONFIG_URL:-"$REPO_URL/.p10k.zsh"}
 REQUIREMENTS_URL=${REQUIREMENTS_URL:-"$REPO_URL/requirements.txt"}
 
+# 性能優化選項
+ENABLE_PARALLEL_INSTALL=${ENABLE_PARALLEL_INSTALL:-true}
+PARALLEL_JOBS=${PARALLEL_JOBS:-4}
+
 # 導出變數供子腳本使用
 export REPO_URL SCRIPTS_URL P10K_CONFIG_URL REQUIREMENTS_URL
 export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN
+export ENABLE_PARALLEL_INSTALL PARALLEL_JOBS
 
 # 載入共用函數庫
 SCRIPT_DIR="$PWD/scripts"
@@ -166,6 +171,11 @@ check_environment() {
     # 檢查是否為支援的發行版
     if [ "$DISTRO_FAMILY" = "unknown" ]; then
         log_warning "無法檢測 Linux 發行版，將嘗試使用預設設定"
+    fi
+
+    # 優化 APT 性能（Debian 系列）
+    if [ "$DISTRO_FAMILY" = "debian" ] && command -v optimize_apt_performance >/dev/null 2>&1; then
+        optimize_apt_performance || log_warning "APT 優化失敗，繼續安裝"
     fi
 
     # 檢查系統版本

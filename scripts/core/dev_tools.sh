@@ -23,18 +23,26 @@ fi
 
 # 安裝開發工具
 dev_packages="vim neovim nodejs npm unzip cargo gem lua5.3 pipx httpie"
-for pkg in $dev_packages; do
-    if dpkg -l | grep -q "^ii  $pkg"; then
-        printf "\033[36m$pkg 已安裝\033[0m\n"
-        continue
-    fi
 
-    if command -v install_apt_package >/dev/null 2>&1; then
-        install_apt_package "$pkg" || true
-    else
-        sudo apt-get install -y "$pkg"
-    fi
-done
+# 使用批量安裝（支持並行）
+if command -v install_packages_batch >/dev/null 2>&1; then
+    IFS=' ' read -r -a dev_packages_array <<< "$dev_packages"
+    install_packages_batch "${dev_packages_array[@]}" || log_warning "部分開發工具安裝失敗"
+else
+    # 後備：逐個安裝
+    for pkg in $dev_packages; do
+        if dpkg -l | grep -q "^ii  $pkg"; then
+            printf "\033[36m$pkg 已安裝\033[0m\n"
+            continue
+        fi
+
+        if command -v install_apt_package >/dev/null 2>&1; then
+            install_apt_package "$pkg" || true
+        else
+            sudo apt-get install -y "$pkg"
+        fi
+    done
+fi
 
 # 安裝 LazyVim 配置
 if [ ! -d ~/.config/nvim ]; then
