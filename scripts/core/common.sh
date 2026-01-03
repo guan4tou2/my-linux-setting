@@ -577,6 +577,32 @@ install_apt_package() {
     install_package "$@"
 }
 
+# 批量安裝包（簡化版，消除代碼重複）
+install_packages_batch() {
+    local packages=("$@")
+    local failed_packages=()
+
+    for pkg in "${packages[@]}"; do
+        if check_package_installed "$pkg" 2>/dev/null; then
+            log_info "$pkg 已安裝，跳過"
+            continue
+        fi
+
+        if ! install_package "$pkg"; then
+            log_warning "$pkg 安裝失敗，記錄並繼續"
+            failed_packages+=("$pkg")
+        fi
+    done
+
+    # 報告失敗的包
+    if [ ${#failed_packages[@]} -gt 0 ]; then
+        log_warning "以下包安裝失敗: ${failed_packages[*]}"
+        return 1
+    fi
+
+    return 0
+}
+
 # 通用系統更新函數
 update_system() {
     log_info "更新系統套件列表 (使用 ${PKG_MANAGER:-apt})"

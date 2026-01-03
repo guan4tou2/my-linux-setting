@@ -150,6 +150,16 @@ fi
 
 printf "\033[36m########## 終端機環境設定完成 ##########\n\033[m"
 
-# 重新載入 shell 設定
-# 注意：此命令會結束當前安裝腳本，因此 terminal 模組應該最後執行
-exec zsh -l 
+# 提示用戶切換到 zsh（不自動執行 exec，避免中斷安裝流程）
+log_success "終端機設定已完成！"
+log_info ""
+log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log_info "  ${GREEN}✓${NC} Zsh + Oh-My-Zsh + Powerlevel10k 已安裝"
+log_info "  ${GREEN}✓${NC} 插件已配置 (autosuggestions, syntax-highlighting 等)"
+log_info "  ${GREEN}✓${NC} 別名已設定 (lsd, bat 等)"
+log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+log_info ""
+log_info "${CYAN}下一步：${NC}請在所有模組安裝完成後，執行以下命令切換到 zsh："
+printf "\n    ${GREEN}exec zsh -l${NC}\n\n"
+log_info "或者重新登入系統以應用更改。"
+log_info "" 

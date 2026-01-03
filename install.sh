@@ -5,11 +5,10 @@
 # ==============================================================================
 
 # 解析命令行參數
-# 鏡像模式固定為全球官方源（不再提供 --mirror 選項）
-MIRROR_MODE="global"
 INSTALL_MODE="full"
 UPDATE_MODE=false
 VERBOSE=false
+DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -19,6 +18,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --update)
             UPDATE_MODE=true
+            shift
+            ;;
+        --dry-run)
+            DRY_RUN=true
             shift
             ;;
         -v|--verbose)
@@ -50,7 +53,7 @@ REQUIREMENTS_URL=${REQUIREMENTS_URL:-"$REPO_URL/requirements.txt"}
 
 # 導出變數供子腳本使用
 export REPO_URL SCRIPTS_URL P10K_CONFIG_URL REQUIREMENTS_URL
-export MIRROR_MODE INSTALL_MODE UPDATE_MODE VERBOSE DEBUG
+export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN
 
 # 載入共用函數庫
 SCRIPT_DIR="$PWD/scripts"
@@ -81,13 +84,14 @@ Linux Setting Scripts - 自動安裝腳本
 選項:
   --minimal                       最小安裝模式
   --update                        更新已安裝的組件
+  --dry-run                       預覽模式（不實際安裝）
   -v, --verbose                   顯示詳細日誌
   -h, --help                      顯示此幫助訊息
 
 範例:
-  $0                             # 標準安裝
-  $0 --mirror china              # 使用中國鏡像源
+  $0                             # 標準安裝（互動式選單）
   $0 --minimal                   # 最小安裝
+  $0 --dry-run                   # 預覽將要安裝的內容
   $0 --update                    # 更新模式
   $0 --verbose                   # 詳細模式
 
@@ -541,7 +545,71 @@ install_selected_modules() {
         return
     fi
 
+    # 計算要安裝的模組數量
+    local total_modules=0
+    local current_module=0
+    for module in base dev python monitoring docker terminal; do
+        case " $selected_modules " in
+            *" $module "*) total_modules=$((total_modules + 1)) ;;
+        esac
+    done
+
+    # 干運行模式：僅顯示將要安裝的內容
+    if [ "$DRY_RUN" = true ]; then
+        printf "\n${CYAN}========== 預覽模式 (Dry Run) ==========${NC}\n"
+        printf "${BLUE}將安裝以下 $total_modules 個模組：${NC}\n\n"
+
+        for module in base dev python monitoring docker terminal; do
+            case " $selected_modules " in
+                *" $module "*) ;;
+                *) continue ;;
+            esac
+
+            printf "${GREEN}[$module]${NC}\n"
+            case $module in
+                base)
+                    printf "  • git, curl, wget, build-essential\n"
+                    printf "  • lsd, bat, fzf, ripgrep\n"
+                    printf "  • tealdeer, superfile\n"
+                    ;;
+                dev)
+                    printf "  • neovim + lazyvim\n"
+                    printf "  • lazygit\n"
+                    printf "  • nodejs, cargo\n"
+                    ;;
+                python)
+                    printf "  • python3, pip\n"
+                    printf "  • uv (快速包管理器)\n"
+                    printf "  • ranger-fm, s-tui\n"
+                    ;;
+                terminal)
+                    printf "  • zsh + oh-my-zsh\n"
+                    printf "  • powerlevel10k 主題\n"
+                    printf "  • 多個 zsh 插件\n"
+                    ;;
+                monitoring)
+                    printf "  • btop, htop\n"
+                    printf "  • iftop, nethogs\n"
+                    printf "  • fail2ban\n"
+                    ;;
+                docker)
+                    printf "  • docker-ce\n"
+                    printf "  • lazydocker\n"
+                    ;;
+            esac
+            printf "\n"
+        done
+
+        printf "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+        printf "${BLUE}預估時間：${NC}約 10-15 分鐘\n"
+        printf "${BLUE}預估空間：${NC}約 500MB-1GB\n"
+        printf "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+        printf "\n${GREEN}提示：${NC}移除 --dry-run 參數即可開始實際安裝\n\n"
+        return 0
+    fi
+
     printf "${CYAN}開始安裝以下模組：$selected_modules${NC}\n"
+    printf "${BLUE}總共 $total_modules 個模組${NC}\n\n"
 
     # 為了確保依賴順序，實際安裝順序固定為：
     # 1. base       - 提供 git/curl/wget 等基礎工具與 APT 相關套件
@@ -549,12 +617,17 @@ install_selected_modules() {
     # 3. python     - 建立 Python/uv/虛擬環境，供終端工具使用
     # 4. monitoring - 安裝監控與安全工具
     # 5. docker     - 可選的 Docker 工具
-    # 6. terminal   - 最後安裝，因為會執行 exec zsh 重新載入 shell
+    # 6. terminal   - 最後安裝（不再自動 exec zsh）
     for module in base dev python monitoring docker terminal; do
         case " $selected_modules " in
             *" $module "*) ;;
             *) continue ;;
         esac
+
+        current_module=$((current_module + 1))
+        printf "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+        printf "${GREEN}進度: [$current_module/$total_modules]${NC} 安裝模組: ${BLUE}$module${NC}\n"
+        printf "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
 
         case $module in
             base) execute_script "core/base_tools.sh" "base" ;;
