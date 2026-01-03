@@ -1,10 +1,20 @@
 ## Linux 環境設定腳本（增強版）
 
-這是一套用來 **快速建立 Ubuntu / Debian 開發環境** 的安裝腳本，內建互動式選單、模組化安裝、錯誤回滾與詳細日誌，適合在新機、VM、WSL 或 CI 測試環境中快速複製一致的開發體驗。
+這是一套用來 **快速建立多種 Linux 發行版開發環境** 的安裝腳本，內建互動式選單、模組化安裝、錯誤回滾與詳細日誌，適合在新機、VM、WSL 或 CI 測試環境中快速複製一致的開發體驗。
+
+### 🐧 支援的 Linux 發行版
+
+- **Debian 系列**：Ubuntu、Debian、Kali Linux、Linux Mint、Pop!_OS、Elementary OS
+- **RHEL 系列**：Fedora、CentOS、RHEL、Rocky Linux、AlmaLinux
+- **Arch 系列**：Arch Linux、Manjaro、EndeavourOS、Garuda Linux
+- **SUSE 系列**：openSUSE、SLES（基本支援）
+
+腳本會自動檢測系統並使用對應的包管理器（apt、dnf、yum、pacman、zypper）。
 
 ### ✅ 主要特色
 
 - **一行指令遠端安裝**（透過 `bash -c "$(curl ...)"`）
+- **多發行版支援**：自動檢測並適配不同的 Linux 發行版
 - **互動式選單**：自由選擇要安裝的模組
 - **完整 Linux 開發環境**：Python / Docker / 終端 / 編輯器 / 監控工具
 - **安全機制**：備份舊設定、失敗時可回滾

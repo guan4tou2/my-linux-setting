@@ -149,17 +149,27 @@ cleanup() {
 # 增強的環境檢查函數
 check_environment() {
     log_info "檢查系統環境..."
-    
-    # 檢查系統類型
-    if [ ! -f /etc/os-release ] || ! grep -q 'Ubuntu\|Debian' /etc/os-release; then
-        log_error "此腳本僅支持 Ubuntu/Debian 系統"
-        exit 1
+
+    # 檢測發行版（如果 common.sh 已載入，變數已設定）
+    if [ -z "$DISTRO" ]; then
+        DISTRO=$(detect_distro 2>/dev/null || echo "unknown")
+        DISTRO_FAMILY=$(get_distro_family "$DISTRO" 2>/dev/null || echo "unknown")
+        PKG_MANAGER=$(get_package_manager "$DISTRO_FAMILY" 2>/dev/null || echo "apt")
     fi
-    
+
+    log_info "檢測到系統：$DISTRO ($DISTRO_FAMILY) - 包管理器：$PKG_MANAGER"
+
+    # 檢查是否為支援的發行版
+    if [ "$DISTRO_FAMILY" = "unknown" ]; then
+        log_warning "無法檢測 Linux 發行版，將嘗試使用預設設定"
+    fi
+
     # 檢查系統版本
-    local os_version
-    os_version=$(grep VERSION_ID /etc/os-release | cut -d'"' -f2)
-    log_info "檢測到系統版本: $os_version"
+    if [ -f /etc/os-release ]; then
+        local os_version
+        os_version=$(grep VERSION_ID /etc/os-release | cut -d'"' -f2 2>/dev/null || echo "unknown")
+        log_info "系統版本: $os_version"
+    fi
     
     # 檢查系統架構兼容性
     if ! check_architecture_compatibility; then
@@ -172,7 +182,20 @@ check_environment() {
         log_info "跳過 Python 版本檢查（環境變數設定）"
     elif ! check_python_version "3.8"; then
         log_warning "Python 版本不滿足要求，嘗試安裝 Python 3+"
-        if run_as_root apt-get update && run_as_root apt-get install -y python3 python3-venv python3-pip; then
+        # 使用通用安裝方式
+        if command -v update_system >/dev/null 2>&1; then
+            update_system
+        fi
+        if command -v install_package >/dev/null 2>&1; then
+            install_package python3 && install_package python3-pip
+        else
+            case "$PKG_MANAGER" in
+                apt) run_as_root apt-get install -y python3 python3-venv python3-pip ;;
+                dnf|yum) run_as_root $PKG_MANAGER install -y python3 python3-pip ;;
+                pacman) run_as_root pacman -S --noconfirm python python-pip ;;
+            esac
+        fi
+        if [ $? -eq 0 ]; then
             log_success "Python 3 安裝完成"
             # Try the check again, but don't fail if it still doesn't pass
             if check_python_version "3.8"; then
@@ -201,29 +224,35 @@ check_environment() {
     fi
     log_success "磁盤空間充足"
     
-    # 檢查必要命令
-    local required_commands="curl apt-get"
+    # 檢查必要命令（curl 是必須的，包管理器根據系統而定）
+    local required_commands="curl"
     local optional_commands="wget"
-    
+
     # Check if running as root or if sudo is available
     if [ "$EUID" -ne 0 ] && ! check_command "sudo"; then
         log_error "找不到必要的命令：sudo（或請以 root 身份運行）"
         exit 1
     fi
-    
+
+    # 檢查包管理器是否可用
+    if ! check_command "${PKG_MANAGER:-apt}"; then
+        log_error "找不到包管理器：${PKG_MANAGER}"
+        exit 1
+    fi
+
     for cmd in $required_commands; do
         if ! check_command "$cmd"; then
             log_error "找不到必要的命令：$cmd"
             exit 1
         fi
     done
-    
+
     for cmd in $optional_commands; do
         if ! check_command "$cmd"; then
             log_warning "建議安裝的命令未找到：$cmd（將嘗試自動安裝）"
-            # Try to install wget if missing
-            if command -v apt-get >/dev/null 2>&1; then
-                run_as_root apt-get update && run_as_root apt-get install -y wget >/dev/null 2>&1 || log_warning "無法安裝 $cmd"
+            # 使用通用安裝方式
+            if command -v install_package >/dev/null 2>&1; then
+                install_package wget 2>/dev/null || log_warning "無法安裝 $cmd"
             fi
         fi
     done

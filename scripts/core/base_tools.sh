@@ -8,32 +8,85 @@ source "$SCRIPT_DIR/common.sh" 2>/dev/null || {
 }
 
 log_info "########## 安裝基礎工具 ##########"
+log_info "檢測到系統：$DISTRO ($DISTRO_FAMILY) - 包管理器：$PKG_MANAGER"
 
-# 更新套件庫（使用 run_as_root + apt-get，TUI_MODE=quiet 時將自動隱藏細節）
-if command -v run_as_root >/dev/null 2>&1; then
-    # 寫入 ipinfo PPA（避免 sudo 直接出現在腳本裡）
-    run_as_root sh -c 'echo "deb [trusted=yes] https://ppa.ipinfo.net/ /" > /etc/apt/sources.list.d/ipinfo.ppa.list'
-    run_as_root apt-get update
-else
-    echo "deb [trusted=yes] https://ppa.ipinfo.net/ /" | sudo tee "/etc/apt/sources.list.d/ipinfo.ppa.list"
-    sudo apt-get update
+# 更新套件庫
+if [ "$DISTRO_FAMILY" = "debian" ]; then
+    # 僅在 Debian 系列（包括 Kali）上添加 ipinfo PPA
+    if command -v run_as_root >/dev/null 2>&1; then
+        run_as_root sh -c 'echo "deb [trusted=yes] https://ppa.ipinfo.net/ /" > /etc/apt/sources.list.d/ipinfo.ppa.list' 2>/dev/null || true
+    else
+        echo "deb [trusted=yes] https://ppa.ipinfo.net/ /" | sudo tee "/etc/apt/sources.list.d/ipinfo.ppa.list" >/dev/null 2>&1 || true
+    fi
 fi
 
-# 基礎套件（不再透過 APT 安裝 lsd 和 tealdeer，改用專門流程處理）
-base_packages="git curl wget ca-certificates gnupg2 software-properties-common build-essential pkg-config libssl-dev bat lnav fzf ripgrep ipinfo"
+# 使用通用更新函數
+if command -v update_system >/dev/null 2>&1; then
+    update_system
+else
+    # 後備：直接更新
+    case "${PKG_MANAGER:-apt}" in
+        apt)
+            sudo apt-get update
+            ;;
+        dnf|yum)
+            sudo ${PKG_MANAGER} check-update || true
+            ;;
+        pacman)
+            sudo pacman -Sy
+            ;;
+    esac
+fi
 
+# 基礎套件（根據發行版系列調整）
+# 這些是核心工具，lsd 和 tealdeer 會透過 cargo 單獨處理
+case "$DISTRO_FAMILY" in
+    debian)
+        # Debian/Ubuntu/Kali
+        base_packages="git curl wget ca-certificates gnupg2 build-essential pkg-config libssl-dev bat lnav fzf ripgrep"
+        # Kali 特殊處理：通常已包含很多工具
+        if [ "$DISTRO" != "kali" ]; then
+            base_packages="$base_packages software-properties-common ipinfo"
+        fi
+        ;;
+    rhel)
+        # Fedora/CentOS/RHEL
+        base_packages="git curl wget ca-certificates gnupg2 gcc gcc-c++ make pkgconfig openssl-devel bat fzf ripgrep"
+        ;;
+    arch)
+        # Arch/Manjaro
+        base_packages="git curl wget ca-certificates gnupg base-devel pkg-config openssl bat fzf ripgrep"
+        ;;
+    *)
+        # 未知系統，使用最小集合
+        base_packages="git curl wget"
+        log_warning "未知的發行版系列，僅安裝基本工具"
+        ;;
+esac
+
+# 安裝基礎套件
 for pkg in $base_packages; do
-    if dpkg -l | grep -q "^ii  $pkg"; then
+    if check_package_installed "$pkg" 2>/dev/null; then
         printf "\033[36m$pkg 已安裝\033[0m\n"
         continue
     fi
 
-    if command -v install_apt_package >/dev/null 2>&1; then
-        # 使用共用安裝函數（會自動尊重 TUI_MODE）
-        install_apt_package "$pkg" || true
+    if command -v install_package >/dev/null 2>&1; then
+        # 使用通用安裝函數（會自動尊重 TUI_MODE 和包管理器）
+        install_package "$pkg" || true
     else
-        # 後備路徑：直接用 apt-get 安裝
-        sudo apt-get install -y "$pkg"
+        # 後備路徑：根據包管理器直接安裝
+        case "${PKG_MANAGER:-apt}" in
+            apt)
+                sudo apt-get install -y "$pkg" || true
+                ;;
+            dnf|yum)
+                sudo ${PKG_MANAGER} install -y "$pkg" || true
+                ;;
+            pacman)
+                sudo pacman -S --noconfirm "$pkg" || true
+                ;;
+        esac
     fi
 done
 

@@ -135,13 +135,103 @@ show_progress() {
 # 系統檢查函數
 # ==============================================================================
 
+# 發行版檢測
+# 支援的發行版：Ubuntu, Debian, Kali, Fedora, CentOS, Rocky, Alma, Arch, Manjaro
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        echo "$ID"
+    elif [ -f /etc/lsb-release ]; then
+        . /etc/lsb-release
+        echo "$DISTRIB_ID" | tr '[:upper:]' '[:lower:]'
+    elif [ -f /etc/debian_version ]; then
+        echo "debian"
+    elif [ -f /etc/redhat-release ]; then
+        echo "rhel"
+    elif [ -f /etc/arch-release ]; then
+        echo "arch"
+    else
+        echo "unknown"
+    fi
+}
+
+# 獲取發行版系列（用於判斷包管理器）
+get_distro_family() {
+    local distro="${1:-$(detect_distro)}"
+    case "$distro" in
+        ubuntu|debian|kali|linuxmint|pop|elementary)
+            echo "debian"
+            ;;
+        fedora|centos|rhel|rocky|alma|amazonlinux)
+            echo "rhel"
+            ;;
+        arch|manjaro|endeavouros|garuda)
+            echo "arch"
+            ;;
+        opensuse*|sles)
+            echo "suse"
+            ;;
+        *)
+            echo "unknown"
+            ;;
+    esac
+}
+
+# 獲取包管理器
+get_package_manager() {
+    local family="${1:-$(get_distro_family)}"
+    case "$family" in
+        debian)
+            echo "apt"
+            ;;
+        rhel)
+            if command -v dnf >/dev/null 2>&1; then
+                echo "dnf"
+            else
+                echo "yum"
+            fi
+            ;;
+        arch)
+            echo "pacman"
+            ;;
+        suse)
+            echo "zypper"
+            ;;
+        *)
+            echo "unknown"
+            ;;
+    esac
+}
+
+# 檢測當前系統
+DISTRO=$(detect_distro)
+DISTRO_FAMILY=$(get_distro_family "$DISTRO")
+PKG_MANAGER=$(get_package_manager "$DISTRO_FAMILY")
+
 check_command() {
     command -v "$1" >/dev/null 2>&1
 }
 
 check_package_installed() {
     local package="$1"
-    dpkg -l | grep -q "^ii  $package" 2>/dev/null
+    case "${PKG_MANAGER:-apt}" in
+        apt)
+            dpkg -l | grep -q "^ii  $package" 2>/dev/null
+            ;;
+        dnf|yum)
+            rpm -q "$package" >/dev/null 2>&1
+            ;;
+        pacman)
+            pacman -Q "$package" >/dev/null 2>&1
+            ;;
+        zypper)
+            rpm -q "$package" >/dev/null 2>&1
+            ;;
+        *)
+            log_warning "不支援的包管理器，無法檢查套件"
+            return 1
+            ;;
+    esac
 }
 
 check_python_version() {
@@ -424,21 +514,46 @@ install_with_fallback() {
     fi
 }
 
-install_apt_package() {
+# 通用包安裝函數（支援多種包管理器）
+install_package() {
     local package="$1"
     local force="${2:-false}"
-    
+
     if [ "$force" = "false" ] && check_package_installed "$package"; then
         log_info "$package 已安裝"
         return 0
     fi
-    
-    log_info "安裝 $package"
+
+    log_info "安裝 $package (使用 ${PKG_MANAGER:-apt})"
+
+    # 根據包管理器選擇安裝命令
+    local install_cmd
+    case "${PKG_MANAGER:-apt}" in
+        apt)
+            install_cmd="sudo apt install -y"
+            ;;
+        dnf)
+            install_cmd="sudo dnf install -y"
+            ;;
+        yum)
+            install_cmd="sudo yum install -y"
+            ;;
+        pacman)
+            install_cmd="sudo pacman -S --noconfirm"
+            ;;
+        zypper)
+            install_cmd="sudo zypper install -y"
+            ;;
+        *)
+            log_error "不支援的包管理器: ${PKG_MANAGER}"
+            return 1
+            ;;
+    esac
 
     # 根據 TUI_MODE 控制輸出詳細程度
     if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-        # 靜默模式：隱藏 apt 的詳細輸出（錯誤仍會透過返回值回報）
-        if sudo apt install -y "$package" >/dev/null 2>&1; then
+        # 靜默模式：隱藏詳細輸出
+        if $install_cmd "$package" >/dev/null 2>&1; then
             log_success "$package 安裝成功"
             return 0
         else
@@ -447,14 +562,66 @@ install_apt_package() {
         fi
     fi
 
-    # 一般模式：顯示完整 apt 安裝輸出
-    if sudo apt install -y "$package"; then
+    # 一般模式：顯示完整安裝輸出
+    if $install_cmd "$package"; then
         log_success "$package 安裝成功"
         return 0
     else
         log_error "$package 安裝失敗"
         return 1
     fi
+}
+
+# 保留 install_apt_package 以保持向後兼容
+install_apt_package() {
+    install_package "$@"
+}
+
+# 通用系統更新函數
+update_system() {
+    log_info "更新系統套件列表 (使用 ${PKG_MANAGER:-apt})"
+
+    case "${PKG_MANAGER:-apt}" in
+        apt)
+            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
+                sudo apt-get update >/dev/null 2>&1
+            else
+                sudo apt-get update
+            fi
+            ;;
+        dnf)
+            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
+                sudo dnf check-update >/dev/null 2>&1 || true
+            else
+                sudo dnf check-update || true
+            fi
+            ;;
+        yum)
+            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
+                sudo yum check-update >/dev/null 2>&1 || true
+            else
+                sudo yum check-update || true
+            fi
+            ;;
+        pacman)
+            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
+                sudo pacman -Sy >/dev/null 2>&1
+            else
+                sudo pacman -Sy
+            fi
+            ;;
+        zypper)
+            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
+                sudo zypper refresh >/dev/null 2>&1
+            else
+                sudo zypper refresh
+            fi
+            ;;
+        *)
+            log_warning "不支援的包管理器，無法更新系統"
+            return 1
+            ;;
+    esac
 }
 
 # ==============================================================================
