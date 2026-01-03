@@ -342,13 +342,26 @@ main() {
     
     if [ "$REMOTE_INSTALL" = true ]; then
         printf "${CYAN}########## 下載安裝腳本 ##########${NC}\n"
-        
-        # 下載所有模組腳本（common.sh 已經在初始化時下載）
-        for script in python_setup.sh docker_setup.sh terminal_setup.sh base_tools.sh dev_tools.sh monitoring_tools.sh secure_download.sh update_tools.sh; do
-            printf "${BLUE}下載 $script...${NC}\n"
-            curl -fsSL "$SCRIPTS_URL/$script" -o "$SCRIPT_DIR/$script"
-            chmod +x "$SCRIPT_DIR/$script"
+
+        # 創建必要的子目錄
+        mkdir -p "$SCRIPT_DIR/core" "$SCRIPT_DIR/utils" "$SCRIPT_DIR/maintenance"
+
+        # 下載核心模組腳本（common.sh 已經在初始化時下載）
+        for script in python_setup.sh docker_setup.sh terminal_setup.sh base_tools.sh dev_tools.sh monitoring_tools.sh; do
+            printf "${BLUE}下載 core/$script...${NC}\n"
+            curl -fsSL "$SCRIPTS_URL/core/$script" -o "$SCRIPT_DIR/core/$script"
+            chmod +x "$SCRIPT_DIR/core/$script"
         done
+
+        # 下載工具腳本
+        printf "${BLUE}下載 utils/secure_download.sh...${NC}\n"
+        curl -fsSL "$SCRIPTS_URL/utils/secure_download.sh" -o "$SCRIPT_DIR/utils/secure_download.sh"
+        chmod +x "$SCRIPT_DIR/utils/secure_download.sh"
+
+        # 下載維護腳本
+        printf "${BLUE}下載 maintenance/update_tools.sh...${NC}\n"
+        curl -fsSL "$SCRIPTS_URL/maintenance/update_tools.sh" -o "$SCRIPT_DIR/maintenance/update_tools.sh"
+        chmod +x "$SCRIPT_DIR/maintenance/update_tools.sh"
     fi
     
     # 進入主循環
