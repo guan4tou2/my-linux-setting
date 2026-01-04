@@ -89,87 +89,105 @@ else
     done
 fi
 
-# 安裝 lsd（next-gen ls）。
-# 流程：
-#   1. 優先嘗試使用 APT 安裝預編譯版本（Ubuntu 21.10+）
-#   2. 如果 APT 安裝失敗，才使用 cargo 編譯安裝
+# 安裝 lsd（next-gen ls）
+# 優先使用 Homebrew 安裝（避免 cargo 編譯耗時）
 if ! command -v lsd >/dev/null 2>&1; then
     log_info "安裝 lsd (下一代 ls 指令，來源: github.com/lsd-rs/lsd)"
 
-    # 方法 1: 優先使用 APT 安裝（避免 Rust 版本問題）
-    if command -v install_apt_package >/dev/null 2>&1; then
-        if install_apt_package "lsd" 2>/dev/null; then
-            log_success "lsd 安裝成功 (apt)"
+    # 方法 1: 優先使用 Homebrew 安裝（快速且無需編譯）
+    if command -v brew >/dev/null 2>&1; then
+        if command -v install_brew_package >/dev/null 2>&1; then
+            if install_brew_package "lsd"; then
+                log_success "lsd 安裝成功 (brew)"
+            else
+                log_warning "Homebrew 安裝失敗，嘗試使用 APT..."
+                BREW_FAILED=1
+            fi
         else
-            log_info "APT 安裝失敗，嘗試使用 cargo..."
-            # 方法 2 的標記
-            APT_FAILED=1
+            if brew install lsd >/dev/null 2>&1; then
+                log_success "lsd 安裝成功 (brew)"
+            else
+                log_warning "Homebrew 安裝失敗，嘗試使用 APT..."
+                BREW_FAILED=1
+            fi
         fi
     else
-        if sudo apt-get install -y lsd 2>/dev/null; then
-            log_success "lsd 安裝成功 (apt)"
-        else
-            log_info "APT 安裝失敗，嘗試使用 cargo..."
-            APT_FAILED=1
-        fi
+        log_info "Homebrew 未安裝，嘗試使用 APT..."
+        BREW_FAILED=1
     fi
 
-    # 方法 2: 如果 APT 失敗，使用 cargo 編譯安裝
-    if [ "${APT_FAILED:-0}" = "1" ]; then
-        # 若沒有 cargo，先安裝
-        if ! command -v cargo >/dev/null 2>&1; then
-            log_info "找不到 cargo，嘗試透過 APT 安裝 cargo..."
-            if command -v install_apt_package >/dev/null 2>&1; then
-                install_apt_package "cargo" || log_warning "cargo 安裝可能失敗，稍後再檢查"
+    # 方法 2: 如果 Homebrew 失敗或不可用，嘗試 APT
+    if [ "${BREW_FAILED:-0}" = "1" ]; then
+        if command -v install_apt_package >/dev/null 2>&1; then
+            if install_apt_package "lsd" 2>/dev/null; then
+                log_success "lsd 安裝成功 (apt)"
             else
-                sudo apt-get install -y cargo || log_warning "cargo 安裝可能失敗，稍後再檢查"
-            fi
-
-            # 嘗試載入 cargo 環境導出
-            if [ -f "$HOME/.cargo/env" ]; then
-                source "$HOME/.cargo/env"
-            fi
-            export PATH="$HOME/.cargo/bin:$PATH"
-        fi
-
-        # 再次檢查 cargo 是否可用
-        if command -v cargo >/dev/null 2>&1; then
-            if cargo install lsd; then
-                log_success "lsd 安裝成功 (cargo)"
-            else
-                log_warning "lsd 安裝失敗 (cargo)，可參考官方安裝說明：github.com/lsd-rs/lsd"
+                log_warning "lsd 安裝失敗，建議安裝 Homebrew 以獲取更好的支援"
+                log_info "安裝 Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
             fi
         else
-            log_warning "仍然找不到 cargo，略過自動安裝 lsd，可之後手動安裝：參考 github.com/lsd-rs/lsd"
+            if sudo apt-get install -y lsd 2>/dev/null; then
+                log_success "lsd 安裝成功 (apt)"
+            else
+                log_warning "lsd 安裝失敗，建議安裝 Homebrew 以獲取更好的支援"
+            fi
         fi
     fi
 fi
 
 # 安裝 tealdeer (快速 TLDR 客戶端)
-# 注意：tealdeer 需要 cargo，但通過 APT 安裝 cargo 非常耗時
-# 如果用戶已經有 cargo 或在開發工具模組中安裝了 cargo，則會自動安裝 tealdeer
+# 優先使用 Homebrew 安裝（避免 cargo 編譯耗時）
 if ! command -v tldr >/dev/null 2>&1; then
     log_info "安裝 tealdeer (快速 TLDR 客戶端，來源: github.com/dbrgn/tealdeer)"
 
-    # 檢查是否有 cargo
-    if command -v cargo >/dev/null 2>&1; then
-        # cargo 已存在，直接安裝 tealdeer
-        log_info "偵測到 cargo，開始安裝 tealdeer..."
-        if cargo install tealdeer 2>&1; then
-            log_success "tealdeer 安裝成功 (cargo)"
-            # 初始化 tldr 緩存
-            if command -v tldr >/dev/null 2>&1; then
-                tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
+    # 方法 1: 優先使用 Homebrew 安裝（快速且無需編譯）
+    if command -v brew >/dev/null 2>&1; then
+        if command -v install_brew_package >/dev/null 2>&1; then
+            if install_brew_package "tealdeer"; then
+                log_success "tealdeer 安裝成功 (brew)"
+                # 初始化 tldr 緩存
+                if command -v tldr >/dev/null 2>&1; then
+                    tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
+                fi
+            else
+                log_warning "Homebrew 安裝失敗，嘗試使用 cargo..."
+                BREW_FAILED=1
             fi
         else
-            log_warning "tealdeer 安裝失敗，可參考官方安裝說明：github.com/dbrgn/tealdeer"
+            if brew install tealdeer >/dev/null 2>&1; then
+                log_success "tealdeer 安裝成功 (brew)"
+                # 初始化 tldr 緩存
+                if command -v tldr >/dev/null 2>&1; then
+                    tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
+                fi
+            else
+                log_warning "Homebrew 安裝失敗，嘗試使用 cargo..."
+                BREW_FAILED=1
+            fi
         fi
     else
-        # cargo 不存在，跳過 tealdeer 安裝以避免長時間等待
-        log_warning "找不到 cargo，跳過 tealdeer 安裝"
-        log_info "提示：如需安裝 tealdeer，請先安裝開發工具模組（包含 cargo）"
-        log_info "      或手動安裝：curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-        log_info "      然後執行：cargo install tealdeer"
+        log_info "Homebrew 未安裝，嘗試使用 cargo..."
+        BREW_FAILED=1
+    fi
+
+    # 方法 2: 如果 Homebrew 失敗或不可用，嘗試使用 cargo
+    if [ "${BREW_FAILED:-0}" = "1" ]; then
+        if command -v cargo >/dev/null 2>&1; then
+            log_info "偵測到 cargo，開始安裝 tealdeer..."
+            if cargo install tealdeer 2>&1; then
+                log_success "tealdeer 安裝成功 (cargo)"
+                # 初始化 tldr 緩存
+                if command -v tldr >/dev/null 2>&1; then
+                    tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
+                fi
+            else
+                log_warning "tealdeer 安裝失敗"
+            fi
+        else
+            log_warning "找不到 cargo 且 Homebrew 不可用，跳過 tealdeer 安裝"
+            log_info "建議安裝 Homebrew 以獲取更好的支援"
+            log_info "安裝命令: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        fi
     fi
 else
     log_success "tldr 命令已存在，跳過 tealdeer 安裝"

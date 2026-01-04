@@ -178,6 +178,49 @@ check_environment() {
         optimize_apt_performance || log_warning "APT 優化失敗，繼續安裝"
     fi
 
+    # 檢測並啟用 TUI（如果可用）
+    if [ -t 0 ] && [ "${INSTALL_MODE}" != "minimal" ]; then
+        if command -v ensure_tui_available >/dev/null 2>&1; then
+            ensure_tui_available && log_success "TUI 模式已啟用" || log_info "使用命令行模式"
+        fi
+    fi
+
+    # 檢查並提示安裝 Homebrew（可選）
+    if ! command -v brew >/dev/null 2>&1; then
+        log_info "檢測到系統未安裝 Homebrew"
+        log_info "Homebrew 可以簡化某些工具的安裝（如 lsd、tealdeer、lazygit 等）"
+
+        # 如果不是非互動模式，詢問用戶
+        if [ -t 0 ] && [ "${INSTALL_MODE}" != "minimal" ]; then
+            local install_brew_answer=""
+
+            # 嘗試使用 TUI 對話框
+            if [ "$USE_TUI" = "true" ] && command -v tui_yesno >/dev/null 2>&1; then
+                if tui_yesno "Homebrew 安裝" "Homebrew 可以簡化工具安裝並節省編譯時間。\n\n是否要安裝 Homebrew？\n\n建議：如果您要安裝 lsd、tealdeer、Rust、Neovim、Lazygit 等工具，建議安裝 Homebrew。" "no"; then
+                    install_brew_answer="y"
+                else
+                    install_brew_answer="n"
+                fi
+            else
+                # 命令行模式
+                printf "${YELLOW}是否要安裝 Homebrew？${NC} [y/N]: "
+                read -r install_brew_answer
+            fi
+
+            if [[ "$install_brew_answer" =~ ^[Yy]$ ]]; then
+                if command -v ensure_homebrew_installed >/dev/null 2>&1; then
+                    ensure_homebrew_installed || log_warning "Homebrew 安裝失敗，將使用其他方式安裝工具"
+                else
+                    log_warning "找不到 Homebrew 安裝函數，跳過"
+                fi
+            else
+                log_info "跳過 Homebrew 安裝，將使用傳統方式安裝工具"
+            fi
+        fi
+    else
+        log_success "檢測到 Homebrew 已安裝，將優先使用 brew 安裝工具"
+    fi
+
     # 檢查系統版本
     if [ -f /etc/os-release ]; then
         local os_version
@@ -366,30 +409,76 @@ main() {
     
     # 進入主循環
     while true; do
-        show_menu
-        read -r input
-        case $input in
-            [0-9]*)
-                for num in $input; do
-                    add_module "$num"
-                done
-                ;;
-            i|I)
+        # 如果啟用 TUI，使用 checklist 進行模組選擇
+        if [ "$USE_TUI" = "true" ] && command -v tui_checklist >/dev/null 2>&1; then
+            # 使用 TUI checklist 選擇模組
+            local module_selection
+            module_selection=$(tui_checklist "Linux 環境設定安裝程序" \
+                "請使用空格鍵選擇要安裝的模組，方向鍵移動，Enter 確認：" \
+                "python|Python開發環境(python3,pip,uv,ranger)" \
+                "docker|Docker相關工具(docker-ce,lazydocker)" \
+                "base|基礎工具(git,lsd,bat,ripgrep,fzf)" \
+                "terminal|終端設定(zsh,oh-my-zsh,p10k)" \
+                "dev|開發工具(neovim,lazygit,rust,nodejs)" \
+                "monitoring|系統監控工具(btop,htop,fail2ban)")
+
+            # 如果用戶取消，詢問是否退出
+            if [ -z "$module_selection" ]; then
+                if tui_yesno "確認退出" "確定要退出安裝程序嗎？" "no"; then
+                    cleanup
+                    printf "${CYAN}退出安裝程序${NC}\n"
+                    exit 0
+                else
+                    continue
+                fi
+            fi
+
+            # 解析選擇的模組（whiptail 返回格式: "python docker base"）
+            selected_modules=""
+            for item in $module_selection; do
+                # 去除可能的引號和提取模組名（在|之前）
+                module_name=$(echo "$item" | cut -d'|' -f1 | tr -d '"')
+                selected_modules="$selected_modules $module_name"
+            done
+
+            # 顯示選擇的模組
+            printf "\n${GREEN}已選擇的模組：$selected_modules${NC}\n\n"
+
+            # 確認安裝
+            if tui_yesno "確認安裝" "確定要安裝以下模組嗎？\n\n$selected_modules\n\n預估時間：10-15分鐘\n預估空間：500MB-1GB" "yes"; then
                 install_selected_modules
-                ;;
-            c|C)
+            else
                 selected_modules=""
-                printf "${CYAN}已清除所有選擇${NC}\n"
-                ;;
-            q|Q)
-                cleanup
-                printf "${CYAN}退出安裝程序${NC}\n"
-                exit 0
-                ;;
-            *)
-                printf "${RED}無效的輸入，請重試${NC}\n"
-                ;;
-        esac
+                printf "${CYAN}已取消安裝${NC}\n"
+                continue
+            fi
+        else
+            # 命令行模式：使用原有的菜單邏輯
+            show_menu
+            read -r input
+            case $input in
+                [0-9]*)
+                    for num in $input; do
+                        add_module "$num"
+                    done
+                    ;;
+                i|I)
+                    install_selected_modules
+                    ;;
+                c|C)
+                    selected_modules=""
+                    printf "${CYAN}已清除所有選擇${NC}\n"
+                    ;;
+                q|Q)
+                    cleanup
+                    printf "${CYAN}退出安裝程序${NC}\n"
+                    exit 0
+                    ;;
+                *)
+                    printf "${RED}無效的輸入，請重試${NC}\n"
+                    ;;
+            esac
+        fi
     done
 }
 
@@ -499,65 +588,73 @@ add_module() {
 
 # 顯示安裝報告
 show_installation_report() {
-    printf "\n${CYAN}########## 安裝報告 ##########${NC}\n"
-    printf "${GREEN}已安裝的模組：${NC}\n"
-    
-    if echo "$installed_modules" | grep -q "base"; then
-        printf "✓ 基礎工具\n"
-        printf "    git, curl, wget, lsd, bat 等\n"
-    fi
-    
-    if echo "$installed_modules" | grep -q "terminal"; then
-        printf "✓ 終端機設定\n"
-        printf "    zsh, oh-my-zsh, powerlevel10k\n"
-        printf "    zsh 插件：autosuggestions, syntax-highlighting, history-substring-search, you-should-use\n"
-    fi
-    
-    if echo "$installed_modules" | grep -q "dev"; then
-        printf "✓ 開發工具\n"
-        printf "    neovim (LazyVim)\n"
-        printf "    lazygit\n"
-        printf "    nodejs, npm, cargo, lua\n"
-    fi
-    
-    if echo "$installed_modules" | grep -q "monitoring"; then
-        printf "✓ 系統監控工具\n"
-        printf "    btop, iftop, nethogs, fail2ban\n"
-    fi
-    
-    if echo "$installed_modules" | grep -q "python"; then
-        printf "✓ Python 環境\n"
-        printf "    python3, pip, venv, uv\n"
-        printf "    ranger-fm, s-tui\n"
-    fi
-    
-    if echo "$installed_modules" | grep -q "docker"; then
-        printf "✓ Docker 相關工具\n"
-        printf "    docker\n"
-        printf "    lazydocker\n"
-    fi
-    
-    printf "\n${BLUE}設定檔位置：${NC}\n"
-    printf "zsh 配置：%s\n" "~/.zshrc"
-    printf "powerlevel10k 配置：%s\n" "~/.p10k.zsh"
-    printf "neovim 配置：%s\n" "~/.config/nvim"
-    
-    printf "\n${BLUE}別名設定：${NC}\n"
-    printf "nvim -> nv\n"
-    printf "lazydocker -> lzd\n"
-    
-    printf "\n${BLUE}備份位置：${NC}\n"
-    printf "%s\n" "$BACKUP_DIR"
-    
-    printf "\n${BLUE}日誌文件：${NC}\n"
-    printf "%s\n" "$LOG_FILE"
-    
-    printf "\n${CYAN}########## 安裝完成 ##########${NC}\n"
+    # 構建報告內容
+    local report=""
+    report+="========== 安裝報告 ==========\n\n"
+    report+="已安裝的模組：\n"
 
-    # 如果安裝了 terminal 模組，shell 會自動重新載入（exec zsh -l）
-    # 如果沒有安裝 terminal 模組，提示用戶重新開啟終端機
+    if echo "$installed_modules" | grep -q "base"; then
+        report+="✓ 基礎工具\n"
+        report+="    git, curl, wget, lsd, bat, ripgrep, fzf\n\n"
+    fi
+
+    if echo "$installed_modules" | grep -q "terminal"; then
+        report+="✓ 終端機設定\n"
+        report+="    zsh, oh-my-zsh, powerlevel10k\n"
+        report+="    插件: autosuggestions, syntax-highlighting等\n\n"
+    fi
+
+    if echo "$installed_modules" | grep -q "dev"; then
+        report+="✓ 開發工具\n"
+        report+="    neovim (LazyVim), lazygit\n"
+        report+="    nodejs, npm, cargo, lua\n\n"
+    fi
+
+    if echo "$installed_modules" | grep -q "monitoring"; then
+        report+="✓ 系統監控工具\n"
+        report+="    btop, htop, iftop, nethogs, fail2ban\n\n"
+    fi
+
+    if echo "$installed_modules" | grep -q "python"; then
+        report+="✓ Python 環境\n"
+        report+="    python3, pip, venv, uv\n"
+        report+="    ranger-fm, s-tui\n\n"
+    fi
+
+    if echo "$installed_modules" | grep -q "docker"; then
+        report+="✓ Docker 相關工具\n"
+        report+="    docker-ce, lazydocker\n\n"
+    fi
+
+    report+="設定檔位置：\n"
+    report+="  zsh: ~/.zshrc\n"
+    report+="  p10k: ~/.p10k.zsh\n"
+    report+="  neovim: ~/.config/nvim\n\n"
+
+    report+="別名設定：\n"
+    report+="  nvim -> nv\n"
+    report+="  lazydocker -> lzd\n\n"
+
+    report+="備份位置：$BACKUP_DIR\n"
+    report+="日誌文件：$LOG_FILE\n\n"
+
+    # 添加提示信息
     if ! echo "$installed_modules" | grep -q "terminal"; then
-        printf "${GREEN}請重新開啟終端機以套用所有更改${NC}\n"
+        report+="注意：請重新開啟終端機以套用所有更改"
+    fi
+
+    # 使用 TUI 或命令行顯示報告
+    if [ "$USE_TUI" = "true" ] && command -v tui_msgbox >/dev/null 2>&1; then
+        tui_msgbox "安裝完成" "$report"
+    else
+        # 命令行模式：使用原有的格式化輸出
+        printf "\n${CYAN}########## 安裝報告 ##########${NC}\n"
+        echo -e "$report" | sed 's/\\n/\n/g'
+        printf "${CYAN}########## 安裝完成 ##########${NC}\n"
+
+        if ! echo "$installed_modules" | grep -q "terminal"; then
+            printf "${GREEN}請重新開啟終端機以套用所有更改${NC}\n"
+        fi
     fi
 }
 

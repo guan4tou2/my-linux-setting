@@ -43,16 +43,45 @@ else
     log_info "Docker 已安裝"
 fi
 
-# 安全安裝 lazydocker  
+# 安裝 lazydocker
+# 優先使用 Homebrew 安裝（避免手動下載）
 show_progress "安裝 Lazydocker"
 if ! check_command lazydocker; then
-    log_info "安裝 Lazydocker（使用安全方式）"
-    install_lazydocker || {
-        log_warning "Lazydocker 安裝失敗，但不影響 Docker 使用"
-    }
-    
+    # 方法 1: 優先使用 Homebrew 安裝
+    if command -v brew >/dev/null 2>&1; then
+        log_info "使用 Homebrew 安裝 Lazydocker"
+        if command -v install_brew_package >/dev/null 2>&1; then
+            if install_brew_package "lazydocker"; then
+                log_success "Lazydocker 安裝成功 (brew)"
+            else
+                log_warning "Homebrew 安裝失敗，嘗試使用安全下載..."
+                BREW_FAILED=1
+            fi
+        else
+            if brew install lazydocker >/dev/null 2>&1; then
+                log_success "Lazydocker 安裝成功 (brew)"
+            else
+                log_warning "Homebrew 安裝失敗，嘗試使用安全下載..."
+                BREW_FAILED=1
+            fi
+        fi
+    else
+        log_info "Homebrew 未安裝，使用安全下載方式..."
+        BREW_FAILED=1
+    fi
+
+    # 方法 2: 如果 Homebrew 失敗或不可用，使用安全下載
+    if [ "${BREW_FAILED:-0}" = "1" ]; then
+        log_info "安裝 Lazydocker（使用安全下載方式）"
+        install_lazydocker || {
+            log_warning "Lazydocker 安裝失敗，但不影響 Docker 使用"
+        }
+    fi
+
     # 添加別名
-    safe_append_to_file 'alias lzd="lazydocker"' ~/.zshrc
+    if command -v lazydocker >/dev/null 2>&1; then
+        safe_append_to_file 'alias lzd="lazydocker"' ~/.zshrc
+    fi
 else
     log_info "Lazydocker 已安裝"
 fi

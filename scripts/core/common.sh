@@ -673,6 +673,205 @@ update_system() {
 }
 
 # ==============================================================================
+# Homebrew 包管理函數 (Linux)
+# ==============================================================================
+
+# 確保 Homebrew 已安裝（Linux 上的 Homebrew/Linuxbrew）
+ensure_homebrew_installed() {
+    # 檢查是否已安裝 Homebrew
+    if command -v brew >/dev/null 2>&1; then
+        log_success "Homebrew 已安裝: $(brew --version | head -n1)"
+        return 0
+    fi
+
+    log_info "檢測到系統未安裝 Homebrew，開始安裝..."
+    log_info "Homebrew 可以提供更新的軟體版本，並避免編譯耗時的工具"
+
+    # 安裝 Homebrew 所需的依賴
+    log_info "安裝 Homebrew 依賴項..."
+    local brew_deps="build-essential procps curl file git"
+
+    case "${PKG_MANAGER:-apt}" in
+        apt)
+            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
+                sudo apt-get install -y $brew_deps >/dev/null 2>&1 || log_warning "部分依賴安裝失敗"
+            else
+                sudo apt-get install -y $brew_deps || log_warning "部分依賴安裝失敗"
+            fi
+            ;;
+        dnf|yum)
+            sudo ${PKG_MANAGER} groupinstall -y 'Development Tools' || true
+            sudo ${PKG_MANAGER} install -y procps-ng curl file git || true
+            ;;
+        pacman)
+            sudo pacman -S --noconfirm base-devel procps-ng curl file git || true
+            ;;
+    esac
+
+    # 下載並安裝 Homebrew
+    log_info "下載並安裝 Homebrew（可能需要幾分鐘）..."
+
+    # 使用官方安裝腳本（非互動模式）
+    if NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+        log_success "Homebrew 安裝成功"
+
+        # 配置 Homebrew 環境變量
+        local brew_shellenv=""
+        if [ -d "/home/linuxbrew/.linuxbrew" ]; then
+            brew_shellenv="/home/linuxbrew/.linuxbrew/bin/brew shellenv"
+        elif [ -d "$HOME/.linuxbrew" ]; then
+            brew_shellenv="$HOME/.linuxbrew/bin/brew shellenv"
+        fi
+
+        if [ -n "$brew_shellenv" ]; then
+            # 載入到當前會話
+            eval "$($brew_shellenv)"
+
+            # 添加到 shell 配置文件
+            for rcfile in "$HOME/.bashrc" "$HOME/.zshrc"; do
+                if [ -f "$rcfile" ]; then
+                    if ! grep -q "brew shellenv" "$rcfile"; then
+                        echo "" >> "$rcfile"
+                        echo "# Homebrew 環境配置" >> "$rcfile"
+                        echo "eval \"\$($brew_shellenv)\"" >> "$rcfile"
+                        log_info "已添加 Homebrew 配置到 $rcfile"
+                    fi
+                fi
+            done
+
+            log_success "Homebrew 環境配置完成"
+            log_info "已安裝版本：$(brew --version | head -n1)"
+        else
+            log_warning "找不到 Homebrew 安裝目錄，可能需要手動配置環境變量"
+        fi
+
+        return 0
+    else
+        log_error "Homebrew 安裝失敗"
+        log_info "您可以稍後手動安裝：https://brew.sh"
+        return 1
+    fi
+}
+
+# 檢查 Homebrew 包是否已安裝
+check_brew_package_installed() {
+    local package="$1"
+
+    if ! command -v brew >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # 使用 brew list 檢查包是否已安裝
+    brew list "$package" >/dev/null 2>&1
+}
+
+# 安裝單個 Homebrew 包
+install_brew_package() {
+    local package="$1"
+    local force="${2:-false}"
+
+    # 確保 Homebrew 已安裝
+    if ! command -v brew >/dev/null 2>&1; then
+        log_warning "Homebrew 未安裝，無法安裝 $package"
+        return 1
+    fi
+
+    # 檢查是否已安裝
+    if [ "$force" = "false" ] && check_brew_package_installed "$package"; then
+        log_info "$package 已安裝 (brew)"
+        return 0
+    fi
+
+    log_info "安裝 $package (使用 Homebrew)"
+
+    # 根據 TUI_MODE 控制輸出詳細程度
+    if [ "${TUI_MODE:-normal}" = "quiet" ]; then
+        if brew install "$package" >/dev/null 2>&1; then
+            log_success "$package 安裝成功 (brew)"
+            return 0
+        else
+            log_error "$package 安裝失敗 (brew)"
+            return 1
+        fi
+    else
+        if brew install "$package"; then
+            log_success "$package 安裝成功 (brew)"
+            return 0
+        else
+            log_error "$package 安裝失敗 (brew)"
+            return 1
+        fi
+    fi
+}
+
+# 批量安裝 Homebrew 包
+install_brew_packages_batch() {
+    local packages=("$@")
+    local failed_packages=()
+
+    # 確保 Homebrew 已安裝
+    if ! command -v brew >/dev/null 2>&1; then
+        log_error "Homebrew 未安裝，無法批量安裝套件"
+        return 1
+    fi
+
+    # 過濾已安裝的包
+    local to_install=()
+    for pkg in "${packages[@]}"; do
+        if check_brew_package_installed "$pkg" 2>/dev/null; then
+            log_info "$pkg 已安裝，跳過 (brew)"
+        else
+            to_install+=("$pkg")
+        fi
+    done
+
+    # 如果沒有需要安裝的包，直接返回
+    if [ ${#to_install[@]} -eq 0 ]; then
+        log_info "所有 Homebrew 包都已安裝"
+        return 0
+    fi
+
+    log_info "批量安裝 ${#to_install[@]} 個 Homebrew 套件"
+
+    # Homebrew 自身支持批量安裝，一次性安裝所有包
+    if [ "${TUI_MODE:-normal}" = "quiet" ]; then
+        if brew install "${to_install[@]}" >/dev/null 2>&1; then
+            log_success "批量安裝成功 (brew)"
+            return 0
+        else
+            # 批量安裝失敗，逐個重試
+            log_warning "批量安裝失敗，嘗試逐個安裝..."
+            for pkg in "${to_install[@]}"; do
+                if ! install_brew_package "$pkg"; then
+                    failed_packages+=("$pkg")
+                fi
+            done
+        fi
+    else
+        if brew install "${to_install[@]}"; then
+            log_success "批量安裝成功 (brew)"
+            return 0
+        else
+            # 批量安裝失敗，逐個重試
+            log_warning "批量安裝失敗，嘗試逐個安裝..."
+            for pkg in "${to_install[@]}"; do
+                if ! install_brew_package "$pkg"; then
+                    failed_packages+=("$pkg")
+                fi
+            done
+        fi
+    fi
+
+    # 報告失敗的包
+    if [ ${#failed_packages[@]} -gt 0 ]; then
+        log_warning "以下 Homebrew 包安裝失敗: ${failed_packages[*]}"
+        return 1
+    fi
+
+    return 0
+}
+
+# ==============================================================================
 # 文件操作函數
 # ==============================================================================
 
@@ -1090,6 +1289,219 @@ install_arch_specific_package() {
 }
 
 # ==============================================================================
+# TUI (Text User Interface) 函數
+# ==============================================================================
+
+# 全局變數：控制是否使用 TUI
+USE_TUI="${USE_TUI:-auto}"  # auto/true/false
+
+# 檢測並確保 whiptail 可用
+ensure_tui_available() {
+    # 如果明確禁用 TUI，直接返回失敗
+    if [ "$USE_TUI" = "false" ]; then
+        return 1
+    fi
+
+    # 檢查 whiptail 是否可用
+    if command -v whiptail >/dev/null 2>&1; then
+        export USE_TUI="true"
+        return 0
+    fi
+
+    # 嘗試安裝 whiptail（通常在 newt 包中）
+    log_info "檢測到 whiptail 未安裝，嘗試安裝..."
+    if [ "$DISTRO_FAMILY" = "debian" ]; then
+        if install_package "whiptail" 2>/dev/null || install_package "newt" 2>/dev/null; then
+            if command -v whiptail >/dev/null 2>&1; then
+                log_success "whiptail 安裝成功，啟用 TUI 模式"
+                export USE_TUI="true"
+                return 0
+            fi
+        fi
+    fi
+
+    # 如果是 auto 模式且安裝失敗，降級到命令行
+    if [ "$USE_TUI" = "auto" ]; then
+        log_info "TUI 不可用，使用命令行模式"
+        export USE_TUI="false"
+        return 1
+    fi
+
+    # 明確要求 TUI 但不可用
+    log_warning "TUI 模式不可用，降級到命令行模式"
+    export USE_TUI="false"
+    return 1
+}
+
+# TUI 多選菜單（返回選中的項目，以空格分隔）
+tui_checklist() {
+    local title="$1"
+    local prompt="$2"
+    shift 2
+    local items=("$@")
+
+    # 檢查 TUI 是否可用
+    if [ "$USE_TUI" != "true" ]; then
+        return 1
+    fi
+
+    # 構建 whiptail checklist 參數
+    local checklist_args=()
+    local index=0
+    local default_state="ON"  # 預設全部選中
+
+    for item in "${items[@]}"; do
+        # 每個項目格式: "tag" "description" "status"
+        checklist_args+=("$item" "" "$default_state")
+        index=$((index + 1))
+    done
+
+    # 計算窗口大小
+    local height=$((${#items[@]} + 10))
+    [ $height -gt 25 ] && height=25
+    local width=70
+
+    # 顯示 checklist 並捕獲結果
+    local result
+    result=$(whiptail --title "$title" --checklist "$prompt" $height $width $((${#items[@]})) "${checklist_args[@]}" 3>&1 1>&2 2>&3)
+    local exit_code=$?
+
+    # 返回選中的項目（去除引號）
+    if [ $exit_code -eq 0 ]; then
+        echo "$result" | tr -d '"'
+        return 0
+    else
+        return 1
+    fi
+}
+
+# TUI 單選菜單（返回選中的項目）
+tui_menu() {
+    local title="$1"
+    local prompt="$2"
+    shift 2
+    local items=("$@")
+
+    # 檢查 TUI 是否可用
+    if [ "$USE_TUI" != "true" ]; then
+        return 1
+    fi
+
+    # 構建 whiptail menu 參數
+    local menu_args=()
+    local index=1
+
+    for item in "${items[@]}"; do
+        menu_args+=("$index" "$item")
+        index=$((index + 1))
+    done
+
+    # 計算窗口大小
+    local height=$((${#items[@]} + 10))
+    [ $height -gt 25 ] && height=25
+    local width=70
+
+    # 顯示 menu 並捕獲結果
+    local result
+    result=$(whiptail --title "$title" --menu "$prompt" $height $width $((${#items[@]})) "${menu_args[@]}" 3>&1 1>&2 2>&3)
+    local exit_code=$?
+
+    # 返回選中項目的文本（而不是索引）
+    if [ $exit_code -eq 0 ] && [ -n "$result" ]; then
+        echo "${items[$((result - 1))]}"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# TUI 是/否對話框
+tui_yesno() {
+    local title="$1"
+    local prompt="$2"
+    local default="${3:-no}"  # yes/no
+
+    # 檢查 TUI 是否可用
+    if [ "$USE_TUI" != "true" ]; then
+        return 1
+    fi
+
+    # 計算窗口大小
+    local height=10
+    local width=60
+
+    # 設置預設按鈕
+    local defaultno=""
+    [ "$default" = "no" ] && defaultno="--defaultno"
+
+    # 顯示 yesno 對話框
+    if whiptail --title "$title" $defaultno --yesno "$prompt" $height $width 3>&1 1>&2 2>&3; then
+        return 0  # Yes
+    else
+        return 1  # No
+    fi
+}
+
+# TUI 信息框
+tui_msgbox() {
+    local title="$1"
+    local message="$2"
+
+    # 檢查 TUI 是否可用
+    if [ "$USE_TUI" != "true" ]; then
+        return 1
+    fi
+
+    # 計算窗口大小（根據消息長度）
+    local height=15
+    local width=70
+
+    whiptail --title "$title" --msgbox "$message" $height $width 3>&1 1>&2 2>&3
+}
+
+# TUI 進度條（需要配合管道使用）
+tui_gauge() {
+    local title="$1"
+    local prompt="$2"
+    local initial_percent="${3:-0}"
+
+    # 檢查 TUI 是否可用
+    if [ "$USE_TUI" != "true" ]; then
+        return 1
+    fi
+
+    # whiptail gauge 從標準輸入讀取百分比
+    # 使用方式: echo "50" | tui_gauge "Title" "Message"
+    whiptail --title "$title" --gauge "$prompt" 10 70 "$initial_percent"
+}
+
+# TUI 輸入框
+tui_inputbox() {
+    local title="$1"
+    local prompt="$2"
+    local default="${3:-}"
+
+    # 檢查 TUI 是否可用
+    if [ "$USE_TUI" != "true" ]; then
+        return 1
+    fi
+
+    local height=10
+    local width=60
+
+    local result
+    result=$(whiptail --title "$title" --inputbox "$prompt" $height $width "$default" 3>&1 1>&2 2>&3)
+    local exit_code=$?
+
+    if [ $exit_code -eq 0 ]; then
+        echo "$result"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# ==============================================================================
 # 清理函數
 # ==============================================================================
 
@@ -1165,6 +1577,7 @@ func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_ca
 func_list="$func_list safe_download download_files_parallel get_best_mirror"
 func_list="$func_list optimize_apt_performance cleanup_apt_system select_fastest_apt_mirror"
 func_list="$func_list version_greater_equal check_architecture_compatibility install_arch_specific_package"
+func_list="$func_list ensure_tui_available tui_checklist tui_menu tui_yesno tui_msgbox tui_gauge tui_inputbox"
 func_list="$func_list cleanup_temp_files get_elapsed_time check_sudo_access init_common_env"
 
 for func in $func_list; do
