@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 權限管理工具 - 安全的 sudo 操作管理

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 完整系統測試和驗證 - 全面測試 Linux Setting Scripts 功能

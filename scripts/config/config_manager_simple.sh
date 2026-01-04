@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 簡化配置管理器 - 兼容舊版 bash

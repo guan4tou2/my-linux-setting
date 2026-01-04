@@ -1,24 +1,59 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # ==============================================================================
-# 共用函數庫 - Linux Setting Scripts Common Library
+# Common Library - Linux Setting Scripts
+# Author: Linux Setting Scripts Team
+# Version: 2.0.0
+# Description: Common functions library for Linux environment setup
 # ==============================================================================
 
-# 顏色定義
+# Set strict mode
+set -euo pipefail
+
+# ==============================================================================
+# Configuration Loading
+# ==============================================================================
+
+# Load user configuration file if exists
+CONFIG_FILE="${CONFIG_FILE:-$HOME/.config/linux-setting/config}"
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+fi
+
+# ==============================================================================
+# Constants
+# ==============================================================================
+
+readonly SCRIPT_VERSION="2.0.0"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
 readonly CYAN='\033[0;36m'
 readonly YELLOW='\033[0;33m'
+readonly MAGENTA='\033[0;35m'
 readonly NC='\033[0m'
 
-# TUI 顯示模式（normal / quiet）
-# - quiet : （預設）僅顯示關鍵步驟與結果，隱藏 apt 安裝細節
-# - normal: 顯示完整日誌與 apt 安裝輸出
-TUI_MODE="${TUI_MODE:-quiet}"
+# Security constants
+readonly MAX_SCRIPT_SIZE="${MAX_SCRIPT_SIZE:-1048576}"
+readonly DOWNLOAD_TIMEOUT="${DOWNLOAD_TIMEOUT:-30}"
+readonly DOWNLOAD_RETRIES="${DOWNLOAD_RETRIES:-3}"
 
-# 全局變數
-SCRIPT_START_TIME=$(date +%s)
+# Logging constants
+readonly LOG_DIR="${LOG_DIR:-$HOME/.local/log/linux-setting}"
+readonly MAX_LOG_SIZE="${MAX_LOG_SIZE:-10}"
+readonly MAX_LOG_AGE="${MAX_LOG_AGE:-30}"
+readonly MAX_LOG_COUNT="${MAX_LOG_COUNT:-10}"
+
+# Cache constants
+readonly CACHE_DIR="${CACHE_DIR:-$HOME/.cache/linux-setting}"
+readonly CACHE_TTL="${CACHE_TTL:-86400}"
+
+# Performance constants
+readonly PARALLEL_JOBS="${PARALLEL_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+readonly MIN_PACKAGES_FOR_PARALLEL="${MIN_PACKAGES_FOR_PARALLEL:-3}"
+
+# Global variables
+readonly SCRIPT_START_TIME=$(date +%s)
 TOTAL_STEPS=0
 CURRENT_STEP=0
 
@@ -46,62 +81,113 @@ run_as_root() {
     fi
 }
 
-# 預設日誌文件路徑
-if [ -z "${LOG_FILE:-}" ]; then
-    LOG_FILE="$HOME/.local/log/linux-setting/common_$(date +%Y%m%d).log"
-    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
-fi
+# ==============================================================================
+# Logging Functions
+# ==============================================================================
 
-# ==============================================================================
-# 日誌與錯誤處理函數
-# ==============================================================================
+# Initialize logging with rotation
+init_logging() {
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    local log_prefix="common_$timestamp.log"
+
+    # Create log directory
+    mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+    # Set log file path
+    LOG_FILE="${LOG_FILE:-$LOG_DIR/$log_prefix}"
+
+    # Rotate old logs
+    rotate_logs
+
+    # Set global logging flag
+    ENABLE_LOGGING="${ENABLE_LOGGING:-true}"
+}
+
+# Rotate log files based on size, age, and count
+rotate_logs() {
+    [ "$ENABLE_LOGGING" != "true" ] && return 0
+
+    # Clean logs older than MAX_LOG_AGE days
+    find "$LOG_DIR" -type f -name "*.log" -mtime +$MAX_LOG_AGE -delete 2>/dev/null || true
+
+    # Check log sizes and rotate if needed
+    for log_file in "$LOG_DIR"/*.log; do
+        [ -f "$log_file" ] || continue
+
+        local file_size_mb
+        file_size_mb=$(du -m "$log_file" 2>/dev/null | cut -f1)
+
+        if [ "$file_size_mb" -ge "$MAX_LOG_SIZE" ]; then
+            local new_name="${log_file%.log}.$(date +%Y%m%d_%H%M%S).old"
+            mv "$log_file" "$new_name" 2>/dev/null || true
+        fi
+    done
+
+    # Keep only MAX_LOG_COUNT log files
+    local log_count
+    log_count=$(find "$LOG_DIR" -type f -name "*.log" | wc -l 2>/dev/null || echo 0)
+
+    if [ "$log_count" -gt "$MAX_LOG_COUNT" ]; then
+        find "$LOG_DIR" -type f -name "*.log" -printf '%T@%p\n' | \
+            sort -n | head -n "$((log_count - MAX_LOG_COUNT))" | \
+            cut -d@ -f2- | xargs rm -f 2>/dev/null || true
+    fi
+}
+
+# Structured logging helper
+log_entry() {
+    local level="$1"
+    shift
+    local message="$*"
+    local timestamp
+    timestamp=$(date -Iseconds 2>/dev/null || date +"%Y-%m-%dT%H:%M:%S")
+    local pid=$$
+
+    case "${LOG_FORMAT:-text}" in
+        json)
+            printf '{"timestamp":"%s","level":"%s","pid":%d,"message":"%s"}\n' \
+                "$timestamp" "$level" "$pid" "$message" | \
+                tee -a "$LOG_FILE" >&2 2>/dev/null || true
+            ;;
+        *)
+            printf '%s [%s] [%d] %s: %s\n' \
+                "$timestamp" "$level" "$pid" "$level" "$message" | \
+                tee -a "$LOG_FILE" 2>/dev/null || true
+            ;;
+    esac
+}
 
 log_error() {
     local message="$1"
-    if [ -n "${LOG_FILE:-}" ] && [ -w "$(dirname "$LOG_FILE")" ] 2>/dev/null; then
-        printf "${RED}ERROR: %s${NC}\n" "$message" | tee -a "$LOG_FILE" >&2
-    else
-        printf "${RED}ERROR: %s${NC}\n" "$message" >&2
-    fi
+    [ "$ENABLE_LOGGING" != "true" ] && printf "${RED}ERROR: %s${NC}\n" "$message" >&2
+    log_entry "ERROR" "$message"
     return 1
 }
 
 log_info() {
     local message="$1"
-    if [ -n "${LOG_FILE:-}" ] && [ -w "$(dirname "$LOG_FILE")" ] 2>/dev/null; then
-        printf "${CYAN}INFO: %s${NC}\n" "$message" | tee -a "$LOG_FILE"
-    else
-        printf "${CYAN}INFO: %s${NC}\n" "$message"
-    fi
+    [ "$ENABLE_LOGGING" != "true" ] && printf "${CYAN}INFO: %s${NC}\n" "$message"
+    log_entry "INFO" "$message"
 }
 
 log_success() {
     local message="$1"
-    if [ -n "${LOG_FILE:-}" ] && [ -w "$(dirname "$LOG_FILE")" ] 2>/dev/null; then
-        printf "${GREEN}SUCCESS: %s${NC}\n" "$message" | tee -a "$LOG_FILE"
-    else
-        printf "${GREEN}SUCCESS: %s${NC}\n" "$message"
-    fi
+    [ "$ENABLE_LOGGING" != "true" ] && printf "${GREEN}SUCCESS: %s${NC}\n" "$message"
+    log_entry "SUCCESS" "$message"
 }
 
 log_warning() {
     local message="$1"
-    if [ -n "${LOG_FILE:-}" ] && [ -w "$(dirname "$LOG_FILE")" ] 2>/dev/null; then
-        printf "${YELLOW}WARNING: %s${NC}\n" "$message" | tee -a "$LOG_FILE"
-    else
-        printf "${YELLOW}WARNING: %s${NC}\n" "$message"
-    fi
+    [ "$ENABLE_LOGGING" != "true" ] && printf "${YELLOW}WARNING: %s${NC}\n" "$message"
+    log_entry "WARNING" "$message"
 }
 
 log_debug() {
     local message="$1"
-    if [ "${DEBUG:-false}" = "true" ]; then
-        if [ -n "${LOG_FILE:-}" ] && [ -w "$(dirname "$LOG_FILE")" ] 2>/dev/null; then
-            printf "${BLUE}DEBUG: %s${NC}\n" "$message" | tee -a "$LOG_FILE"
-        else
-            printf "${BLUE}DEBUG: %s${NC}\n" "$message"
-        fi
-    fi
+    [ "${DEBUG:-false}" != "true" ] && return 0
+    [ "$ENABLE_LOGGING" != "true" ] && printf "${BLUE}DEBUG: %s${NC}\n" "$message"
+    log_entry "DEBUG" "$message"
 }
 
 # ==============================================================================
@@ -487,31 +573,102 @@ download_files_parallel() {
 }
 
 # ==============================================================================
-# 安裝函數
+# Unified Package Installation Functions
 # ==============================================================================
 
-install_with_fallback() {
+# Try Homebrew installation with fallback
+install_with_homebrew_fallback() {
     local package="$1"
-    local use_uv="${2:-true}"
-    
-    if [ "$use_uv" = "true" ] && check_command uv; then
-        log_info "使用 uv 安裝 $package"
-        if uv tool install "$package"; then
-            log_success "$package 安裝成功 (uv)"
+    local binary_name="${2:-$package}"
+    local fallback_func="${3:-}"
+
+    [ "${PREFER_HOMEBREW:-true}" != "true" ] && return 1
+
+    if command -v brew >/dev/null 2>&1 && ! check_command "$binary_name"; then
+        log_info "Attempting Homebrew installation: $package"
+
+        if install_brew_package "$package"; then
+            log_success "$package installed via Homebrew"
             return 0
         else
-            log_warning "uv 安裝失敗，嘗試 pip"
+            log_debug "Homebrew installation failed for $package, will try fallback"
+            return 1
         fi
     fi
-    
-    log_info "使用 pip 安裝 $package"
-    if pip install "$package"; then
-        log_success "$package 安裝成功 (pip)"
-        return 0
-    else
-        log_error "$package 安裝失敗"
-        return 1
+
+    return 0
+}
+
+# Unified pattern: Try Homebrew, then call fallback function
+try_homebrew_then() {
+    local package="$1"
+    local binary_name="${2:-$package}"
+    local fallback_function="$3"
+    shift 3
+    local fallback_args="$@"
+
+    if ! install_with_homebrew_fallback "$package" "$binary_name"; then
+        # Homebrew not available or failed, use fallback
+        if [ -n "$fallback_function" ]; then
+            log_info "Using fallback method: $fallback_function"
+            "$fallback_function" "$fallback_args"
+        else
+            log_warning "No fallback method available for $package"
+            return 1
+        fi
     fi
+    return $?
+}
+
+# Install with multiple fallback methods
+install_with_fallback() {
+    local package="$1"
+    local install_method="${2:-uv,pip,binary}"
+    local success=0
+
+    IFS=',' read -ra methods <<< "$install_method"
+
+    for method in "${methods[@]}"; do
+        case "$method" in
+            uv)
+                if [ "${PREFER_UV:-true}" = "true" ] && check_command uv; then
+                    log_info "Installing $package via uv"
+                    if uv tool install "$package"; then
+                        log_success "$package installed via uv"
+                        return 0
+                    fi
+                fi
+                ;;
+            pip)
+                log_info "Installing $package via pip"
+                if pip install "$package" 2>/dev/null; then
+                    log_success "$package installed via pip"
+                    return 0
+                fi
+                ;;
+            brew)
+                if command -v brew >/dev/null 2>&1; then
+                    log_info "Installing $package via brew"
+                    if install_brew_package "$package"; then
+                        log_success "$package installed via brew"
+                        return 0
+                    fi
+                fi
+                ;;
+            cargo)
+                if command -v cargo >/dev/null 2>&1; then
+                    log_info "Installing $package via cargo"
+                    if cargo install "$package" 2>/dev/null; then
+                        log_success "$package installed via cargo"
+                        return 0
+                    fi
+                fi
+                ;;
+        esac
+    done
+
+    log_error "All installation methods failed for $package"
+    return 1
 }
 
 # 通用包安裝函數（支援多種包管理器）
@@ -1013,37 +1170,169 @@ cleanup_cache() {
 }
 
 # ==============================================================================
-# 下載函數
+# Security Functions
+# ==============================================================================
+
+# Verify GPG signature of a file
+verify_gpg_signature() {
+    local file="$1"
+    local sig_file="${2:-$file.sig}"
+    local keyring="${3:-$HOME/.cache/linux-setting/trusted.gpg}"
+
+    [ "${ENABLE_GPG_VERIFY:-true}" != "true" ] && return 0
+    [ ! -f "$file" ] && { log_error "File not found: $file"; return 1; }
+
+    # Import key if keyring doesn't exist
+    if [ ! -f "$keyring" ] && [ -n "${GPG_KEY:-}" ]; then
+        log_info "Importing GPG key..."
+        echo "$GPG_KEY" | gpg --dearmor > "$keyring" 2>/dev/null || {
+            log_warning "Failed to import GPG key, skipping verification"
+            return 0
+        }
+    fi
+
+    # Verify signature if available
+    if [ -f "$sig_file" ]; then
+        if gpg --verify --keyring "$keyring" "$sig_file" "$file" >/dev/null 2>&1; then
+            log_success "GPG signature verified"
+            return 0
+        else
+            log_error "GPG signature verification failed"
+            return 1
+        fi
+    fi
+
+    # No signature file, warn but continue
+    log_warning "No signature file found for $file, skipping GPG verification"
+    return 0
+}
+
+# Validate script content safely
+validate_script_content() {
+    local script_file="$1"
+    local max_size="${2:-$MAX_SCRIPT_SIZE}"
+
+    # Check file size
+    [ ! -f "$script_file" ] && return 1
+
+    local file_size
+    file_size=$(stat -c%s "$script_file" 2>/dev/null || stat -f%z "$script_file" 2>/dev/null || echo 0)
+
+    if [ "$file_size" -gt "$max_size" ]; then
+        log_error "Script too large: $file_size bytes (max: $max_size)"
+        return 1
+    fi
+
+    # Check for dangerous patterns
+    local dangerous_patterns=(
+        "rm[[:space:]]+-rf[[:space:]]+/"
+        "dd[[:space:]]+if="
+        "mkfs\."
+        "echo[[:space:]]*>[[:space:]]*/etc/passwd"
+        "echo[[:space:]]*>[[:space:]]*/etc/shadow"
+        ":(){ :|:& };:"
+        ">[[:space:]]*\$(command)"
+    )
+
+    for pattern in "${dangerous_patterns[@]}"; do
+        if grep -qE "$pattern" "$script_file" 2>/dev/null; then
+            log_error "Dangerous pattern detected: $pattern"
+            return 1
+        fi
+    done
+
+    # Check for excessive sudo operations
+    local sudo_count
+    sudo_count=$(grep -cE "^\s*(sudo|su)\s" "$script_file" 2>/dev/null || echo 0)
+
+    if [ "$sudo_count" -gt 20 ]; then
+        log_warning "Script contains excessive sudo operations: $sudo_count"
+        # Ask in interactive mode
+        if [ -t 0 ] && [ -z "${SKIP_SECURITY_PROMPT:-}" ]; then
+            printf "${YELLOW}This script makes $sudo_count sudo operations. Continue? (y/N): ${NC}"
+            read -r -n 1 -p "" answer
+            echo
+            [[ ! "$answer" =~ ^[Yy]$ ]] && return 1
+        fi
+    fi
+
+    return 0
+}
+
+# ==============================================================================
+# Download Functions
 # ==============================================================================
 
 safe_download() {
     local url="$1"
     local output="$2"
-    local max_retries="${3:-3}"
+    local max_retries="${3:-$DOWNLOAD_RETRIES}"
     local use_cache="${4:-true}"
-    
-    # 嘗試從快取獲取 (僅當 use_cache 為 true 時)
-    if [ "$use_cache" = "true" ] && get_from_cache "$url" "$output"; then
-        return 0
+    local verify_gpg="${5:-true}"
+
+    log_debug "Downloading: $url"
+
+    # Try to get from cache first
+    if [ "$use_cache" = "true" ] && [ "$CACHE_ENABLED" = "true" ]; then
+        if get_from_cache "$url" "$output"; then
+            log_debug "Retrieved from cache"
+            return 0
+        fi
     fi
-    
+
+    # Download with retries
     local retry=0
+    local temp_output
+    temp_output="${output}.tmp.$$"
+
     while [ $retry -lt $max_retries ]; do
-        if curl -fsSL "$url" -o "$output"; then
-            # 保存到快取
-            if [ "$use_cache" = "true" ]; then
+        if curl -fsSL \
+            --max-time "$DOWNLOAD_TIMEOUT" \
+            --connect-timeout "$CONNECTION_TIMEOUT:-10}" \
+            --max-filesize "$MAX_SCRIPT_SIZE" \
+            "$url" -o "$temp_output" 2>/dev/null; then
+
+            # Validate downloaded content
+            if ! validate_script_content "$temp_output"; then
+                rm -f "$temp_output"
+                retry=$((retry + 1))
+                log_warning "Validation failed, retry $retry/$max_retries"
+                sleep 2
+                continue
+            fi
+
+            # Move to final location
+            mv "$temp_output" "$output"
+
+            # Verify GPG signature if enabled and available
+            if [ "$verify_gpg" = "true" ]; then
+                local sig_file
+                sig_file="${url}.sig"
+                if curl -fsSL "$sig_file" -o "${output}.sig" 2>/dev/null; then
+                    verify_gpg_signature "$output" "${output}.sig" || {
+                        rm -f "$output" "${output}.sig"
+                        return 1
+                    }
+                    rm -f "${output}.sig"
+                fi
+            fi
+
+            # Save to cache
+            if [ "$use_cache" = "true" ] && [ "$CACHE_ENABLED" = "true" ]; then
                 save_to_cache "$url" "$output"
             fi
-            log_success "下載成功: $url"
+
+            log_success "Download successful: $(basename "$output")"
             return 0
         else
+            rm -f "$temp_output"
             retry=$((retry + 1))
-            log_warning "下載失敗，重試 $retry/$max_retries: $url"
-            sleep 2
+            log_debug "Download failed, retry $retry/$max_retries: $url"
+            sleep $((retry * 2))  # Exponential backoff
         fi
     done
-    
-    log_error "下載最終失敗: $url"
+
+    log_error "Download failed after $max_retries attempts: $url"
     return 1
 }
 

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 進階配置同步系統 - 跨設備配置管理與版本控制

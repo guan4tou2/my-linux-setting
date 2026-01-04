@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 測試報告生成器 - 生成綜合測試報告

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 遠程配置同步系統 - 多設備間配置同步

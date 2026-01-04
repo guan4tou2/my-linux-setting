@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 配置版本控制系統 - Git-based 配置文件版本管理

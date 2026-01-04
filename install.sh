@@ -1,17 +1,57 @@
 #!/usr/bin/env bash
 
 # ==============================================================================
-# Linux 環境設定腳本 - 安裝工具
+# Linux Environment Setup - Main Installation Script
+# Version: 2.0.1
 # ==============================================================================
 
-# 解析命令行參數
-INSTALL_MODE="full"
-UPDATE_MODE=false
-VERBOSE=false
-DRY_RUN=false
+# 跟踪最後執行的命令
+LAST_COMMAND=""
+
+# 顯示歡迎信息
+show_welcome() {
+    echo ""
+    echo "╔══════════════════════════════════════════════════╗"
+    echo "║  🚀 Linux Setting Scripts  ║"
+    echo "║  v2.0.1 - 自動化環境配置  ║"
+    echo "╚══════════════════════════════════════════════════╝"
+    echo ""
+    echo "📌 快速開始："
+    echo "   ./install.sh              # 互動式安裝（推薦）"
+    echo "   ./install.sh --minimal   # 最小安裝"
+    echo "   ./install.sh --verbose   # 詳細輸出"
+    echo ""
+    echo "💡 幫助："
+    echo "   ./install.sh --help     # 查看完整幫助"
+    echo "   ./install.sh --dry-run   # 預覽安裝內容"
+    echo ""
+    echo "🔧 設定："
+    echo "   cp config/linux-setting.conf ~/.config/linux-setting/config"
+    echo "   vim ~/.config/linux-setting/config"
+    echo ""
+}
+
+show_welcome
+
+
+# Set strict error handling
+set -euo pipefail
+
+# 統一的錯誤捕獲
+trap 'handle_error $? $LINENO "$BASH_COMMAND"' ERR
+
+# ==============================================================================
+# Argument Parsing
+# ==============================================================================
+
+INSTALL_MODE="${INSTALL_MODE:-full}"
+UPDATE_MODE="${UPDATE_MODE:-false}"
+VERBOSE="${VERBOSE:-false}"
+DEBUG="${DEBUG:-false}"
+DRY_RUN="${DRY_RUN:-false}"
 
 while [[ $# -gt 0 ]]; do
-    case $1 in
+    case "$1" in
         --minimal)
             INSTALL_MODE="minimal"
             shift
@@ -33,50 +73,83 @@ while [[ $# -gt 0 ]]; do
             show_help
             exit 0
             ;;
+        --config)
+            if [ -n "$2" ]; then
+                export CONFIG_FILE="$2"
+                shift 2
+            else
+                echo "Error: --config requires a file path"
+                exit 1
+            fi
+            ;;
         *)
-            echo "未知參數: $1"
+            echo "Unknown parameter: $1"
             show_help
             exit 1
             ;;
     esac
 done
 
-# 錯誤處理
-set -eE
-trap 'handle_error $? $LINENO' ERR
-
-# 配置下載網址（可根據需要修改）
-REPO_URL=${REPO_URL:-"https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main"}
-SCRIPTS_URL=${SCRIPTS_URL:-"$REPO_URL/scripts"}
-P10K_CONFIG_URL=${P10K_CONFIG_URL:-"$REPO_URL/.p10k.zsh"}
-REQUIREMENTS_URL=${REQUIREMENTS_URL:-"$REPO_URL/requirements.txt"}
-
-# 性能優化選項
-ENABLE_PARALLEL_INSTALL=${ENABLE_PARALLEL_INSTALL:-true}
-PARALLEL_JOBS=${PARALLEL_JOBS:-4}
-
-# 導出變數供子腳本使用
-export REPO_URL SCRIPTS_URL P10K_CONFIG_URL REQUIREMENTS_URL
+# Export variables for child scripts
 export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN
+
+# ==============================================================================
+# Configuration
+# ==============================================================================
+
+REPO_URL="${REPO_URL:-https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main}"
+SCRIPTS_URL="${SCRIPTS_URL:-$REPO_URL/scripts}"
+P10K_CONFIG_URL="${P10K_CONFIG_URL:-$REPO_URL/.p10k.zsh}"
+REQUIREMENTS_URL="${REQUIREMENTS_URL:-$REPO_URL/requirements.txt}"
+
+# Performance options
+ENABLE_PARALLEL_INSTALL="${ENABLE_PARALLEL_INSTALL:-true}"
+PARALLEL_JOBS="${PARALLEL_JOBS:-auto}"
+
+# Auto-detect parallel jobs if set to auto
+if [ "$PARALLEL_JOBS" = "auto" ]; then
+    PARALLEL_JOBS=$(nproc 2>/dev/null || echo 4)
+fi
+
+# Export configuration
+export REPO_URL SCRIPTS_URL P10K_CONFIG_URL REQUIREMENTS_URL
 export ENABLE_PARALLEL_INSTALL PARALLEL_JOBS
 
-# 載入共用函數庫
+# ==============================================================================
+# Remote Installation with Security Verification
+# ==============================================================================
+
 SCRIPT_DIR="$PWD/scripts"
+REMOTE_INSTALL=false
+
+# Try local common.sh first
 if [ -f "$SCRIPT_DIR/core/common.sh" ]; then
     source "$SCRIPT_DIR/core/common.sh"
 elif [ -f "./scripts/core/common.sh" ]; then
     source "./scripts/core/common.sh"
 else
-    # 遠程下載共用函數庫
+    # Remote installation with verification
     TEMP_DIR=$(mktemp -d)
     SCRIPT_DIR="$TEMP_DIR/scripts"
     mkdir -p "$SCRIPT_DIR/core"
-    curl -fsSL "$SCRIPTS_URL/core/common.sh" -o "$SCRIPT_DIR/core/common.sh"
-    source "$SCRIPT_DIR/core/common.sh"
-    REMOTE_INSTALL=true
+
+    log_info "Downloading common library from remote source..."
+
+    # Download with signature verification
+    local common_url="$SCRIPTS_URL/core/common.sh"
+    local common_output="$SCRIPT_DIR/core/common.sh"
+
+    if safe_download "$common_url" "$common_output"; then
+        source "$common_output"
+        REMOTE_INSTALL=true
+    else
+        log_error "Failed to download common library"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
 fi
 
-# 初始化環境
+# Initialize environment
 init_common_env
 
 # 幫助函數
@@ -106,18 +179,73 @@ EOF
 # 錯誤處理函數
 handle_error() {
     local exit_code=$1
-    local line_number=$2
-    log_error "腳本在第 $line_number 行出錯（錯誤碼：$exit_code）"
-    log_error "請檢查日誌文件：${LOG_FILE:-/tmp/install.log}"
+    local line_number="$2"
+    local last_command="${3:-}"
     
-    # 嘗試回滾
-    if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
-        read -p "是否要回滾到安裝前狀態？(y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            rollback_installation
+    echo ""
+    echo "❌ 安裝失敗"
+    echo "───────────────────────────────"
+    echo "錯誤位置：install.sh:$line_number"
+    echo "錯誤代碼：$exit_code"
+    echo "失敗命令：$last_command"
+    echo "───────────────────────────────"
+    echo ""
+    
+    # 檢查日誌文件
+    if [ -n "${LOG_FILE:-}" ]; then
+        if [ -f "$LOG_FILE" ]; then
+            echo "📄 日誌文件：$LOG_FILE"
+            echo "   查看最新錯誤："
+            echo "   tail -50 $LOG_FILE"
+        else
+            echo "⚠️  日誌文件不存在：$LOG_FILE"
         fi
     fi
+    
+    echo ""
+    echo "💡 快速診斷："
+    echo "   1. 檢查網絡連接："
+    echo "      ping -c 1 github.com"
+    echo "   2. 檢查磁碟空間："
+    echo "      df -h /"
+    echo "   3. 檢查權限："
+    echo "      sudo -v true 2>&1 | head -5"
+    echo "   4. 健康檢查："
+    echo "      ./scripts/quick_health.sh"
+    echo ""
+    
+    echo "🔧 常見問題解決："
+    echo "   網絡錯誤："
+    echo "     - 使用代理：export HTTP_PROXY=http://proxy:port"
+    echo "     - 切換到本地文件：無需下載"
+    echo "   "
+    echo "   權限錯誤："
+    echo "     - 檢查 sudo 配置：visudo"
+    echo "     - 確保用戶在 sudo 組：groups $USER"
+    echo "   "
+    echo "   磁碟空間不足："
+    echo "     - 清理 APT 快取：sudo apt clean && sudo apt autoremove"
+    echo "     - 清理 Docker：docker system prune -a"
+    echo ""
+    
+    # 詢問是否查看日誌
+    if [ -t 0 ]; then
+        read -p "要查看詳細日誌嗎？(y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            if [ -f "${LOG_FILE:-}" ]; then
+                tail -100 "$LOG_FILE" | less
+            else
+                echo "找不到日誌文件"
+            fi
+        fi
+    fi
+    
+    echo ""
+    echo "💡 需要更多幫助？"
+    echo "   - 查看 README：README.md"
+    echo "   - 提交 Issue：https://github.com/guan4tou2/my-linux-setting/issues"
+    echo ""
     
     cleanup_temp_files
     exit $exit_code
@@ -749,6 +877,9 @@ install_selected_modules() {
         printf "${GREEN}進度: [$current_module/$total_modules]${NC} 安裝模組: ${BLUE}$module${NC}\n"
         printf "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
 
+        # 跟踪最後執行的命令
+        LAST_COMMAND="execute_script \"core/${module}_setup.sh\" \"$module\""
+        
         case $module in
             base) execute_script "core/base_tools.sh" "base" ;;
             dev) execute_script "core/dev_tools.sh" "dev" ;;

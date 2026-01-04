@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 系統自動恢復功能 - 自動檢測和恢復系統狀態

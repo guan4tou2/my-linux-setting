@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 性能優化工具 - 提升安裝腳本性能

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 安全審計工具 - 檢查安裝腳本的安全問題

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 完整安裝流程模擬（使用本機 HTTP server + Docker）

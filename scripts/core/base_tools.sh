@@ -13,10 +13,17 @@ log_info "檢測到系統：$DISTRO ($DISTRO_FAMILY) - 包管理器：$PKG_MANAG
 # 更新套件庫
 if [ "$DISTRO_FAMILY" = "debian" ]; then
     # 僅在 Debian 系列（包括 Kali）上添加 ipinfo PPA
+    # Security: Import GPG key before adding repository
     if command -v run_as_root >/dev/null 2>&1; then
-        run_as_root sh -c 'echo "deb [trusted=yes] https://ppa.ipinfo.net/ /" > /etc/apt/sources.list.d/ipinfo.ppa.list' 2>/dev/null || true
+        # Import GPG key for ipinfo repository
+        run_as_root curl -fsSL https://ppa.ipinfo.net/ipinfo.gpg -o /usr/share/keyrings/ipinfo.gpg 2>/dev/null || true
+        # Add repository without trusted=yes (requires GPG key)
+        run_as_root sh -c 'echo "deb https://ppa.ipinfo.net/ /" > /etc/apt/sources.list.d/ipinfo.ppa.list' 2>/dev/null || true
     else
-        echo "deb [trusted=yes] https://ppa.ipinfo.net/ /" | sudo tee "/etc/apt/sources.list.d/ipinfo.ppa.list" >/dev/null 2>&1 || true
+        # Import GPG key for ipinfo repository
+        sudo curl -fsSL https://ppa.ipinfo.net/ipinfo.gpg -o /usr/share/keyrings/ipinfo.gpg 2>/dev/null || true
+        # Add repository without trusted=yes (requires GPG key)
+        echo "deb https://ppa.ipinfo.net/ /" | sudo tee "/etc/apt/sources.list.d/ipinfo.ppa.list" >/dev/null 2>&1 || true
     fi
 fi
 
@@ -90,19 +97,30 @@ else
 fi
 
 # 安裝 lsd（next-gen ls）
-# 優先使用 Homebrew 安裝（避免 cargo 編譯耗時）
+# 使用統一的 Homebrew fallback 模式
 if ! command -v lsd >/dev/null 2>&1; then
-    log_info "安裝 lsd (下一代 ls 指令，來源: github.com/lsd-rs/lsd)"
+    log_info "Installing lsd (next-gen ls command, source: github.com/lsd-rs/lsd)"
 
-    # 方法 1: 優先使用 Homebrew 安裝（快速且無需編譯）
-    if command -v brew >/dev/null 2>&1; then
-        if command -v install_brew_package >/dev/null 2>&1; then
-            if install_brew_package "lsd"; then
-                log_success "lsd 安裝成功 (brew)"
+    if ! install_with_homebrew_fallback "lsd"; then
+        log_info "Attempting APT installation..."
+        if command -v install_apt_package >/dev/null 2>&1; then
+            if install_apt_package "lsd" 2>/dev/null; then
+                log_success "lsd installed via APT"
             else
-                log_warning "Homebrew 安裝失敗，嘗試使用 APT..."
-                BREW_FAILED=1
+                log_warning "lsd installation failed"
+                log_info "Install Homebrew for better support: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
             fi
+        else
+            if sudo apt-get install -y lsd 2>/dev/null; then
+                log_success "lsd installed via APT"
+            else
+                log_warning "lsd installation failed"
+            fi
+        fi
+    fi
+else
+    log_debug "lsd already installed, skipping"
+fi
         else
             if brew install lsd >/dev/null 2>&1; then
                 log_success "lsd 安裝成功 (brew)"

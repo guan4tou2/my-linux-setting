@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 自動同步系統 - 智能配置和腳本同步

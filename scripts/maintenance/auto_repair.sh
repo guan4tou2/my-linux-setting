@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #!/bin/bash
 
 # 智能自動修復系統 - 自動檢測和修復常見問題
