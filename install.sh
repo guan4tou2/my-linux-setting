@@ -475,9 +475,10 @@ backup_config_files() {
 
 # 設置日誌
 setup_logging() {
-    LOG_DIR="$HOME/.local/log/linux-setting"
-    mkdir -p "$LOG_DIR"
-    LOG_FILE="$LOG_DIR/install_$(date +%Y%m%d_%H%M%S).log"
+    # LOG_DIR 可能已在 common.sh 中定義為 readonly，使用局部變數
+    local log_dir="${LOG_DIR:-$HOME/.local/log/linux-setting}"
+    mkdir -p "$log_dir"
+    LOG_FILE="$log_dir/install_$(date +%Y%m%d_%H%M%S).log"
     exec 1> >(tee -a "$LOG_FILE") 2>&1
     printf "${GREEN}安裝日誌將保存到：$LOG_FILE${NC}\n"
 }
