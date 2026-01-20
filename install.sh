@@ -5,10 +5,16 @@
 # Version: 2.0.1
 # ==============================================================================
 
-# 自動切換到 Homebrew bash (macOS 需要 bash 4+ 支持關聯陣列)
+# 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
 if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
     # 嘗試找到 Homebrew 安裝的 bash
-    for brew_bash in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    # macOS: /opt/homebrew/bin (Apple Silicon), /usr/local/bin (Intel)
+    # Linux: /home/linuxbrew/.linuxbrew/bin, $HOME/.linuxbrew/bin
+    for brew_bash in \
+        /opt/homebrew/bin/bash \
+        /usr/local/bin/bash \
+        /home/linuxbrew/.linuxbrew/bin/bash \
+        "$HOME/.linuxbrew/bin/bash"; do
         if [ -x "$brew_bash" ] && "$brew_bash" --version 2>/dev/null | grep -q "version [4-9]"; then
             exec "$brew_bash" "$0" "$@"
         fi
