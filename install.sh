@@ -5,6 +5,19 @@
 # Version: 2.0.1
 # ==============================================================================
 
+# 自動切換到 Homebrew bash (macOS 需要 bash 4+ 支持關聯陣列)
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+    # 嘗試找到 Homebrew 安裝的 bash
+    for brew_bash in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+        if [ -x "$brew_bash" ] && "$brew_bash" --version 2>/dev/null | grep -q "version [4-9]"; then
+            exec "$brew_bash" "$0" "$@"
+        fi
+    done
+    # 如果沒有找到新版 bash，顯示警告但繼續執行（使用備用邏輯）
+    echo -e "\033[0;33mWARNING: Bash 版本 ($BASH_VERSION) 較舊，部分功能可能受限\033[0m"
+    echo -e "\033[0;33m建議安裝新版 Bash: brew install bash\033[0m"
+fi
+
 # 跟踪最後執行的命令
 LAST_COMMAND=""
 
@@ -183,13 +196,19 @@ fi
 # Initialize environment
 init_common_env
 
-# 載入模組管理器
+# 載入模組管理器（需要 bash 4.0+ 支持關聯陣列）
+USE_MODULE_MANAGER=false
 if [ -f "$SCRIPT_DIR/core/module_manager.sh" ]; then
-    source "$SCRIPT_DIR/core/module_manager.sh"
-    init_module_manager
-    USE_MODULE_MANAGER=true
+    # 檢查 bash 版本是否支持關聯陣列 (需要 4.0+)
+    if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+        source "$SCRIPT_DIR/core/module_manager.sh"
+        init_module_manager
+        USE_MODULE_MANAGER=true
+    else
+        log_warning "Bash 版本 ($BASH_VERSION) 不支持關聯陣列，使用內建配置"
+        log_info "建議安裝 Bash 4+: brew install bash"
+    fi
 else
-    USE_MODULE_MANAGER=false
     log_info "模組管理器不可用，使用內建配置"
 fi
 

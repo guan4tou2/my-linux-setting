@@ -7,7 +7,16 @@
 # 提供模組配置的讀取、解析和安裝功能
 # 讓用戶可以透過修改 config/modules.conf 來自訂安裝內容
 #
+# 注意：此腳本需要 Bash 4.0+ 支持關聯陣列
+#
 # ==============================================================================
+
+# 檢查 Bash 版本（需要 4.0+ 支持關聯陣列）
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+    echo "WARNING: module_manager.sh 需要 Bash 4.0+，當前版本: ${BASH_VERSION:-unknown}" >&2
+    echo "建議安裝新版 Bash: brew install bash" >&2
+    return 1 2>/dev/null || exit 1
+fi
 
 # 配置文件路徑
 MODULES_CONF="${MODULES_CONF:-}"
