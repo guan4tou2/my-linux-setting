@@ -201,13 +201,31 @@ check_module_status() {
 
     # 檢查 Homebrew 套件
     local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
-    if [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1; then
-        for pkg in $brew_packages; do
-            total=$((total + 1))
-            if check_brew_package_installed "$pkg" 2>/dev/null; then
-                installed=$((installed + 1))
-            fi
-        done
+    local apt_fallback="${MODULE_APT_FALLBACK[$module_id]:-}"
+    if [ -n "$brew_packages" ]; then
+        if command -v brew >/dev/null 2>&1; then
+            # brew 存在，檢查 brew 套件
+            for pkg in $brew_packages; do
+                total=$((total + 1))
+                if check_brew_package_installed "$pkg" 2>/dev/null; then
+                    installed=$((installed + 1))
+                fi
+            done
+        elif [ -n "$apt_fallback" ]; then
+            # brew 不存在但有 apt fallback，檢查 fallback 套件
+            for pkg in $apt_fallback; do
+                total=$((total + 1))
+                if check_package_installed "$pkg" 2>/dev/null; then
+                    installed=$((installed + 1))
+                fi
+            done
+        else
+            # brew 不存在且無 fallback，將 brew 套件計為未安裝
+            for pkg in $brew_packages; do
+                total=$((total + 1))
+                # 不增加 installed，視為未安裝
+            done
+        fi
     fi
 
     # 檢查 Python 套件
@@ -297,15 +315,32 @@ get_module_detail_status() {
 
     # Homebrew 套件
     local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
+    local apt_fallback="${MODULE_APT_FALLBACK[$module_id]:-}"
     if [ -n "$brew_packages" ]; then
-        detail+="Homebrew 套件:\n"
-        for pkg in $brew_packages; do
-            if command -v brew >/dev/null 2>&1 && check_brew_package_installed "$pkg" 2>/dev/null; then
-                detail+="  ✓ $pkg\n"
-            else
-                detail+="  ✗ $pkg\n"
-            fi
-        done
+        if command -v brew >/dev/null 2>&1; then
+            detail+="Homebrew 套件:\n"
+            for pkg in $brew_packages; do
+                if check_brew_package_installed "$pkg" 2>/dev/null; then
+                    detail+="  ✓ $pkg\n"
+                else
+                    detail+="  ✗ $pkg\n"
+                fi
+            done
+        elif [ -n "$apt_fallback" ]; then
+            detail+="Homebrew 套件 (使用 APT 替代):\n"
+            for pkg in $apt_fallback; do
+                if check_package_installed "$pkg" 2>/dev/null; then
+                    detail+="  ✓ $pkg (apt)\n"
+                else
+                    detail+="  ✗ $pkg (apt)\n"
+                fi
+            done
+        else
+            detail+="Homebrew 套件 (brew 未安裝):\n"
+            for pkg in $brew_packages; do
+                detail+="  ✗ $pkg (需要 brew)\n"
+            done
+        fi
         detail+="\n"
     fi
 
