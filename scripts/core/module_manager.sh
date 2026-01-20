@@ -178,6 +178,202 @@ module_exists() {
 }
 
 # ==============================================================================
+# 模組狀態檢查
+# ==============================================================================
+
+# 檢查模組安裝狀態
+# 返回: "installed" | "partial" | "not_installed"
+check_module_status() {
+    local module_id="$1"
+    local total=0
+    local installed=0
+
+    # 檢查 APT/系統套件
+    local packages="${MODULE_PACKAGES[$module_id]:-}"
+    if [ -n "$packages" ]; then
+        for pkg in $packages; do
+            total=$((total + 1))
+            if check_package_installed "$pkg" 2>/dev/null; then
+                installed=$((installed + 1))
+            fi
+        done
+    fi
+
+    # 檢查 Homebrew 套件
+    local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
+    if [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1; then
+        for pkg in $brew_packages; do
+            total=$((total + 1))
+            if check_brew_package_installed "$pkg" 2>/dev/null; then
+                installed=$((installed + 1))
+            fi
+        done
+    fi
+
+    # 檢查 Python 套件
+    local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
+    if [ -n "$pip_packages" ]; then
+        for pkg in $pip_packages; do
+            total=$((total + 1))
+            if check_pip_package_installed "$pkg" 2>/dev/null; then
+                installed=$((installed + 1))
+            fi
+        done
+    fi
+
+    # 檢查 Cargo 套件
+    local cargo_packages="${MODULE_CARGO_PACKAGES[$module_id]:-}"
+    if [ -n "$cargo_packages" ] && command -v cargo >/dev/null 2>&1; then
+        for pkg in $cargo_packages; do
+            total=$((total + 1))
+            if check_cargo_package_installed "$pkg" 2>/dev/null; then
+                installed=$((installed + 1))
+            fi
+        done
+    fi
+
+    # 檢查 NPM 套件
+    local npm_packages="${MODULE_NPM_PACKAGES[$module_id]:-}"
+    if [ -n "$npm_packages" ] && command -v npm >/dev/null 2>&1; then
+        for pkg in $npm_packages; do
+            total=$((total + 1))
+            if check_npm_package_installed "$pkg" 2>/dev/null; then
+                installed=$((installed + 1))
+            fi
+        done
+    fi
+
+    # 返回狀態
+    if [ $total -eq 0 ]; then
+        # 沒有套件定義，檢查是否有腳本
+        local script="${MODULE_SCRIPTS[$module_id]:-}"
+        if [ -n "$script" ]; then
+            echo "not_installed"
+        else
+            echo "not_installed"
+        fi
+    elif [ $installed -eq $total ]; then
+        echo "installed"
+    elif [ $installed -gt 0 ]; then
+        echo "partial"
+    else
+        echo "not_installed"
+    fi
+}
+
+# 獲取模組詳細狀態（返回格式化的詳細狀態）
+get_module_detail_status() {
+    local module_id="$1"
+    local detail=""
+
+    local name="${MODULE_NAMES[$module_id]:-$module_id}"
+    local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
+    local status
+    status=$(check_module_status "$module_id")
+
+    # 狀態標記
+    case "$status" in
+        installed)     detail+="[✓] $name (已安裝)\n" ;;
+        partial)       detail+="[◐] $name (部分安裝)\n" ;;
+        not_installed) detail+="[ ] $name (未安裝)\n" ;;
+    esac
+
+    [ -n "$desc" ] && detail+="    $desc\n" || true
+    detail+="\n"
+
+    # APT/系統套件
+    local packages="${MODULE_PACKAGES[$module_id]:-}"
+    if [ -n "$packages" ]; then
+        detail+="系統套件:\n"
+        for pkg in $packages; do
+            if check_package_installed "$pkg" 2>/dev/null; then
+                detail+="  ✓ $pkg\n"
+            else
+                detail+="  ✗ $pkg\n"
+            fi
+        done
+        detail+="\n"
+    fi
+
+    # Homebrew 套件
+    local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
+    if [ -n "$brew_packages" ]; then
+        detail+="Homebrew 套件:\n"
+        for pkg in $brew_packages; do
+            if command -v brew >/dev/null 2>&1 && check_brew_package_installed "$pkg" 2>/dev/null; then
+                detail+="  ✓ $pkg\n"
+            else
+                detail+="  ✗ $pkg\n"
+            fi
+        done
+        detail+="\n"
+    fi
+
+    # Python 套件
+    local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
+    if [ -n "$pip_packages" ]; then
+        detail+="Python 套件 (uv tool):\n"
+        for pkg in $pip_packages; do
+            if check_pip_package_installed "$pkg" 2>/dev/null; then
+                detail+="  ✓ $pkg\n"
+            else
+                detail+="  ✗ $pkg\n"
+            fi
+        done
+        detail+="\n"
+    fi
+
+    # Cargo 套件
+    local cargo_packages="${MODULE_CARGO_PACKAGES[$module_id]:-}"
+    if [ -n "$cargo_packages" ]; then
+        detail+="Rust 套件 (cargo):\n"
+        for pkg in $cargo_packages; do
+            if command -v cargo >/dev/null 2>&1 && check_cargo_package_installed "$pkg" 2>/dev/null; then
+                detail+="  ✓ $pkg\n"
+            else
+                detail+="  ✗ $pkg\n"
+            fi
+        done
+        detail+="\n"
+    fi
+
+    # NPM 套件
+    local npm_packages="${MODULE_NPM_PACKAGES[$module_id]:-}"
+    if [ -n "$npm_packages" ]; then
+        detail+="Node.js 套件 (npm):\n"
+        for pkg in $npm_packages; do
+            if command -v npm >/dev/null 2>&1 && check_npm_package_installed "$pkg" 2>/dev/null; then
+                detail+="  ✓ $pkg\n"
+            else
+                detail+="  ✗ $pkg\n"
+            fi
+        done
+        detail+="\n"
+    fi
+
+    # 安裝腳本
+    local script="${MODULE_SCRIPTS[$module_id]:-}"
+    if [ -n "$script" ]; then
+        detail+="安裝腳本: $script\n"
+    fi
+
+    echo -e "$detail"
+}
+
+# 獲取模組狀態標記符號
+get_module_status_icon() {
+    local module_id="$1"
+    local status
+    status=$(check_module_status "$module_id")
+
+    case "$status" in
+        installed)     echo "✓" ;;
+        partial)       echo "◐" ;;
+        not_installed) echo " " ;;
+    esac
+}
+
+# ==============================================================================
 # 動態選單生成
 # ==============================================================================
 
@@ -295,69 +491,132 @@ install_module() {
     local script="${MODULE_SCRIPTS[$module_id]}"
     local post_install="${MODULE_POST_INSTALL[$module_id]}"
 
+    # 檢查模組安裝狀態
+    local module_status
+    module_status=$(check_module_status "$module_id" 2>/dev/null || echo "not_installed")
+
     log_info "安裝模組: $name"
 
-    # 1. 安裝 APT 套件
-    if [ -n "$packages" ]; then
-        log_info "安裝系統套件..."
-        for pkg in $packages; do
-            install_package "$pkg" || log_warning "套件安裝失敗: $pkg"
-        done
-    fi
+    if [ "$module_status" = "installed" ]; then
+        log_info "模組 $name 已完全安裝，跳過套件安裝步驟"
+    else
+        # 統計安裝情況
+        local skipped_count=0
+        local installed_count=0
 
-    # 2. 安裝 Homebrew 套件（如果可用）
-    if [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1; then
-        log_info "安裝 Homebrew 套件..."
-        for pkg in $brew_packages; do
-            install_brew_package "$pkg" || log_warning "Brew 套件安裝失敗: $pkg"
-        done
-    elif [ -n "$apt_fallback" ]; then
-        # Homebrew 不可用，使用 APT 替代
-        log_info "使用 APT 替代套件..."
-        for pkg in $apt_fallback; do
-            install_package "$pkg" || log_warning "套件安裝失敗: $pkg"
-        done
-    fi
-
-    # 3. 安裝 Python 套件（統一使用 uv tool）
-    if [ -n "$pip_packages" ]; then
-        log_info "安裝 Python 套件（使用 uv tool）..."
-
-        # 確保 uv 已安裝
-        if ! command -v uv >/dev/null 2>&1; then
-            log_info "安裝 uv..."
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-            export PATH="$HOME/.local/bin:$PATH"
+        # 1. 安裝 APT 套件（跳過已安裝的）
+        if [ -n "$packages" ]; then
+            log_info "檢查系統套件..."
+            for pkg in $packages; do
+                if check_package_installed "$pkg" 2>/dev/null; then
+                    log_info "✓ $pkg 已安裝，跳過"
+                    skipped_count=$((skipped_count + 1))
+                else
+                    install_package "$pkg" || log_warning "套件安裝失敗: $pkg"
+                    installed_count=$((installed_count + 1))
+                fi
+            done
         fi
 
-        for pkg in $pip_packages; do
-            log_info "安裝 $pkg..."
-            if uv tool install "$pkg" 2>/dev/null; then
-                log_success "$pkg 安裝成功"
-            else
-                log_warning "$pkg 安裝失敗，嘗試使用 pipx..."
-                pipx install "$pkg" 2>/dev/null || log_warning "無法安裝 $pkg"
+        # 2. 安裝 Homebrew 套件（如果可用，跳過已安裝的）
+        if [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1; then
+            log_info "檢查 Homebrew 套件..."
+            for pkg in $brew_packages; do
+                if check_brew_package_installed "$pkg" 2>/dev/null; then
+                    log_info "✓ $pkg 已安裝 (brew)，跳過"
+                    skipped_count=$((skipped_count + 1))
+                else
+                    install_brew_package "$pkg" || log_warning "Brew 套件安裝失敗: $pkg"
+                    installed_count=$((installed_count + 1))
+                fi
+            done
+        elif [ -n "$apt_fallback" ]; then
+            # Homebrew 不可用，使用 APT 替代
+            log_info "使用 APT 替代套件..."
+            for pkg in $apt_fallback; do
+                if check_package_installed "$pkg" 2>/dev/null; then
+                    log_info "✓ $pkg 已安裝，跳過"
+                    skipped_count=$((skipped_count + 1))
+                else
+                    install_package "$pkg" || log_warning "套件安裝失敗: $pkg"
+                    installed_count=$((installed_count + 1))
+                fi
+            done
+        fi
+
+        # 3. 安裝 Python 套件（統一使用 uv tool，跳過已安裝的）
+        if [ -n "$pip_packages" ]; then
+            log_info "檢查 Python 套件..."
+
+            # 確保 uv 已安裝
+            if ! command -v uv >/dev/null 2>&1; then
+                log_info "安裝 uv..."
+                curl -LsSf https://astral.sh/uv/install.sh | sh
+                export PATH="$HOME/.local/bin:$PATH"
             fi
-        done
+
+            for pkg in $pip_packages; do
+                if check_pip_package_installed "$pkg" 2>/dev/null; then
+                    log_info "✓ $pkg 已安裝 (pip/uv)，跳過"
+                    skipped_count=$((skipped_count + 1))
+                else
+                    log_info "安裝 $pkg..."
+                    if uv tool install "$pkg" 2>/dev/null; then
+                        log_success "$pkg 安裝成功"
+                        installed_count=$((installed_count + 1))
+                    else
+                        log_warning "$pkg 安裝失敗，嘗試使用 pipx..."
+                        if pipx install "$pkg" 2>/dev/null; then
+                            installed_count=$((installed_count + 1))
+                        else
+                            log_warning "無法安裝 $pkg"
+                        fi
+                    fi
+                fi
+            done
+        fi
+
+        # 4. 安裝 Cargo 套件（跳過已安裝的）
+        if [ -n "$cargo_packages" ] && command -v cargo >/dev/null 2>&1; then
+            log_info "檢查 Rust 套件..."
+            for pkg in $cargo_packages; do
+                if check_cargo_package_installed "$pkg" 2>/dev/null; then
+                    log_info "✓ $pkg 已安裝 (cargo)，跳過"
+                    skipped_count=$((skipped_count + 1))
+                else
+                    if cargo install "$pkg" 2>/dev/null; then
+                        installed_count=$((installed_count + 1))
+                    else
+                        log_warning "Cargo 套件安裝失敗: $pkg"
+                    fi
+                fi
+            done
+        fi
+
+        # 5. 安裝 NPM 套件（跳過已安裝的）
+        if [ -n "$npm_packages" ] && command -v npm >/dev/null 2>&1; then
+            log_info "檢查 Node.js 套件..."
+            for pkg in $npm_packages; do
+                if check_npm_package_installed "$pkg" 2>/dev/null; then
+                    log_info "✓ $pkg 已安裝 (npm)，跳過"
+                    skipped_count=$((skipped_count + 1))
+                else
+                    if npm install -g "$pkg" 2>/dev/null; then
+                        installed_count=$((installed_count + 1))
+                    else
+                        log_warning "NPM 套件安裝失敗: $pkg"
+                    fi
+                fi
+            done
+        fi
+
+        # 顯示安裝統計
+        if [ $skipped_count -gt 0 ] || [ $installed_count -gt 0 ]; then
+            log_info "套件安裝統計: 新安裝 $installed_count 個，跳過 $skipped_count 個（已安裝）"
+        fi
     fi
 
-    # 4. 安裝 Cargo 套件
-    if [ -n "$cargo_packages" ] && command -v cargo >/dev/null 2>&1; then
-        log_info "安裝 Rust 套件..."
-        for pkg in $cargo_packages; do
-            cargo install "$pkg" 2>/dev/null || log_warning "Cargo 套件安裝失敗: $pkg"
-        done
-    fi
-
-    # 5. 安裝 NPM 套件
-    if [ -n "$npm_packages" ] && command -v npm >/dev/null 2>&1; then
-        log_info "安裝 Node.js 套件..."
-        for pkg in $npm_packages; do
-            npm install -g "$pkg" 2>/dev/null || log_warning "NPM 套件安裝失敗: $pkg"
-        done
-    fi
-
-    # 6. 執行自訂安裝腳本
+    # 6. 執行自訂安裝腳本（無論狀態都執行，因為腳本可能有額外配置）
     if [ -n "$script" ]; then
         local script_path="$SCRIPT_DIR/core/$script"
         if [ -f "$script_path" ]; then
@@ -424,3 +683,4 @@ export -f get_module_ids get_module_count get_module_name get_module_description
 export -f get_module_packages get_module_brew_packages get_module_script module_exists 2>/dev/null || true
 export -f generate_cli_menu generate_tui_checklist_items generate_module_details 2>/dev/null || true
 export -f get_module_id_by_number install_module init_module_manager 2>/dev/null || true
+export -f check_module_status get_module_detail_status get_module_status_icon 2>/dev/null || true

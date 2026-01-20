@@ -542,16 +542,65 @@ main() {
     while true; do
         # 如果啟用 TUI，使用 checklist 進行模組選擇
         if [ "$USE_TUI" = "true" ] && command -v tui_checklist >/dev/null 2>&1; then
+            # 動態生成 TUI checklist 項目（包含安裝狀態）
+            local checklist_items=()
+            if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
+                for module_id in "${MODULE_LIST[@]}"; do
+                    local name="${MODULE_NAMES[$module_id]:-$module_id}"
+                    local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
+                    local status_mark=""
+
+                    # 獲取安裝狀態標記
+                    if command -v check_module_status >/dev/null 2>&1; then
+                        local status
+                        status=$(check_module_status "$module_id" 2>/dev/null)
+                        case "$status" in
+                            installed)     status_mark="[✓] " ;;
+                            partial)       status_mark="[◐] " ;;
+                            not_installed) status_mark="[ ] " ;;
+                        esac
+                    fi
+
+                    checklist_items+=("${module_id}|${status_mark}${name} (${desc})")
+                done
+            else
+                # 備用靜態選項
+                checklist_items=(
+                    "python|Python開發環境(python3,pip,uv,ranger)"
+                    "docker|Docker相關工具(docker-ce,lazydocker)"
+                    "base|基礎工具(git,lsd,bat,ripgrep,fzf)"
+                    "terminal|終端設定(zsh,oh-my-zsh,p10k)"
+                    "dev|開發工具(neovim,lazygit,rust,nodejs)"
+                    "monitoring|系統監控工具(btop,htop,fail2ban)"
+                )
+            fi
+
+            # 添加查看詳情選項
+            local action_selection
+            action_selection=$(tui_menu "Linux 環境設定安裝程序" \
+                "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n請選擇操作：" \
+                "選擇模組安裝" "查看模組詳情" "退出")
+
+            case "$action_selection" in
+                "查看模組詳情")
+                    show_detail_selection_menu
+                    continue
+                    ;;
+                "退出")
+                    cleanup
+                    printf "${CYAN}退出安裝程序${NC}\n"
+                    exit 0
+                    ;;
+                "選擇模組安裝"|*)
+                    # 繼續進行模組選擇
+                    ;;
+            esac
+
             # 使用 TUI checklist 選擇模組
             local module_selection
             module_selection=$(tui_checklist "Linux 環境設定安裝程序" \
-                "請使用空格鍵選擇要安裝的模組，方向鍵移動，Enter 確認：" \
-                "python|Python開發環境(python3,pip,uv,ranger)" \
-                "docker|Docker相關工具(docker-ce,lazydocker)" \
-                "base|基礎工具(git,lsd,bat,ripgrep,fzf)" \
-                "terminal|終端設定(zsh,oh-my-zsh,p10k)" \
-                "dev|開發工具(neovim,lazygit,rust,nodejs)" \
-                "monitoring|系統監控工具(btop,htop,fail2ban)")
+                "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n請使用空格鍵選擇要安裝的模組，方向鍵移動，Enter 確認：" \
+                "${checklist_items[@]}")
 
             # 如果用戶取消，詢問是否退出
             if [ -z "$module_selection" ]; then
@@ -601,7 +650,20 @@ main() {
                     printf "${CYAN}已清除所有選擇${NC}\n"
                     ;;
                 d|D)
-                    show_module_details
+                    # 查看詳情：提供選擇單個模組或全部查看
+                    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
+                        printf "\n${CYAN}查看模組詳情${NC}\n"
+                        printf "輸入模組編號查看單一模組，或按 Enter 查看全部: "
+                        read -r detail_num
+                        if [ -n "$detail_num" ] && [ "$detail_num" -ge 1 ] 2>/dev/null && [ "$detail_num" -le ${#MODULE_LIST[@]} ] 2>/dev/null; then
+                            local module_id="${MODULE_LIST[$((detail_num - 1))]}"
+                            show_module_detail_dialog "$module_id"
+                        else
+                            show_module_details
+                        fi
+                    else
+                        show_module_details
+                    fi
                     ;;
                 q|Q|0)
                     cleanup
@@ -619,7 +681,7 @@ main() {
     done
 }
 
-# 顯示菜單函數（動態生成）
+# 顯示菜單函數（動態生成，包含安裝狀態標記）
 show_menu() {
     printf "\n"
     printf "${CYAN}┌─ 選擇安裝模組 ─────────────────────────────────────────────┐${NC}\n"
@@ -631,10 +693,30 @@ show_menu() {
         for module_id in "${MODULE_LIST[@]}"; do
             local name="${MODULE_NAMES[$module_id]:-$module_id}"
             local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
-            printf "${CYAN}│${NC}  ${GREEN}[%d]${NC} %-20s %-30s${CYAN}│${NC}\n" "$index" "$name" "$desc"
+            local status_icon=" "
+
+            # 獲取安裝狀態標記
+            if command -v check_module_status >/dev/null 2>&1; then
+                local status
+                status=$(check_module_status "$module_id" 2>/dev/null)
+                case "$status" in
+                    installed)     status_icon="✓" ;;
+                    partial)       status_icon="◐" ;;
+                    not_installed) status_icon=" " ;;
+                esac
+            fi
+
+            # 根據狀態顯示不同顏色
+            if [ "$status_icon" = "✓" ]; then
+                printf "${CYAN}│${NC}  ${GREEN}[%d]${NC} [${GREEN}%s${NC}] %-17s %-26s${CYAN}│${NC}\n" "$index" "$status_icon" "$name" "$desc"
+            elif [ "$status_icon" = "◐" ]; then
+                printf "${CYAN}│${NC}  ${GREEN}[%d]${NC} [${YELLOW}%s${NC}] %-17s %-26s${CYAN}│${NC}\n" "$index" "$status_icon" "$name" "$desc"
+            else
+                printf "${CYAN}│${NC}  ${GREEN}[%d]${NC} [ ] %-17s %-26s${CYAN}│${NC}\n" "$index" "$name" "$desc"
+            fi
             index=$((index + 1))
         done
-        printf "${CYAN}│${NC}  ${GREEN}[%d]${NC} %-20s %-30s${CYAN}│${NC}\n" "$index" "全部安裝" ""
+        printf "${CYAN}│${NC}  ${GREEN}[%d]${NC}     %-17s %-26s${CYAN}│${NC}\n" "$index" "全部安裝" ""
     else
         # 備用靜態選單
         printf "${CYAN}│${NC}  ${GREEN}[1]${NC} Python 開發環境     python3, pip, uv, ranger         ${CYAN}│${NC}\n"
@@ -647,6 +729,10 @@ show_menu() {
     fi
 
     printf "${CYAN}│                                                             │${NC}\n"
+    printf "${CYAN}├─────────────────────────────────────────────────────────────┤${NC}\n"
+
+    # 顯示狀態圖例
+    printf "${CYAN}│${NC}  ${GREEN}[✓]${NC} 已安裝  ${YELLOW}[◐]${NC} 部分安裝  [ ] 未安裝               ${CYAN}│${NC}\n"
     printf "${CYAN}├─────────────────────────────────────────────────────────────┤${NC}\n"
 
     # 顯示當前選擇
@@ -662,9 +748,74 @@ show_menu() {
     printf "\n輸入選項 (例如: 1 3 4): "
 }
 
-# 顯示模組詳細資訊（動態生成）
+# 顯示單個模組詳細資訊（TUI 對話框）
+show_module_detail_dialog() {
+    local module_id="$1"
+
+    if [ "$USE_MODULE_MANAGER" != "true" ] || ! module_exists "$module_id" 2>/dev/null; then
+        log_warning "模組不存在: $module_id"
+        return 1
+    fi
+
+    local detail
+    detail=$(get_module_detail_status "$module_id" 2>/dev/null)
+
+    if [ "$USE_TUI" = "true" ] && command -v tui_msgbox >/dev/null 2>&1; then
+        local name="${MODULE_NAMES[$module_id]:-$module_id}"
+        tui_msgbox "模組詳情: $name" "$detail"
+    else
+        printf "\n%s\n" "$detail"
+        printf "\n按 Enter 返回..."
+        read -r
+    fi
+}
+
+# 顯示模組選擇選單（用於查看詳情）
+show_detail_selection_menu() {
+    if [ "$USE_TUI" = "true" ] && command -v tui_menu >/dev/null 2>&1; then
+        # TUI 模式：使用選單選擇模組
+        local menu_items=()
+        for module_id in "${MODULE_LIST[@]}"; do
+            local name="${MODULE_NAMES[$module_id]:-$module_id}"
+            local status_icon=""
+            if command -v check_module_status >/dev/null 2>&1; then
+                local status
+                status=$(check_module_status "$module_id" 2>/dev/null)
+                case "$status" in
+                    installed)     status_icon="[✓] " ;;
+                    partial)       status_icon="[◐] " ;;
+                    not_installed) status_icon="[ ] " ;;
+                esac
+            fi
+            menu_items+=("${status_icon}${name}")
+        done
+        menu_items+=("返回主選單")
+
+        local selection
+        selection=$(tui_menu "查看模組詳情" "選擇要查看的模組：" "${menu_items[@]}")
+
+        if [ -n "$selection" ] && [ "$selection" != "返回主選單" ]; then
+            # 從選單項目反查模組 ID
+            local selected_name="${selection#\[*\] }"  # 去除狀態標記
+            for module_id in "${MODULE_LIST[@]}"; do
+                local name="${MODULE_NAMES[$module_id]:-$module_id}"
+                if [ "$name" = "$selected_name" ]; then
+                    show_module_detail_dialog "$module_id"
+                    return 0
+                fi
+            done
+        fi
+    else
+        # 命令行模式：顯示完整的模組詳情
+        show_module_details
+    fi
+}
+
+# 顯示模組詳細資訊（動態生成，包含安裝狀態）
 show_module_details() {
     printf "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
+    printf "${CYAN}                    模組詳細資訊                               ${NC}\n"
+    printf "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n\n"
 
     if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
         local index=1
@@ -673,11 +824,116 @@ show_module_details() {
             local packages="${MODULE_PACKAGES[$module_id]:-}"
             local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
             local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
+            local cargo_packages="${MODULE_CARGO_PACKAGES[$module_id]:-}"
+            local npm_packages="${MODULE_NPM_PACKAGES[$module_id]:-}"
 
-            printf "${GREEN}[%d] %s${NC}\n" "$index" "$name"
-            [ -n "$packages" ] && printf "    APT: %s\n" "$packages" || true
-            [ -n "$brew_packages" ] && printf "    Brew: %s\n" "$brew_packages" || true
-            [ -n "$pip_packages" ] && printf "    Python (uv tool): %s\n" "$pip_packages" || true
+            # 獲取安裝狀態
+            local status_icon=" "
+            local status_text="未安裝"
+            if command -v check_module_status >/dev/null 2>&1; then
+                local status
+                status=$(check_module_status "$module_id" 2>/dev/null)
+                case "$status" in
+                    installed)
+                        status_icon="✓"
+                        status_text="已安裝"
+                        ;;
+                    partial)
+                        status_icon="◐"
+                        status_text="部分安裝"
+                        ;;
+                    not_installed)
+                        status_icon=" "
+                        status_text="未安裝"
+                        ;;
+                esac
+            fi
+
+            # 根據狀態顯示不同顏色
+            if [ "$status_icon" = "✓" ]; then
+                printf "${GREEN}[%d] [%s] %s (%s)${NC}\n" "$index" "$status_icon" "$name" "$status_text"
+            elif [ "$status_icon" = "◐" ]; then
+                printf "${YELLOW}[%d] [%s] %s (%s)${NC}\n" "$index" "$status_icon" "$name" "$status_text"
+            else
+                printf "[%d] [ ] %s (%s)\n" "$index" "$name" "$status_text"
+            fi
+
+            # 顯示套件清單（帶狀態標記）
+            if [ -n "$packages" ]; then
+                printf "    ${BLUE}系統套件:${NC} "
+                local first=true
+                for pkg in $packages; do
+                    [ "$first" = true ] || printf ", " || true
+                    first=false
+                    if check_package_installed "$pkg" 2>/dev/null; then
+                        printf "${GREEN}%s${NC}" "$pkg"
+                    else
+                        printf "${RED}%s${NC}" "$pkg"
+                    fi
+                done
+                printf "\n"
+            fi
+
+            if [ -n "$brew_packages" ]; then
+                printf "    ${BLUE}Homebrew:${NC} "
+                local first=true
+                for pkg in $brew_packages; do
+                    [ "$first" = true ] || printf ", " || true
+                    first=false
+                    if command -v brew >/dev/null 2>&1 && check_brew_package_installed "$pkg" 2>/dev/null; then
+                        printf "${GREEN}%s${NC}" "$pkg"
+                    else
+                        printf "${RED}%s${NC}" "$pkg"
+                    fi
+                done
+                printf "\n"
+            fi
+
+            if [ -n "$pip_packages" ]; then
+                printf "    ${BLUE}Python (uv):${NC} "
+                local first=true
+                for pkg in $pip_packages; do
+                    [ "$first" = true ] || printf ", " || true
+                    first=false
+                    if check_pip_package_installed "$pkg" 2>/dev/null; then
+                        printf "${GREEN}%s${NC}" "$pkg"
+                    else
+                        printf "${RED}%s${NC}" "$pkg"
+                    fi
+                done
+                printf "\n"
+            fi
+
+            if [ -n "$cargo_packages" ]; then
+                printf "    ${BLUE}Cargo:${NC} "
+                local first=true
+                for pkg in $cargo_packages; do
+                    [ "$first" = true ] || printf ", " || true
+                    first=false
+                    if command -v cargo >/dev/null 2>&1 && check_cargo_package_installed "$pkg" 2>/dev/null; then
+                        printf "${GREEN}%s${NC}" "$pkg"
+                    else
+                        printf "${RED}%s${NC}" "$pkg"
+                    fi
+                done
+                printf "\n"
+            fi
+
+            if [ -n "$npm_packages" ]; then
+                printf "    ${BLUE}NPM:${NC} "
+                local first=true
+                for pkg in $npm_packages; do
+                    [ "$first" = true ] || printf ", " || true
+                    first=false
+                    if command -v npm >/dev/null 2>&1 && check_npm_package_installed "$pkg" 2>/dev/null; then
+                        printf "${GREEN}%s${NC}" "$pkg"
+                    else
+                        printf "${RED}%s${NC}" "$pkg"
+                    fi
+                done
+                printf "\n"
+            fi
+
             printf "\n"
             index=$((index + 1))
         done
@@ -698,8 +954,9 @@ show_module_details() {
     fi
 
     printf "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
-    printf "\n${YELLOW}提示:${NC} 修改 config/modules.conf 可自訂安裝內容\n"
-    printf "按 Enter 返回選單..."
+    printf "\n${YELLOW}圖例:${NC} ${GREEN}綠色${NC}=已安裝  ${RED}紅色${NC}=未安裝\n"
+    printf "${YELLOW}提示:${NC} 修改 config/modules.conf 可自訂安裝內容\n"
+    printf "\n按 Enter 返回選單..."
     read -r
 }
 

@@ -976,6 +976,68 @@ check_brew_package_installed() {
     brew list "$package" >/dev/null 2>&1
 }
 
+# ==============================================================================
+# 套件安裝狀態檢查函數
+# ==============================================================================
+
+# 檢查 pip/uv 套件是否已安裝
+check_pip_package_installed() {
+    local package="$1"
+
+    # 優先檢查 uv tool
+    if command -v uv >/dev/null 2>&1; then
+        if uv tool list 2>/dev/null | grep -q "^$package "; then
+            return 0
+        fi
+    fi
+
+    # 檢查 pipx
+    if command -v pipx >/dev/null 2>&1; then
+        if pipx list 2>/dev/null | grep -q "package $package"; then
+            return 0
+        fi
+    fi
+
+    # 檢查 pip3
+    if command -v pip3 >/dev/null 2>&1; then
+        if pip3 show "$package" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    # 嘗試 import（針對 Python 模組）
+    local import_name="${package//-/_}"  # 將 - 轉為 _
+    if python3 -c "import $import_name" 2>/dev/null; then
+        return 0
+    fi
+
+    return 1
+}
+
+# 檢查 cargo 套件是否已安裝
+check_cargo_package_installed() {
+    local package="$1"
+
+    if ! command -v cargo >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # 使用 cargo install --list 檢查
+    cargo install --list 2>/dev/null | grep -q "^$package v"
+}
+
+# 檢查 npm 全域套件是否已安裝
+check_npm_package_installed() {
+    local package="$1"
+
+    if ! command -v npm >/dev/null 2>&1; then
+        return 1
+    fi
+
+    # 使用 npm list -g 檢查
+    npm list -g "$package" >/dev/null 2>&1
+}
+
 # 安裝單個 Homebrew 包
 install_brew_package() {
     local package="$1"
@@ -1911,6 +1973,7 @@ init_common_env() {
 # 安全導出所有函數供子 shell 使用
 func_list="log_error log_info log_success log_warning log_debug init_progress show_progress run_as_root"
 func_list="$func_list check_command check_package_installed check_python_version check_disk_space check_network check_internet_speed"
+func_list="$func_list check_pip_package_installed check_cargo_package_installed check_npm_package_installed"
 func_list="$func_list install_with_fallback install_apt_package install_apt_packages_parallel"
 func_list="$func_list backup_file safe_append_to_file"
 func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_cache cleanup_cache"
