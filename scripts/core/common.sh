@@ -1896,9 +1896,7 @@ init_common_env() {
     # 設置 PATH
     export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
     
-    # 設置並行任務數量（根據CPU核心數）
-    export PARALLEL_JOBS="${PARALLEL_JOBS:-$(nproc 2>/dev/null || echo 4)}"
-    
+    # PARALLEL_JOBS 已在檔案頂部定義為 readonly
     log_info "共用環境初始化完成（並行任務: $PARALLEL_JOBS）"
 }
 
