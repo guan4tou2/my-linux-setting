@@ -106,7 +106,7 @@ init_logging() {
 
 # Rotate log files based on size, age, and count
 rotate_logs() {
-    [ "$ENABLE_LOGGING" != "true" ] && return 0
+    [ "${ENABLE_LOGGING:-true}" != "true" ] && return 0
 
     # Clean logs older than MAX_LOG_AGE days
     find "$LOG_DIR" -type f -name "*.log" -mtime +$MAX_LOG_AGE -delete 2>/dev/null || true
@@ -596,19 +596,23 @@ install_with_homebrew_fallback() {
 
     [ "${PREFER_HOMEBREW:-true}" != "true" ] && return 1
 
-    if command -v brew >/dev/null 2>&1 && ! check_command "$binary_name"; then
-        log_info "Attempting Homebrew installation: $package"
-
-        if install_brew_package "$package"; then
-            log_success "$package installed via Homebrew"
-            return 0
-        else
-            log_debug "Homebrew installation failed for $package, will try fallback"
-            return 1
-        fi
+    if check_command "$binary_name"; then
+        return 0
     fi
 
-    return 0
+    if ! command -v brew >/dev/null 2>&1; then
+        return 1
+    fi
+
+    log_info "Attempting Homebrew installation: $package"
+
+    if install_brew_package "$package"; then
+        log_success "$package installed via Homebrew"
+        return 0
+    else
+        log_debug "Homebrew installation failed for $package, will try fallback"
+        return 1
+    fi
 }
 
 # Unified pattern: Try Homebrew, then call fallback function
@@ -1770,7 +1774,7 @@ tui_yesno() {
 
     # 設置預設按鈕
     local defaultno=""
-    [ "$default" = "no" ] && defaultno="--defaultno"
+    [ "$default" = "no" ] && defaultno="--defaultno" || true
 
     # 顯示 yesno 對話框
     if whiptail --title "$title" $defaultno --yesno "$prompt" $height $width 3>&1 1>&2 2>&3; then
