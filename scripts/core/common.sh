@@ -173,7 +173,7 @@ log_info() {
     # 總是輸出到終端
     printf "${CYAN}INFO: %s${NC}\n" "$message"
     # 如果啟用日誌，同時寫入日誌文件
-    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "INFO" "$message"
+    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "INFO" "$message" || true
 }
 
 log_success() {
@@ -181,7 +181,7 @@ log_success() {
     # 總是輸出到終端
     printf "${GREEN}SUCCESS: %s${NC}\n" "$message"
     # 如果啟用日誌，同時寫入日誌文件
-    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "SUCCESS" "$message"
+    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "SUCCESS" "$message" || true
 }
 
 log_warning() {
@@ -189,7 +189,7 @@ log_warning() {
     # 總是輸出到終端
     printf "${YELLOW}WARNING: %s${NC}\n" "$message"
     # 如果啟用日誌，同時寫入日誌文件
-    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "WARNING" "$message"
+    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "WARNING" "$message" || true
 }
 
 log_debug() {
@@ -199,7 +199,7 @@ log_debug() {
     # 輸出到終端
     printf "${BLUE}DEBUG: %s${NC}\n" "$message"
     # 如果啟用日誌，同時寫入日誌文件
-    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "DEBUG" "$message"
+    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "DEBUG" "$message" || true
 }
 
 # ==============================================================================
