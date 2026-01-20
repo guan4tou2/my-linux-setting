@@ -1132,10 +1132,9 @@ safe_append_to_file() {
 
 # 初始化快取系統
 init_cache_system() {
-    export CACHE_DIR="${CACHE_DIR:-$HOME/.cache/linux-setting}"
+    # CACHE_DIR 和 CACHE_TTL 已在檔案頂部定義為 readonly，這裡只設定 CACHE_ENABLED
     export CACHE_ENABLED="${CACHE_ENABLED:-true}"
-    export CACHE_TTL="${CACHE_TTL:-86400}"  # 24小時
-    
+
     if [ "$CACHE_ENABLED" = "true" ]; then
         mkdir -p "$CACHE_DIR/downloads"
         mkdir -p "$CACHE_DIR/metadata"
