@@ -106,7 +106,7 @@ init_logging() {
 
 # Rotate log files based on size, age, and count
 rotate_logs() {
-    [ "${ENABLE_LOGGING:-true}" != "true" ] && return 0
+    [ "${ENABLE_LOGGING:-true}" != "true" ] && return 0 || true
 
     # Clean logs older than MAX_LOG_AGE days
     find "$LOG_DIR" -type f -name "*.log" -mtime +$MAX_LOG_AGE -delete 2>/dev/null || true
@@ -145,7 +145,7 @@ log_entry() {
     local pid=$$
 
     # 確保日誌文件存在
-    [ -z "${LOG_FILE:-}" ] && return 0
+    [ -z "${LOG_FILE:-}" ] && return 0 || true
 
     case "${LOG_FORMAT:-text}" in
         json)
@@ -195,7 +195,7 @@ log_warning() {
 log_debug() {
     local message="$1"
     # DEBUG 模式未啟用時直接返回
-    [ "${DEBUG:-false}" != "true" ] && return 0
+    [ "${DEBUG:-false}" != "true" ] && return 0 || true
     # 輸出到終端
     printf "${BLUE}DEBUG: %s${NC}\n" "$message"
     # 如果啟用日誌，同時寫入日誌文件
@@ -594,7 +594,7 @@ install_with_homebrew_fallback() {
     local binary_name="${2:-$package}"
     local fallback_func="${3:-}"
 
-    [ "${PREFER_HOMEBREW:-true}" != "true" ] && return 1
+    [ "${PREFER_HOMEBREW:-true}" != "true" ] && return 1 || true
 
     if check_command "$binary_name"; then
         return 0
@@ -1232,8 +1232,8 @@ verify_gpg_signature() {
     local sig_file="${2:-$file.sig}"
     local keyring="${3:-$HOME/.cache/linux-setting/trusted.gpg}"
 
-    [ "${ENABLE_GPG_VERIFY:-true}" != "true" ] && return 0
-    [ ! -f "$file" ] && { log_error "File not found: $file"; return 1; }
+    [ "${ENABLE_GPG_VERIFY:-true}" != "true" ] && return 0 || true
+    [ ! -f "$file" ] && { log_error "File not found: $file"; return 1; } || true
 
     # Import key if keyring doesn't exist
     if [ ! -f "$keyring" ] && [ -n "${GPG_KEY:-}" ]; then
@@ -1266,7 +1266,7 @@ validate_script_content() {
     local max_size="${2:-$MAX_SCRIPT_SIZE}"
 
     # Check file size
-    [ ! -f "$script_file" ] && return 1
+    [ ! -f "$script_file" ] && return 1 || true
 
     local file_size
     file_size=$(stat -c%s "$script_file" 2>/dev/null || stat -f%z "$script_file" 2>/dev/null || echo 0)
@@ -1700,7 +1700,7 @@ tui_checklist() {
 
     # 計算窗口大小
     local height=$((${#items[@]} + 10))
-    [ $height -gt 25 ] && height=25
+    [ $height -gt 25 ] && height=25 || true
     local width=70
 
     # 顯示 checklist 並捕獲結果
@@ -1740,7 +1740,7 @@ tui_menu() {
 
     # 計算窗口大小
     local height=$((${#items[@]} + 10))
-    [ $height -gt 25 ] && height=25
+    [ $height -gt 25 ] && height=25 || true
     local width=70
 
     # 顯示 menu 並捕獲結果

@@ -71,6 +71,7 @@ UPDATE_MODE="${UPDATE_MODE:-false}"
 VERBOSE="${VERBOSE:-false}"
 DEBUG="${DEBUG:-false}"
 DRY_RUN="${DRY_RUN:-false}"
+SKIP_PYTHON_CHECK="${SKIP_PYTHON_CHECK:-false}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -113,7 +114,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Export variables for child scripts
-export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN
+export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK
 
 # ==============================================================================
 # Configuration
@@ -674,9 +675,9 @@ show_module_details() {
             local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
 
             printf "${GREEN}[%d] %s${NC}\n" "$index" "$name"
-            [ -n "$packages" ] && printf "    APT: %s\n" "$packages"
-            [ -n "$brew_packages" ] && printf "    Brew: %s\n" "$brew_packages"
-            [ -n "$pip_packages" ] && printf "    Python (uv tool): %s\n" "$pip_packages"
+            [ -n "$packages" ] && printf "    APT: %s\n" "$packages" || true
+            [ -n "$brew_packages" ] && printf "    Brew: %s\n" "$brew_packages" || true
+            [ -n "$pip_packages" ] && printf "    Python (uv tool): %s\n" "$pip_packages" || true
             printf "\n"
             index=$((index + 1))
         done
@@ -838,10 +839,17 @@ install_selected_modules() {
         return
     fi
 
+    local install_order=()
+    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
+        install_order=("${MODULE_LIST[@]}")
+    else
+        install_order=(base dev python monitoring docker terminal)
+    fi
+
     # 計算要安裝的模組數量
     local total_modules=0
     local current_module=0
-    for module in base dev python monitoring docker terminal; do
+    for module in "${install_order[@]}"; do
         case " $selected_modules " in
             *" $module "*) total_modules=$((total_modules + 1)) ;;
         esac
@@ -852,44 +860,54 @@ install_selected_modules() {
         printf "\n${CYAN}========== 預覽模式 (Dry Run) ==========${NC}\n"
         printf "${BLUE}將安裝以下 $total_modules 個模組：${NC}\n\n"
 
-        for module in base dev python monitoring docker terminal; do
+        for module in "${install_order[@]}"; do
             case " $selected_modules " in
                 *" $module "*) ;;
                 *) continue ;;
             esac
 
-            printf "${GREEN}[$module]${NC}\n"
-            case $module in
-                base)
-                    printf "  • git, curl, wget, build-essential\n"
-                    printf "  • lsd, bat, fzf, ripgrep\n"
-                    printf "  • tealdeer, superfile\n"
-                    ;;
-                dev)
-                    printf "  • neovim + lazyvim\n"
-                    printf "  • lazygit\n"
-                    printf "  • nodejs, cargo\n"
-                    ;;
-                python)
-                    printf "  • python3, pip\n"
-                    printf "  • uv (快速包管理器)\n"
-                    printf "  • ranger-fm, s-tui\n"
-                    ;;
-                terminal)
-                    printf "  • zsh + oh-my-zsh\n"
-                    printf "  • powerlevel10k 主題\n"
-                    printf "  • 多個 zsh 插件\n"
-                    ;;
-                monitoring)
-                    printf "  • btop, htop\n"
-                    printf "  • iftop, nethogs\n"
-                    printf "  • fail2ban\n"
-                    ;;
-                docker)
-                    printf "  • docker-ce\n"
-                    printf "  • lazydocker\n"
-                    ;;
-            esac
+            if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
+                local module_name="${MODULE_NAMES[$module]:-$module}"
+                printf "${GREEN}[$module]${NC} %s\n" "$module_name"
+                [ -n "${MODULE_PACKAGES[$module]:-}" ] && printf "  • packages: %s\n" "${MODULE_PACKAGES[$module]}" || true
+                [ -n "${MODULE_BREW_PACKAGES[$module]:-}" ] && printf "  • brew: %s\n" "${MODULE_BREW_PACKAGES[$module]}" || true
+                [ -n "${MODULE_PIP_PACKAGES[$module]:-}" ] && printf "  • pip: %s\n" "${MODULE_PIP_PACKAGES[$module]}" || true
+                [ -n "${MODULE_CARGO_PACKAGES[$module]:-}" ] && printf "  • cargo: %s\n" "${MODULE_CARGO_PACKAGES[$module]}" || true
+                [ -n "${MODULE_NPM_PACKAGES[$module]:-}" ] && printf "  • npm: %s\n" "${MODULE_NPM_PACKAGES[$module]}" || true
+            else
+                printf "${GREEN}[$module]${NC}\n"
+                case $module in
+                    base)
+                        printf "  • git, curl, wget, build-essential\n"
+                        printf "  • lsd, bat, fzf, ripgrep\n"
+                        printf "  • tealdeer, superfile\n"
+                        ;;
+                    dev)
+                        printf "  • neovim + lazyvim\n"
+                        printf "  • lazygit\n"
+                        printf "  • nodejs, cargo\n"
+                        ;;
+                    python)
+                        printf "  • python3, pip\n"
+                        printf "  • uv (快速包管理器)\n"
+                        printf "  • ranger-fm, s-tui\n"
+                        ;;
+                    terminal)
+                        printf "  • zsh + oh-my-zsh\n"
+                        printf "  • powerlevel10k 主題\n"
+                        printf "  • 多個 zsh 插件\n"
+                        ;;
+                    monitoring)
+                        printf "  • btop, htop\n"
+                        printf "  • iftop, nethogs\n"
+                        printf "  • fail2ban\n"
+                        ;;
+                    docker)
+                        printf "  • docker-ce\n"
+                        printf "  • lazydocker\n"
+                        ;;
+                esac
+            fi
             printf "\n"
         done
 
@@ -911,7 +929,7 @@ install_selected_modules() {
     # 4. monitoring - 安裝監控與安全工具
     # 5. docker     - 可選的 Docker 工具
     # 6. terminal   - 最後安裝（不再自動 exec zsh）
-    for module in base dev python monitoring docker terminal; do
+    for module in "${install_order[@]}"; do
         case " $selected_modules " in
             *" $module "*) ;;
             *) continue ;;
@@ -925,17 +943,25 @@ install_selected_modules() {
         # 跟踪最後執行的命令
         LAST_COMMAND="execute_script \"core/${module}_setup.sh\" \"$module\""
         
-        case $module in
-            base) execute_script "core/base_tools.sh" "base" ;;
-            dev) execute_script "core/dev_tools.sh" "dev" ;;
-            python) execute_script "core/python_setup.sh" "python" ;;
-            terminal) execute_script "core/terminal_setup.sh" "terminal" ;;
-            monitoring) execute_script "core/monitoring_tools.sh" "monitoring" ;;
-            docker) execute_script "core/docker_setup.sh" "docker" ;;
-        esac || {
-            printf "${RED}安裝過程中出現錯誤，中止安裝${NC}\n"
-            return 1
-        }
+        if [ "$USE_MODULE_MANAGER" = "true" ] && command -v install_module >/dev/null 2>&1; then
+            LAST_COMMAND="install_module \"$module\""
+            install_module "$module" || {
+                printf "${RED}安裝過程中出現錯誤，中止安裝${NC}\n"
+                return 1
+            }
+        else
+            case $module in
+                base) execute_script "core/base_tools.sh" "base" ;;
+                dev) execute_script "core/dev_tools.sh" "dev" ;;
+                python) execute_script "core/python_setup.sh" "python" ;;
+                terminal) execute_script "core/terminal_setup.sh" "terminal" ;;
+                monitoring) execute_script "core/monitoring_tools.sh" "monitoring" ;;
+                docker) execute_script "core/docker_setup.sh" "docker" ;;
+            esac || {
+                printf "${RED}安裝過程中出現錯誤，中止安裝${NC}\n"
+                return 1
+            }
+        fi
     done
     
     show_installation_report
@@ -951,5 +977,3 @@ install_selected_modules() {
 
 # 執行主函數
 main
-
-
