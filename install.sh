@@ -364,7 +364,7 @@ check_environment() {
     fi
     
     # 檢查 Python 版本，如果不滿足要求則嘗試安裝
-    if [ "$SKIP_PYTHON_CHECK" = "true" ]; then
+    if [ "${SKIP_PYTHON_CHECK:-false}" = "true" ]; then
         log_info "跳過 Python 版本檢查（環境變數設定）"
     elif ! check_python_version "3.8"; then
         log_warning "Python 版本不滿足要求，嘗試安裝 Python 3+"
