@@ -135,7 +135,7 @@ rotate_logs() {
     fi
 }
 
-# Structured logging helper
+# Structured logging helper - 只寫入日誌文件
 log_entry() {
     local level="$1"
     shift
@@ -144,50 +144,62 @@ log_entry() {
     timestamp=$(date -Iseconds 2>/dev/null || date +"%Y-%m-%dT%H:%M:%S")
     local pid=$$
 
+    # 確保日誌文件存在
+    [ -z "${LOG_FILE:-}" ] && return 0
+
     case "${LOG_FORMAT:-text}" in
         json)
             printf '{"timestamp":"%s","level":"%s","pid":%d,"message":"%s"}\n' \
-                "$timestamp" "$level" "$pid" "$message" | \
-                tee -a "$LOG_FILE" >&2 2>/dev/null || true
+                "$timestamp" "$level" "$pid" "$message" >> "$LOG_FILE" 2>/dev/null || true
             ;;
         *)
-            printf '%s [%s] [%d] %s: %s\n' \
-                "$timestamp" "$level" "$pid" "$level" "$message" | \
-                tee -a "$LOG_FILE" 2>/dev/null || true
+            printf '%s [%s] [%d] %s\n' \
+                "$timestamp" "$level" "$pid" "$message" >> "$LOG_FILE" 2>/dev/null || true
             ;;
     esac
 }
 
 log_error() {
     local message="$1"
-    [ "$ENABLE_LOGGING" != "true" ] && printf "${RED}ERROR: %s${NC}\n" "$message" >&2
-    log_entry "ERROR" "$message"
+    # 總是輸出到終端（錯誤訊息）
+    printf "${RED}ERROR: %s${NC}\n" "$message" >&2
+    # 如果啟用日誌，同時寫入日誌文件
+    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "ERROR" "$message"
     return 1
 }
 
 log_info() {
     local message="$1"
-    [ "$ENABLE_LOGGING" != "true" ] && printf "${CYAN}INFO: %s${NC}\n" "$message"
-    log_entry "INFO" "$message"
+    # 總是輸出到終端
+    printf "${CYAN}INFO: %s${NC}\n" "$message"
+    # 如果啟用日誌，同時寫入日誌文件
+    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "INFO" "$message"
 }
 
 log_success() {
     local message="$1"
-    [ "$ENABLE_LOGGING" != "true" ] && printf "${GREEN}SUCCESS: %s${NC}\n" "$message"
-    log_entry "SUCCESS" "$message"
+    # 總是輸出到終端
+    printf "${GREEN}SUCCESS: %s${NC}\n" "$message"
+    # 如果啟用日誌，同時寫入日誌文件
+    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "SUCCESS" "$message"
 }
 
 log_warning() {
     local message="$1"
-    [ "$ENABLE_LOGGING" != "true" ] && printf "${YELLOW}WARNING: %s${NC}\n" "$message"
-    log_entry "WARNING" "$message"
+    # 總是輸出到終端
+    printf "${YELLOW}WARNING: %s${NC}\n" "$message"
+    # 如果啟用日誌，同時寫入日誌文件
+    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "WARNING" "$message"
 }
 
 log_debug() {
     local message="$1"
+    # DEBUG 模式未啟用時直接返回
     [ "${DEBUG:-false}" != "true" ] && return 0
-    [ "$ENABLE_LOGGING" != "true" ] && printf "${BLUE}DEBUG: %s${NC}\n" "$message"
-    log_entry "DEBUG" "$message"
+    # 輸出到終端
+    printf "${BLUE}DEBUG: %s${NC}\n" "$message"
+    # 如果啟用日誌，同時寫入日誌文件
+    [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "DEBUG" "$message"
 }
 
 # ==============================================================================
@@ -881,23 +893,61 @@ ensure_homebrew_installed() {
         fi
 
         if [ -n "$brew_shellenv" ]; then
-            # 載入到當前會話
+            # 載入到當前會話（僅供安裝時使用）
             eval "$($brew_shellenv)"
 
-            # 添加到 shell 配置文件
+            # 添加 alias 到 shell 配置文件（預設不自動載入 Homebrew 環境）
+            # 這樣可以避免 Homebrew Python 與系統 Python 的路徑衝突
             for rcfile in "$HOME/.bashrc" "$HOME/.zshrc"; do
-                if [ -f "$rcfile" ]; then
-                    if ! grep -q "brew shellenv" "$rcfile"; then
-                        echo "" >> "$rcfile"
-                        echo "# Homebrew 環境配置" >> "$rcfile"
-                        echo "eval \"\$($brew_shellenv)\"" >> "$rcfile"
-                        log_info "已添加 Homebrew 配置到 $rcfile"
+                if [ -f "$rcfile" ] || [ "$(basename "$rcfile")" = ".zshrc" ]; then
+                    if ! grep -q "brew-on" "$rcfile"; then
+                        cat >> "$rcfile" << 'BREW_ALIAS'
+
+# ==============================================================================
+# Homebrew 環境切換（預設不啟用，避免 Python 路徑衝突）
+# ==============================================================================
+# 使用 brew-on 啟用 Homebrew 環境
+# 使用 brew-off 停用 Homebrew 環境
+# ==============================================================================
+BREW_ALIAS
+                        if [ -d "/home/linuxbrew/.linuxbrew" ]; then
+                            cat >> "$rcfile" << 'BREW_FUNC'
+brew-on() {
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    echo "Homebrew 環境已啟用"
+}
+brew-off() {
+    export PATH=$(echo "$PATH" | sed 's|/home/linuxbrew/.linuxbrew/[^:]*:||g')
+    unset HOMEBREW_PREFIX HOMEBREW_CELLAR HOMEBREW_REPOSITORY
+    echo "Homebrew 環境已停用"
+}
+# 直接使用 brew 命令的 alias（不影響 PATH）
+alias brew='/home/linuxbrew/.linuxbrew/bin/brew'
+BREW_FUNC
+                        else
+                            cat >> "$rcfile" << BREW_FUNC
+brew-on() {
+    eval "\$($HOME/.linuxbrew/bin/brew shellenv)"
+    echo "Homebrew 環境已啟用"
+}
+brew-off() {
+    export PATH=\$(echo "\$PATH" | sed 's|$HOME/.linuxbrew/[^:]*:||g')
+    unset HOMEBREW_PREFIX HOMEBREW_CELLAR HOMEBREW_REPOSITORY
+    echo "Homebrew 環境已停用"
+}
+# 直接使用 brew 命令的 alias（不影響 PATH）
+alias brew='$HOME/.linuxbrew/bin/brew'
+BREW_FUNC
+                        fi
+                        log_info "已添加 Homebrew alias 到 $rcfile"
                     fi
                 fi
             done
 
             log_success "Homebrew 環境配置完成"
             log_info "已安裝版本：$(brew --version | head -n1)"
+            log_info "使用 'brew-on' 啟用 Homebrew 環境，'brew-off' 停用"
+            log_info "預設不啟用 Homebrew 環境，避免 Python 路徑衝突"
         else
             log_warning "找不到 Homebrew 安裝目錄，可能需要手動配置環境變量"
         fi
@@ -1288,7 +1338,7 @@ safe_download() {
     while [ $retry -lt $max_retries ]; do
         if curl -fsSL \
             --max-time "$DOWNLOAD_TIMEOUT" \
-            --connect-timeout "$CONNECTION_TIMEOUT:-10}" \
+            --connect-timeout "${CONNECTION_TIMEOUT:-10}" \
             --max-filesize "$MAX_SCRIPT_SIZE" \
             "$url" -o "$temp_output" 2>/dev/null; then
 

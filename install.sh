@@ -8,27 +8,49 @@
 # 跟踪最後執行的命令
 LAST_COMMAND=""
 
+# 幫助函數（必須在參數解析之前定義）
+show_help() {
+    cat << 'EOF'
+Linux Setting Scripts - 自動安裝腳本 v2.0.1
+
+用法: ./install.sh [選項]
+
+選項:
+  --minimal                       最小安裝模式
+  --update                        更新已安裝的組件
+  --dry-run                       預覽模式（不實際安裝）
+  -v, --verbose                   顯示詳細日誌
+  -h, --help                      顯示此幫助訊息
+  --config <file>                 指定配置文件路徑
+
+範例:
+  ./install.sh                    # 標準安裝（互動式選單）
+  ./install.sh --minimal          # 最小安裝
+  ./install.sh --dry-run          # 預覽將要安裝的內容
+  ./install.sh --update           # 更新模式
+  ./install.sh --verbose          # 詳細模式
+
+更多資訊請參閱 README.md
+EOF
+}
+
 # 顯示歡迎信息
 show_welcome() {
-    echo ""
-    echo "╔══════════════════════════════════════════════════╗"
-    echo "║  🚀 Linux Setting Scripts  ║"
-    echo "║  v2.0.1 - 自動化環境配置  ║"
-    echo "╚══════════════════════════════════════════════════╝"
-    echo ""
-    echo "📌 快速開始："
-    echo "   ./install.sh              # 互動式安裝（推薦）"
-    echo "   ./install.sh --minimal   # 最小安裝"
-    echo "   ./install.sh --verbose   # 詳細輸出"
-    echo ""
-    echo "💡 幫助："
-    echo "   ./install.sh --help     # 查看完整幫助"
-    echo "   ./install.sh --dry-run   # 預覽安裝內容"
-    echo ""
-    echo "🔧 設定："
-    echo "   cp config/linux-setting.conf ~/.config/linux-setting/config"
-    echo "   vim ~/.config/linux-setting/config"
-    echo ""
+    # 使用 printf 確保跨平台兼容性
+    printf "\n"
+    printf "╔════════════════════════════════════════════════════════╗\n"
+    printf "║                                                        ║\n"
+    printf "║          Linux Setting Scripts  v2.0.1                 ║\n"
+    printf "║            自動化開發環境配置工具                      ║\n"
+    printf "║                                                        ║\n"
+    printf "╠════════════════════════════════════════════════════════╣\n"
+    printf "║  快速開始:                                             ║\n"
+    printf "║    ./install.sh             互動式安裝 (推薦)          ║\n"
+    printf "║    ./install.sh --minimal   最小安裝                   ║\n"
+    printf "║    ./install.sh --dry-run   預覽安裝內容               ║\n"
+    printf "║    ./install.sh --help      查看完整幫助               ║\n"
+    printf "╚════════════════════════════════════════════════════════╝\n"
+    printf "\n"
 }
 
 show_welcome
@@ -128,22 +150,30 @@ if [ -f "$SCRIPT_DIR/core/common.sh" ]; then
 elif [ -f "./scripts/core/common.sh" ]; then
     source "./scripts/core/common.sh"
 else
-    # Remote installation with verification
+    # Remote installation - bootstrap without common.sh functions
     TEMP_DIR=$(mktemp -d)
     SCRIPT_DIR="$TEMP_DIR/scripts"
     mkdir -p "$SCRIPT_DIR/core"
 
-    log_info "Downloading common library from remote source..."
+    echo -e "\033[0;36mINFO: Downloading common library from remote source...\033[0m"
 
-    # Download with signature verification
-    local common_url="$SCRIPTS_URL/core/common.sh"
-    local common_output="$SCRIPT_DIR/core/common.sh"
+    # Download common.sh (without using safe_download since it's not loaded yet)
+    COMMON_URL="$SCRIPTS_URL/core/common.sh"
+    COMMON_OUTPUT="$SCRIPT_DIR/core/common.sh"
 
-    if safe_download "$common_url" "$common_output"; then
-        source "$common_output"
-        REMOTE_INSTALL=true
+    if curl -fsSL --max-time 30 "$COMMON_URL" -o "$COMMON_OUTPUT" 2>/dev/null; then
+        # Basic validation before sourcing
+        if [ -s "$COMMON_OUTPUT" ] && head -1 "$COMMON_OUTPUT" | grep -q "^#!/"; then
+            source "$COMMON_OUTPUT"
+            REMOTE_INSTALL=true
+            echo -e "\033[0;32mSUCCESS: Common library loaded\033[0m"
+        else
+            echo -e "\033[0;31mERROR: Downloaded file appears invalid\033[0m"
+            rm -rf "$TEMP_DIR"
+            exit 1
+        fi
     else
-        log_error "Failed to download common library"
+        echo -e "\033[0;31mERROR: Failed to download common library\033[0m"
         rm -rf "$TEMP_DIR"
         exit 1
     fi
@@ -152,101 +182,72 @@ fi
 # Initialize environment
 init_common_env
 
-# 幫助函數
-show_help() {
-    cat << EOF
-Linux Setting Scripts - 自動安裝腳本
-
-用法: $0 [選項]
-
-選項:
-  --minimal                       最小安裝模式
-  --update                        更新已安裝的組件
-  --dry-run                       預覽模式（不實際安裝）
-  -v, --verbose                   顯示詳細日誌
-  -h, --help                      顯示此幫助訊息
-
-範例:
-  $0                             # 標準安裝（互動式選單）
-  $0 --minimal                   # 最小安裝
-  $0 --dry-run                   # 預覽將要安裝的內容
-  $0 --update                    # 更新模式
-  $0 --verbose                   # 詳細模式
-
-EOF
-}
+# 載入模組管理器
+if [ -f "$SCRIPT_DIR/core/module_manager.sh" ]; then
+    source "$SCRIPT_DIR/core/module_manager.sh"
+    init_module_manager
+    USE_MODULE_MANAGER=true
+else
+    USE_MODULE_MANAGER=false
+    log_info "模組管理器不可用，使用內建配置"
+fi
 
 # 錯誤處理函數
 handle_error() {
     local exit_code=$1
     local line_number="$2"
     local last_command="${3:-}"
-    
-    echo ""
-    echo "❌ 安裝失敗"
-    echo "───────────────────────────────"
-    echo "錯誤位置：install.sh:$line_number"
-    echo "錯誤代碼：$exit_code"
-    echo "失敗命令：$last_command"
-    echo "───────────────────────────────"
-    echo ""
-    
-    # 檢查日誌文件
-    if [ -n "${LOG_FILE:-}" ]; then
-        if [ -f "$LOG_FILE" ]; then
-            echo "📄 日誌文件：$LOG_FILE"
-            echo "   查看最新錯誤："
-            echo "   tail -50 $LOG_FILE"
-        else
-            echo "⚠️  日誌文件不存在：$LOG_FILE"
-        fi
+
+    printf "\n"
+    printf "${RED}╔═══════════════════════════════════════════════════════════════╗${NC}\n"
+    printf "${RED}║                       安裝失敗                                ║${NC}\n"
+    printf "${RED}╠═══════════════════════════════════════════════════════════════╣${NC}\n"
+    printf "${RED}║${NC}  位置: install.sh:%-44s${RED}║${NC}\n" "$line_number"
+    printf "${RED}║${NC}  代碼: %-54s${RED}║${NC}\n" "$exit_code"
+    printf "${RED}║${NC}  命令: %-54s${RED}║${NC}\n" "${last_command:0:54}"
+    printf "${RED}╠═══════════════════════════════════════════════════════════════╣${NC}\n"
+    printf "${RED}║${NC}  ${YELLOW}可能原因:${NC}                                                  ${RED}║${NC}\n"
+    printf "${RED}║${NC}    - 網路連線問題                                            ${RED}║${NC}\n"
+    printf "${RED}║${NC}    - 套件來源無法存取                                        ${RED}║${NC}\n"
+    printf "${RED}║${NC}    - 磁碟空間不足                                            ${RED}║${NC}\n"
+    printf "${RED}║${NC}    - 權限不足                                                ${RED}║${NC}\n"
+    printf "${RED}╠═══════════════════════════════════════════════════════════════╣${NC}\n"
+    printf "${RED}║${NC}  ${GREEN}建議操作:${NC}                                                  ${RED}║${NC}\n"
+    printf "${RED}║${NC}    1. 檢查網路: ping -c 1 github.com                         ${RED}║${NC}\n"
+    printf "${RED}║${NC}    2. 更新來源: sudo apt update                              ${RED}║${NC}\n"
+    printf "${RED}║${NC}    3. 檢查空間: df -h /                                      ${RED}║${NC}\n"
+
+    # 顯示日誌文件位置
+    if [ -n "${LOG_FILE:-}" ] && [ -f "$LOG_FILE" ]; then
+        printf "${RED}║${NC}    4. 查看日誌: tail -50 \$LOG_FILE                          ${RED}║${NC}\n"
     fi
-    
-    echo ""
-    echo "💡 快速診斷："
-    echo "   1. 檢查網絡連接："
-    echo "      ping -c 1 github.com"
-    echo "   2. 檢查磁碟空間："
-    echo "      df -h /"
-    echo "   3. 檢查權限："
-    echo "      sudo -v true 2>&1 | head -5"
-    echo "   4. 健康檢查："
-    echo "      ./scripts/quick_health.sh"
-    echo ""
-    
-    echo "🔧 常見問題解決："
-    echo "   網絡錯誤："
-    echo "     - 使用代理：export HTTP_PROXY=http://proxy:port"
-    echo "     - 切換到本地文件：無需下載"
-    echo "   "
-    echo "   權限錯誤："
-    echo "     - 檢查 sudo 配置：visudo"
-    echo "     - 確保用戶在 sudo 組：groups $USER"
-    echo "   "
-    echo "   磁碟空間不足："
-    echo "     - 清理 APT 快取：sudo apt clean && sudo apt autoremove"
-    echo "     - 清理 Docker：docker system prune -a"
-    echo ""
-    
+
+    printf "${RED}╚═══════════════════════════════════════════════════════════════╝${NC}\n"
+
     # 詢問是否查看日誌
     if [ -t 0 ]; then
-        read -p "要查看詳細日誌嗎？(y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            if [ -f "${LOG_FILE:-}" ]; then
-                tail -100 "$LOG_FILE" | less
-            else
-                echo "找不到日誌文件"
-            fi
-        fi
+        printf "\n"
+        printf "${CYAN}[l]${NC} 查看日誌  ${CYAN}[r]${NC} 重試  ${CYAN}[q]${NC} 退出: "
+        read -r -n 1 choice
+        printf "\n"
+        case $choice in
+            l|L)
+                if [ -f "${LOG_FILE:-}" ]; then
+                    tail -100 "$LOG_FILE" | less
+                else
+                    printf "${YELLOW}找不到日誌文件${NC}\n"
+                fi
+                ;;
+            r|R)
+                printf "${CYAN}請重新執行安裝腳本${NC}\n"
+                ;;
+        esac
     fi
-    
-    echo ""
-    echo "💡 需要更多幫助？"
-    echo "   - 查看 README：README.md"
-    echo "   - 提交 Issue：https://github.com/guan4tou2/my-linux-setting/issues"
-    echo ""
-    
+
+    printf "\n${BLUE}需要幫助？${NC}\n"
+    printf "  README: README.md\n"
+    printf "  Issues: https://github.com/guan4tou2/my-linux-setting/issues\n\n"
+
     cleanup_temp_files
     exit $exit_code
 }
@@ -597,10 +598,16 @@ main() {
                     selected_modules=""
                     printf "${CYAN}已清除所有選擇${NC}\n"
                     ;;
-                q|Q)
+                d|D)
+                    show_module_details
+                    ;;
+                q|Q|0)
                     cleanup
                     printf "${CYAN}退出安裝程序${NC}\n"
                     exit 0
+                    ;;
+                "")
+                    # 空輸入，繼續顯示選單
                     ;;
                 *)
                     printf "${RED}無效的輸入，請重試${NC}\n"
@@ -610,74 +617,88 @@ main() {
     done
 }
 
-# 顯示菜單函數
+# 顯示菜單函數（動態生成）
 show_menu() {
-    printf "\n${CYAN}請選擇要安裝的組件（可多選，用空格分隔）：${NC}\n"
-    printf "\n1) Python 開發環境：\n"
-    printf "   • Python3 與相關工具：\n"
-    printf "     - python3, pip, python3-venv\n"
-    printf "     - python3-dev, python3-setuptools\n"
-    printf "     - uv (現代 Python 包管理器)\n"
-    printf "   • 檔案管理器與系統工具：\n"
-    printf "     - ranger-fm (終端檔案管理器)\n"
-    printf "     - s-tui (系統監控工具)\n"
-    
-    printf "\n2) Docker 相關工具：\n"
-    printf "   • Docker 引擎與工具：\n"
-    printf "     - docker-ce, docker-ce-cli\n"
-    printf "     - containerd.io, docker-buildx-plugin\n"
-    printf "     - docker-compose-plugin\n"
-    printf "   • Docker 管理工具：\n"
-    printf "     - lazydocker (終端 Docker 管理器)\n"
-    
-    printf "\n3) 基礎工具：\n"
-    printf "   • 系統工具：\n"
-    printf "     - git, curl, wget, unzip, tar\n"
-    printf "     - build-essential, pkg-config\n"
-    printf "   • 終端增強工具：\n"
-    printf "     - lsd (更好的 ls)\n"
-    printf "     - bat (更好的 cat)\n"
-    printf "     - ripgrep (更好的 grep)\n"
-    printf "     - fd-find (更好的 find)\n"
-    printf "     - fzf (模糊搜尋工具)\n"
-    
-    printf "\n4) 終端機設定：\n"
-    printf "   • Shell 與主題：\n"
-    printf "     - zsh (Shell)\n"
-    printf "     - oh-my-zsh (zsh 框架)\n"
-    printf "     - powerlevel10k (主題)\n"
-    printf "   • ZSH 插件：\n"
-    printf "     - zsh-autosuggestions\n"
-    printf "     - zsh-syntax-highlighting\n"
-    printf "     - zsh-history-substring-search\n"
-    printf "     - you-should-use\n"
-    
-    printf "\n5) 開發工具：\n"
-    printf "   • 編輯器與版本控制：\n"
-    printf "     - neovim (終端編輯器)\n"
-    printf "     - lazyvim (neovim 配置)\n"
-    printf "     - lazygit (git 終端介面)\n"
-    printf "   • 開發環境：\n"
-    printf "     - nodejs, npm (Node.js)\n"
-    printf "     - cargo (Rust 包管理器)\n"
-    printf "     - lua, luarocks (Lua)\n"
-    
-    printf "\n6) 系統監控工具：\n"
-    printf "   • 系統資源監控：\n"
-    printf "     - btop (系統監控)\n"
-    printf "     - htop (處理程序監控)\n"
-    printf "   • 網路監控：\n"
-    printf "     - iftop (網路流量監控)\n"
-    printf "     - nethogs (程序網路監控)\n"
-    printf "   • 安全工具：\n"
-    printf "     - fail2ban (入侵防護)\n"
-    
-    printf "\n7) 安裝所有組件\n"
-    printf "0) 退出\n"
-    
-    printf "\n${GREEN}當前選擇的模組：$selected_modules${NC}\n"
-    printf "\n請輸入選項 (例如: 1 3 4 表示選擇1,3,4號模組)\n"
-    printf "輸入 'c' 清除選擇，輸入 'i' 開始安裝，輸入 'q' 退出: "
+    printf "\n"
+    printf "${CYAN}┌─ 選擇安裝模組 ─────────────────────────────────────────────┐${NC}\n"
+    printf "${CYAN}│                                                             │${NC}\n"
+
+    # 動態生成模組選項
+    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
+        local index=1
+        for module_id in "${MODULE_LIST[@]}"; do
+            local name="${MODULE_NAMES[$module_id]:-$module_id}"
+            local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
+            printf "${CYAN}│${NC}  ${GREEN}[%d]${NC} %-20s %-30s${CYAN}│${NC}\n" "$index" "$name" "$desc"
+            index=$((index + 1))
+        done
+        printf "${CYAN}│${NC}  ${GREEN}[%d]${NC} %-20s %-30s${CYAN}│${NC}\n" "$index" "全部安裝" ""
+    else
+        # 備用靜態選單
+        printf "${CYAN}│${NC}  ${GREEN}[1]${NC} Python 開發環境     python3, pip, uv, ranger         ${CYAN}│${NC}\n"
+        printf "${CYAN}│${NC}  ${GREEN}[2]${NC} Docker 工具         docker-ce, lazydocker            ${CYAN}│${NC}\n"
+        printf "${CYAN}│${NC}  ${GREEN}[3]${NC} 基礎工具           git, lsd, bat, ripgrep, fzf      ${CYAN}│${NC}\n"
+        printf "${CYAN}│${NC}  ${GREEN}[4]${NC} 終端設定           zsh, oh-my-zsh, powerlevel10k    ${CYAN}│${NC}\n"
+        printf "${CYAN}│${NC}  ${GREEN}[5]${NC} 開發工具           neovim, lazygit, nodejs, rust    ${CYAN}│${NC}\n"
+        printf "${CYAN}│${NC}  ${GREEN}[6]${NC} 監控工具           btop, htop, iftop, fail2ban      ${CYAN}│${NC}\n"
+        printf "${CYAN}│${NC}  ${GREEN}[7]${NC} 全部安裝                                            ${CYAN}│${NC}\n"
+    fi
+
+    printf "${CYAN}│                                                             │${NC}\n"
+    printf "${CYAN}├─────────────────────────────────────────────────────────────┤${NC}\n"
+
+    # 顯示當前選擇
+    if [ -n "$selected_modules" ]; then
+        printf "${CYAN}│${NC}  ${YELLOW}已選擇:${NC}%-46s${CYAN}│${NC}\n" "$selected_modules"
+    else
+        printf "${CYAN}│${NC}  ${YELLOW}已選擇:${NC} (尚未選擇)                                    ${CYAN}│${NC}\n"
+    fi
+
+    printf "${CYAN}│                                                             │${NC}\n"
+    printf "${CYAN}│${NC}  ${BLUE}[i]${NC} 開始安裝  ${BLUE}[c]${NC} 清除  ${BLUE}[d]${NC} 詳細說明  ${BLUE}[q]${NC} 退出        ${CYAN}│${NC}\n"
+    printf "${CYAN}└─────────────────────────────────────────────────────────────┘${NC}\n"
+    printf "\n輸入選項 (例如: 1 3 4): "
+}
+
+# 顯示模組詳細資訊（動態生成）
+show_module_details() {
+    printf "\n${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
+
+    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
+        local index=1
+        for module_id in "${MODULE_LIST[@]}"; do
+            local name="${MODULE_NAMES[$module_id]:-$module_id}"
+            local packages="${MODULE_PACKAGES[$module_id]:-}"
+            local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
+            local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
+
+            printf "${GREEN}[%d] %s${NC}\n" "$index" "$name"
+            [ -n "$packages" ] && printf "    APT: %s\n" "$packages"
+            [ -n "$brew_packages" ] && printf "    Brew: %s\n" "$brew_packages"
+            [ -n "$pip_packages" ] && printf "    Python (uv tool): %s\n" "$pip_packages"
+            printf "\n"
+            index=$((index + 1))
+        done
+    else
+        # 備用靜態詳細資訊
+        printf "${GREEN}[1] Python 開發環境${NC}\n"
+        printf "    python3, pip, uv, ranger-fm, s-tui\n\n"
+        printf "${GREEN}[2] Docker 工具${NC}\n"
+        printf "    docker-ce, lazydocker\n\n"
+        printf "${GREEN}[3] 基礎工具${NC}\n"
+        printf "    git, lsd, bat, ripgrep, fzf\n\n"
+        printf "${GREEN}[4] 終端設定${NC}\n"
+        printf "    zsh, oh-my-zsh, powerlevel10k\n\n"
+        printf "${GREEN}[5] 開發工具${NC}\n"
+        printf "    neovim, lazygit, nodejs, rust\n\n"
+        printf "${GREEN}[6] 監控工具${NC}\n"
+        printf "    btop, htop, iftop, fail2ban\n\n"
+    fi
+
+    printf "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
+    printf "\n${YELLOW}提示:${NC} 修改 config/modules.conf 可自訂安裝內容\n"
+    printf "按 Enter 返回選單..."
+    read -r
 }
 
 # 執行安裝腳本函數
@@ -699,19 +720,42 @@ execute_script() {
     fi
 }
 
-# 添加模組到選擇列表
+# 添加模組到選擇列表（動態支援）
 add_module() {
     local num=$1
-    case $num in
-        1) selected_modules="$selected_modules python" ;;
-        2) selected_modules="$selected_modules docker" ;;
-        3) selected_modules="$selected_modules base" ;;
-        4) selected_modules="$selected_modules terminal" ;;
-        5) selected_modules="$selected_modules dev" ;;
-        6) selected_modules="$selected_modules monitoring" ;;
-        7) selected_modules="$MODULES" ;;
-        *) printf "${RED}無效的選項：$num${NC}\n" ;;
-    esac
+
+    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
+        local total=${#MODULE_LIST[@]}
+        local all_num=$((total + 1))
+
+        if [ "$num" -eq "$all_num" ]; then
+            # 全部安裝
+            selected_modules="${MODULE_LIST[*]}"
+            return
+        elif [ "$num" -ge 1 ] && [ "$num" -le "$total" ]; then
+            local module_id="${MODULE_LIST[$((num - 1))]}"
+            # 避免重複添加
+            if [[ ! " $selected_modules " =~ " $module_id " ]]; then
+                selected_modules="$selected_modules $module_id"
+            fi
+            return
+        fi
+    else
+        # 備用靜態邏輯
+        case $num in
+            1) selected_modules="$selected_modules python" ;;
+            2) selected_modules="$selected_modules docker" ;;
+            3) selected_modules="$selected_modules base" ;;
+            4) selected_modules="$selected_modules terminal" ;;
+            5) selected_modules="$selected_modules dev" ;;
+            6) selected_modules="$selected_modules monitoring" ;;
+            7) selected_modules="$MODULES" ;;
+            *) printf "${RED}無效的選項：$num${NC}\n" ;;
+        esac
+        return
+    fi
+
+    printf "${RED}無效的選項：$num${NC}\n"
 }
 
 # 顯示安裝報告

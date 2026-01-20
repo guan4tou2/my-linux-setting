@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+
+# ==============================================================================
+# 自訂模組安裝腳本模板
+# ==============================================================================
+#
+# 使用方式:
+#   1. 複製此文件: cp custom_module.sh.template your_module_setup.sh
+#   2. 修改腳本內容
+#   3. 在 config/modules.conf 中設定 script=your_module_setup.sh
+#
+# ==============================================================================
+
+# 載入共用函數庫
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+# ==============================================================================
+# 模組資訊
+# ==============================================================================
+
+MODULE_NAME="自訂模組"
+MODULE_VERSION="1.0.0"
+
+log_info "開始安裝 $MODULE_NAME v$MODULE_VERSION"
+
+# ==============================================================================
+# 前置檢查（可選）
+# ==============================================================================
+
+# 檢查是否已安裝
+# if command -v your_tool >/dev/null 2>&1; then
+#     log_info "your_tool 已安裝，跳過"
+#     exit 0
+# fi
+
+# 檢查系統需求
+# if ! check_command some_dependency; then
+#     log_error "缺少依賴: some_dependency"
+#     exit 1
+# fi
+
+# ==============================================================================
+# 安裝套件
+# ==============================================================================
+
+# 方法 1: 使用通用安裝函數（自動選擇包管理器）
+# install_package package_name
+
+# 方法 2: 批量安裝
+# install_packages_batch package1 package2 package3
+
+# 方法 3: 使用 Homebrew（如果可用）
+# if command -v brew >/dev/null 2>&1; then
+#     install_brew_package package_name
+# fi
+
+# 方法 4: 使用 uv tool 安裝 Python 工具
+# if command -v uv >/dev/null 2>&1; then
+#     uv tool install tool_name
+# fi
+
+# 方法 5: 從 URL 下載安裝
+# safe_download "https://example.com/install.sh" "/tmp/install.sh"
+# bash /tmp/install.sh
+
+# 方法 6: 使用 cargo 安裝
+# if command -v cargo >/dev/null 2>&1; then
+#     cargo install tool_name
+# fi
+
+# ==============================================================================
+# 配置文件
+# ==============================================================================
+
+# 建立配置目錄
+# mkdir -p "$HOME/.config/your_tool"
+
+# 寫入配置文件
+# cat > "$HOME/.config/your_tool/config" << 'EOF'
+# # 你的配置內容
+# setting1=value1
+# setting2=value2
+# EOF
+
+# 使用 safe_append_to_file 避免重複添加
+# safe_append_to_file "export PATH=\$PATH:/new/path" "$HOME/.bashrc" "/new/path"
+
+# ==============================================================================
+# 安裝後設定
+# ==============================================================================
+
+# 啟用服務
+# sudo systemctl enable your_service
+# sudo systemctl start your_service
+
+# 設定權限
+# sudo usermod -aG some_group $USER
+
+# 驗證安裝
+# if command -v your_tool >/dev/null 2>&1; then
+#     log_success "$MODULE_NAME 安裝成功"
+#     your_tool --version
+# else
+#     log_error "$MODULE_NAME 安裝失敗"
+#     exit 1
+# fi
+
+# ==============================================================================
+# 完成
+# ==============================================================================
+
+log_success "$MODULE_NAME 安裝完成"
+
+# 顯示使用提示（可選）
+# cat << 'EOF'
+#
+# ════════════════════════════════════════════════════════
+#  安裝完成！使用方式:
+#    your_tool --help
+#    your_tool command
+# ════════════════════════════════════════════════════════
+#
+# EOF

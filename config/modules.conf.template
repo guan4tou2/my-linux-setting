@@ -1,0 +1,157 @@
+# ==============================================================================
+# Linux Setting Scripts - 模組配置模板
+# ==============================================================================
+#
+# 使用方式:
+#   1. 複製此文件: cp modules.conf.template modules.conf
+#   2. 根據需求修改模組配置
+#   3. 執行 ./install.sh 開始安裝
+#
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 模組模板（複製並修改以新增模組）
+# ------------------------------------------------------------------------------
+# [module_id]                    # 模組 ID（英文小寫，用於內部識別）
+# name=模組顯示名稱              # 顯示在選單中的名稱
+# description=簡短描述           # 顯示在選單中的描述
+# packages=apt1 apt2 apt3        # APT/系統套件（空格分隔）
+# brew_packages=brew1 brew2      # Homebrew 套件（可選）
+# apt_fallback=alt1 alt2         # Homebrew 不可用時的替代 APT 套件
+# pip_packages=pip1 pip2         # Python 套件（使用 uv tool 安裝）
+# cargo_packages=cargo1          # Rust 套件（可選）
+# npm_packages=npm1              # Node.js 全域套件（可選）
+# script=custom_setup.sh         # 自訂安裝腳本（放在 scripts/core/）
+# post_install=command           # 安裝後執行的命令
+# ------------------------------------------------------------------------------
+
+# ==============================================================================
+# 預設模組（可根據需求修改或刪除）
+# ==============================================================================
+
+[python]
+name=Python 開發環境
+description=python3, pip, uv, ranger
+packages=python3 python3-pip python3-venv python3-dev
+pip_packages=ranger-fm s-tui
+script=python_setup.sh
+
+[docker]
+name=Docker 工具
+description=docker-ce, lazydocker
+packages=
+script=docker_setup.sh
+
+[base]
+name=基礎工具
+description=git, lsd, bat, ripgrep, fzf
+packages=git curl wget unzip tar build-essential pkg-config
+brew_packages=lsd bat ripgrep fd fzf tealdeer
+apt_fallback=bat ripgrep fd-find fzf
+script=base_tools.sh
+
+[terminal]
+name=終端設定
+description=zsh, oh-my-zsh, powerlevel10k
+packages=zsh
+script=terminal_setup.sh
+
+[dev]
+name=開發工具
+description=neovim, lazygit, nodejs, rust
+packages=
+brew_packages=neovim lazygit node lua luarocks
+script=dev_tools.sh
+
+[monitoring]
+name=監控工具
+description=btop, htop, iftop, fail2ban
+packages=htop iftop nethogs fail2ban
+brew_packages=btop
+script=monitoring_tools.sh
+
+# ==============================================================================
+# 自訂模組範例（取消註解並修改以啟用）
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 範例 1: 資料庫工具
+# ------------------------------------------------------------------------------
+# [database]
+# name=資料庫工具
+# description=postgresql, redis, mongodb
+# packages=postgresql postgresql-contrib redis-server
+# brew_packages=mongosh
+# pip_packages=pgcli mycli litecli
+# script=
+# post_install=sudo systemctl enable postgresql redis-server
+
+# ------------------------------------------------------------------------------
+# 範例 2: 雲端 & DevOps 工具
+# ------------------------------------------------------------------------------
+# [cloud]
+# name=雲端工具
+# description=aws, gcloud, kubectl, terraform
+# packages=
+# brew_packages=awscli google-cloud-sdk kubectl helm terraform
+# pip_packages=
+# script=
+
+# ------------------------------------------------------------------------------
+# 範例 3: 網頁開發工具
+# ------------------------------------------------------------------------------
+# [webdev]
+# name=網頁開發
+# description=nodejs, yarn, deno, bun
+# packages=
+# brew_packages=node yarn deno bun
+# npm_packages=typescript ts-node prettier eslint
+# script=
+
+# ------------------------------------------------------------------------------
+# 範例 4: 多媒體工具
+# ------------------------------------------------------------------------------
+# [multimedia]
+# name=多媒體工具
+# description=ffmpeg, imagemagick, yt-dlp
+# packages=ffmpeg imagemagick
+# brew_packages=
+# pip_packages=yt-dlp
+# script=
+
+# ------------------------------------------------------------------------------
+# 範例 5: 安全工具
+# ------------------------------------------------------------------------------
+# [security]
+# name=安全工具
+# description=nmap, wireshark, burpsuite
+# packages=nmap wireshark tcpdump
+# brew_packages=
+# pip_packages=
+# script=
+
+# ------------------------------------------------------------------------------
+# 範例 6: 最小安裝（只安裝最基本的工具）
+# ------------------------------------------------------------------------------
+# [minimal]
+# name=最小安裝
+# description=僅 git, curl, vim
+# packages=git curl vim
+# brew_packages=
+# script=
+
+# ==============================================================================
+# 空白模板（複製使用）
+# ==============================================================================
+
+# [your_module_id]
+# name=你的模組名稱
+# description=簡短描述
+# packages=
+# brew_packages=
+# apt_fallback=
+# pip_packages=
+# cargo_packages=
+# npm_packages=
+# script=
+# post_install=
