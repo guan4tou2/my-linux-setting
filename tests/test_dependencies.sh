@@ -71,7 +71,7 @@ test_network_connectivity() {
     log_test "測試網路連接性..."
     
     # 檢查是否在測試環境中跳過網路測試
-    if [ "$TEST_ENVIRONMENT" = "docker" ] || [ "$SKIP_NETWORK_TESTS" = "true" ]; then
+    if [ "${TEST_ENVIRONMENT:-}" = "docker" ] || [ "${SKIP_NETWORK_TESTS:-false}" = "true" ]; then
         log_warn "跳過網路連接測試 (Docker/測試環境)"
         return 0
     fi
