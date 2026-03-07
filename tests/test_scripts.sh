@@ -30,6 +30,19 @@ log_warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
+# Portable text search helper.
+# Prefer ripgrep when available, fallback to grep in minimal CI images.
+search_text() {
+    local pattern="$1"
+    local file="$2"
+
+    if command -v rg >/dev/null 2>&1; then
+        rg -n "$pattern" "$file" >/dev/null 2>&1
+    else
+        grep -nE "$pattern" "$file" >/dev/null 2>&1
+    fi
+}
+
 # 測試腳本語法
 test_script_syntax() {
     log_test "測試腳本語法..."
@@ -128,7 +141,7 @@ test_argument_parsing() {
 test_skip_python_check_default() {
     log_test "檢查 SKIP_PYTHON_CHECK 預設值..."
 
-    if rg -n "SKIP_PYTHON_CHECK=\\\"\\$\\{SKIP_PYTHON_CHECK:-" "$SCRIPT_DIR/install.sh" >/dev/null 2>&1; then
+    if search_text "SKIP_PYTHON_CHECK=\\\"\\$\\{SKIP_PYTHON_CHECK:-" "$SCRIPT_DIR/install.sh"; then
         log_pass "SKIP_PYTHON_CHECK 已設定預設值"
     else
         log_fail "SKIP_PYTHON_CHECK 未設定預設值"
@@ -139,7 +152,7 @@ test_skip_python_check_default() {
 test_module_manager_install_path() {
     log_test "檢查模組管理器安裝路徑..."
 
-    if rg -n "install_module" "$SCRIPT_DIR/install.sh" >/dev/null 2>&1; then
+    if search_text "install_module" "$SCRIPT_DIR/install.sh"; then
         log_pass "install.sh 使用 install_module"
     else
         log_fail "install.sh 未使用 install_module"
@@ -150,8 +163,8 @@ test_module_manager_install_path() {
 test_linux_ci_gate_for_extended_suites() {
     log_test "檢查 Linux CI 測試 gate..."
 
-    if rg -n "should_run_linux_only_suites" "$SCRIPT_DIR/tests/run_all_tests.sh" >/dev/null 2>&1 && \
-       rg -n "if should_run_linux_only_suites; then" "$SCRIPT_DIR/tests/run_all_tests.sh" >/dev/null 2>&1; then
+    if search_text "should_run_linux_only_suites" "$SCRIPT_DIR/tests/run_all_tests.sh" && \
+       search_text "if should_run_linux_only_suites; then" "$SCRIPT_DIR/tests/run_all_tests.sh"; then
         log_pass "run_all_tests.sh 已配置 Linux CI gate"
     else
         log_fail "run_all_tests.sh 缺少 Linux CI gate"
@@ -168,8 +181,8 @@ test_workflow_linux_ci_settings() {
         return
     fi
 
-    if rg -n "CI:\\s*true" "$wf" >/dev/null 2>&1 && \
-       rg -n "tests/run_all_tests\\.sh" "$wf" >/dev/null 2>&1; then
+    if search_text "CI:\\s*true" "$wf" && \
+       search_text "tests/run_all_tests\\.sh" "$wf"; then
         log_pass "workflow 已配置 CI=true 且執行 run_all_tests.sh"
     else
         log_fail "workflow 缺少 CI=true 或 run_all_tests.sh"
