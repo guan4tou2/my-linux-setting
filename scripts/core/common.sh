@@ -1150,7 +1150,7 @@ install_brew_packages_batch() {
 
 backup_file() {
     local file="$1"
-    local backup_dir="${2:-$BACKUP_DIR}"
+    local backup_dir="${2:-${BACKUP_DIR:-}}"
     
     if [ -f "$file" ] || [ -d "$file" ]; then
         local backup_name

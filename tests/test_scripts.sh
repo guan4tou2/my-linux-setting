@@ -364,6 +364,23 @@ test_secure_download_variable_namespace() {
     fi
 }
 
+# 檢查 common.sh backup_file 在 set -u 下不會讀取未初始化 BACKUP_DIR
+test_common_backup_file_strict_default() {
+    log_test "檢查 common.sh backup_file 嚴格模式預設值..."
+
+    local common_sh="$SCRIPT_DIR/scripts/core/common.sh"
+    if [ ! -f "$common_sh" ]; then
+        log_fail "找不到 common.sh"
+        return
+    fi
+
+    if search_literal 'local backup_dir="${2:-${BACKUP_DIR:-}}"' "$common_sh"; then
+        log_pass "common.sh backup_file 已安全處理未設定 BACKUP_DIR"
+    else
+        log_fail "common.sh backup_file 仍可能在 set -u 下觸發未綁定變數"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -424,6 +441,8 @@ run_all_tests() {
     test_secure_download_common_path
     echo
     test_secure_download_variable_namespace
+    echo
+    test_common_backup_file_strict_default
     echo
     test_network_dependencies
     echo
