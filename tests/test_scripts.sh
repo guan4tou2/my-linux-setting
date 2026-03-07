@@ -328,6 +328,24 @@ test_base_tools_update_nonfatal() {
     fi
 }
 
+# 檢查 base_tools.sh 的 ipinfo APT source 採用明確 opt-in
+test_base_tools_ipinfo_opt_in() {
+    log_test "檢查 base_tools.sh 的 ipinfo source opt-in..."
+
+    local base_tools="$SCRIPT_DIR/scripts/core/base_tools.sh"
+    if [ ! -f "$base_tools" ]; then
+        log_fail "找不到 base_tools.sh"
+        return
+    fi
+
+    if search_literal 'if [ "$DISTRO_FAMILY" = "debian" ] && [ "${ENABLE_IPINFO_REPO:-false}" = "true" ]; then' "$base_tools" && \
+       search_literal 'if [ "$DISTRO" != "kali" ] && [ "${ENABLE_IPINFO_REPO:-false}" = "true" ]; then' "$base_tools"; then
+        log_pass "base_tools.sh 已將 ipinfo repo 與套件改為 opt-in"
+    else
+        log_fail "base_tools.sh 仍可能在預設情況寫入 ipinfo source"
+    fi
+}
+
 # 檢查 secure_download.sh 共用函數路徑正確
 test_secure_download_common_path() {
     log_test "檢查 secure_download.sh 共用函數路徑..."
@@ -455,6 +473,8 @@ run_all_tests() {
     test_requirements_setuptools_pin
     echo
     test_base_tools_update_nonfatal
+    echo
+    test_base_tools_ipinfo_opt_in
     echo
     test_secure_download_common_path
     echo

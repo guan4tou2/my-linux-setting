@@ -11,20 +11,17 @@ log_info "########## 安裝基礎工具 ##########"
 log_info "檢測到系統：$DISTRO ($DISTRO_FAMILY) - 包管理器：$PKG_MANAGER"
 
 # 更新套件庫
-if [ "$DISTRO_FAMILY" = "debian" ]; then
-    # 僅在 Debian 系列（包括 Kali）上添加 ipinfo PPA
-    # Security: Import GPG key before adding repository
+if [ "$DISTRO_FAMILY" = "debian" ] && [ "${ENABLE_IPINFO_REPO:-false}" = "true" ]; then
+    # 僅在明確 opt-in 時添加 ipinfo APT source，避免預設流程被第三方源影響
     if command -v run_as_root >/dev/null 2>&1; then
-        # Import GPG key for ipinfo repository
         run_as_root curl -fsSL https://ppa.ipinfo.net/ipinfo.gpg -o /usr/share/keyrings/ipinfo.gpg 2>/dev/null || true
-        # Add repository without trusted=yes (requires GPG key)
         run_as_root sh -c 'echo "deb https://ppa.ipinfo.net/ /" > /etc/apt/sources.list.d/ipinfo.ppa.list' 2>/dev/null || true
     else
-        # Import GPG key for ipinfo repository
         sudo curl -fsSL https://ppa.ipinfo.net/ipinfo.gpg -o /usr/share/keyrings/ipinfo.gpg 2>/dev/null || true
-        # Add repository without trusted=yes (requires GPG key)
         echo "deb https://ppa.ipinfo.net/ /" | sudo tee "/etc/apt/sources.list.d/ipinfo.ppa.list" >/dev/null 2>&1 || true
     fi
+elif [ "$DISTRO_FAMILY" = "debian" ]; then
+    log_info "預設不啟用 ipinfo 第三方套件源（設 ENABLE_IPINFO_REPO=true 可啟用）"
 fi
 
 # 使用通用更新函數
@@ -51,8 +48,8 @@ case "$DISTRO_FAMILY" in
     debian)
         # Debian/Ubuntu/Kali
         base_packages="git curl wget ca-certificates gnupg2 build-essential pkg-config libssl-dev bat lnav fzf ripgrep"
-        # Kali 特殊處理：通常已包含很多工具
-        if [ "$DISTRO" != "kali" ]; then
+        # Kali 特殊處理：通常已包含很多工具。ipinfo 改為明確 opt-in。
+        if [ "$DISTRO" != "kali" ] && [ "${ENABLE_IPINFO_REPO:-false}" = "true" ]; then
             base_packages="$base_packages software-properties-common ipinfo"
         fi
         ;;
