@@ -189,6 +189,23 @@ test_workflow_linux_ci_settings() {
     fi
 }
 
+# 檢查配置預覽腳本在非互動模式可正常執行
+test_preview_script_noninteractive() {
+    log_test "檢查 preview_config.sh 共用函數載入路徑..."
+
+    local preview_script="$SCRIPT_DIR/scripts/config/preview_config.sh"
+    if [ ! -f "$preview_script" ]; then
+        log_fail "找不到 preview_config.sh"
+        return
+    fi
+
+    if search_text "\\.\\./core/common\\.sh" "$preview_script"; then
+        log_pass "preview_config.sh 使用 scripts/core/common.sh 路徑"
+    else
+        log_fail "preview_config.sh 未使用 scripts/core/common.sh 路徑"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -231,6 +248,8 @@ run_all_tests() {
     test_linux_ci_gate_for_extended_suites
     echo
     test_workflow_linux_ci_settings
+    echo
+    test_preview_script_noninteractive
     echo
     test_network_dependencies
     echo
