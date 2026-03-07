@@ -135,7 +135,7 @@ run_script_tests() {
     echo ''
     
     echo '=== 測試配置預覽 ==='
-    ./scripts/preview_config.sh --full-preview 'python base'
+    ./scripts/config/preview_config.sh --full-preview 'python base'
     echo ''
     
     echo '=== 所有測試完成 ==='
@@ -204,7 +204,7 @@ run_benchmark() {
     start_time=\$(date +%s)
     
     echo '測試腳本載入時間...'
-    time source scripts/common.sh
+    time source scripts/core/common.sh
     
     echo '測試網路連接速度...'
     time curl -s -o /dev/null --max-time 10 http://example.com || echo '網路測試跳過'
