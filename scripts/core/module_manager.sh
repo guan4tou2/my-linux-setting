@@ -472,8 +472,8 @@ generate_module_details() {
     for module_id in "${MODULE_LIST[@]}"; do
         local name="${MODULE_NAMES[$module_id]}"
         local packages="${MODULE_PACKAGES[$module_id]}"
-        local brew_packages="${MODULE_BREW_PACKAGES[$module_id]}"
-        local pip_packages="${MODULE_PIP_PACKAGES[$module_id]}"
+        local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
+        local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
 
         printf "${GREEN}[%d] %s${NC}\n" "$index" "$name"
 
@@ -527,13 +527,13 @@ install_module() {
 
     local name="${MODULE_NAMES[$module_id]}"
     local packages="${MODULE_PACKAGES[$module_id]}"
-    local brew_packages="${MODULE_BREW_PACKAGES[$module_id]}"
-    local apt_fallback="${MODULE_APT_FALLBACK[$module_id]}"
-    local pip_packages="${MODULE_PIP_PACKAGES[$module_id]}"
-    local cargo_packages="${MODULE_CARGO_PACKAGES[$module_id]}"
-    local npm_packages="${MODULE_NPM_PACKAGES[$module_id]}"
-    local script="${MODULE_SCRIPTS[$module_id]}"
-    local post_install="${MODULE_POST_INSTALL[$module_id]}"
+    local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
+    local apt_fallback="${MODULE_APT_FALLBACK[$module_id]:-}"
+    local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
+    local cargo_packages="${MODULE_CARGO_PACKAGES[$module_id]:-}"
+    local npm_packages="${MODULE_NPM_PACKAGES[$module_id]:-}"
+    local script="${MODULE_SCRIPTS[$module_id]:-}"
+    local post_install="${MODULE_POST_INSTALL[$module_id]:-}"
 
     # 檢查模組安裝狀態
     local module_status

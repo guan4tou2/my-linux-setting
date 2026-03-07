@@ -43,6 +43,18 @@ search_text() {
     fi
 }
 
+# Portable literal text search helper.
+search_literal() {
+    local pattern="$1"
+    local file="$2"
+
+    if command -v rg >/dev/null 2>&1; then
+        rg -F -n "$pattern" "$file" >/dev/null 2>&1
+    else
+        grep -F -n "$pattern" "$file" >/dev/null 2>&1
+    fi
+}
+
 # 測試腳本語法
 test_script_syntax() {
     log_test "測試腳本語法..."
@@ -224,6 +236,27 @@ test_preview_config_strict_defaults() {
     fi
 }
 
+# 檢查 module_manager.sh 在嚴格模式下對可選欄位使用安全展開
+test_module_manager_strict_safe_access() {
+    log_test "檢查 module_manager.sh 嚴格模式 map 存取..."
+
+    local module_manager="$SCRIPT_DIR/scripts/core/module_manager.sh"
+    if [ ! -f "$module_manager" ]; then
+        log_fail "找不到 module_manager.sh"
+        return
+    fi
+
+    if search_literal 'local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"' "$module_manager" && \
+       search_literal 'local apt_fallback="${MODULE_APT_FALLBACK[$module_id]:-}"' "$module_manager" && \
+       search_literal 'local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"' "$module_manager" && \
+       search_literal 'local cargo_packages="${MODULE_CARGO_PACKAGES[$module_id]:-}"' "$module_manager" && \
+       search_literal 'local npm_packages="${MODULE_NPM_PACKAGES[$module_id]:-}"' "$module_manager"; then
+        log_pass "module_manager.sh 已使用安全展開存取可選欄位"
+    else
+        log_fail "module_manager.sh 仍有未安全展開的可選欄位"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -270,6 +303,8 @@ run_all_tests() {
     test_preview_script_noninteractive
     echo
     test_preview_config_strict_defaults
+    echo
+    test_module_manager_strict_safe_access
     echo
     test_network_dependencies
     echo
