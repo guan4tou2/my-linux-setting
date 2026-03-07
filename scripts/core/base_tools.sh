@@ -29,12 +29,12 @@ fi
 
 # 使用通用更新函數
 if command -v update_system >/dev/null 2>&1; then
-    update_system
+    update_system || log_warning "系統套件列表更新失敗，將繼續安裝流程"
 else
     # 後備：直接更新
     case "${PKG_MANAGER:-apt}" in
         apt)
-            sudo apt-get update
+            sudo apt-get update || log_warning "APT 套件列表更新失敗，將繼續安裝流程"
             ;;
         dnf|yum)
             sudo ${PKG_MANAGER} check-update || true

@@ -310,6 +310,24 @@ test_requirements_setuptools_pin() {
     fi
 }
 
+# 檢查 base_tools.sh 套件庫更新失敗時不應中止安裝
+test_base_tools_update_nonfatal() {
+    log_test "檢查 base_tools.sh 更新失敗容錯..."
+
+    local base_tools="$SCRIPT_DIR/scripts/core/base_tools.sh"
+    if [ ! -f "$base_tools" ]; then
+        log_fail "找不到 base_tools.sh"
+        return
+    fi
+
+    if search_literal 'update_system || log_warning "系統套件列表更新失敗，將繼續安裝流程"' "$base_tools" && \
+       search_literal 'sudo apt-get update || log_warning "APT 套件列表更新失敗，將繼續安裝流程"' "$base_tools"; then
+        log_pass "base_tools.sh 已容忍套件庫更新失敗"
+    else
+        log_fail "base_tools.sh 套件庫更新失敗仍可能中止流程"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -364,6 +382,8 @@ run_all_tests() {
     test_python_setup_requirements_fallback
     echo
     test_requirements_setuptools_pin
+    echo
+    test_base_tools_update_nonfatal
     echo
     test_network_dependencies
     echo
