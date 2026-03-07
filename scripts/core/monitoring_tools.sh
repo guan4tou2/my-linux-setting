@@ -46,6 +46,10 @@ show_progress "監控工具安裝完成"
 
 # 啟動 fail2ban
 printf "\033[36m設定 fail2ban\033[0m\n"
-sudo systemctl enable --now fail2ban
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+    sudo systemctl enable --now fail2ban || log_warning "fail2ban 服務啟動失敗，請稍後手動檢查"
+else
+    log_warning "偵測不到 systemd，略過 fail2ban 服務啟動"
+fi
 
-printf "\033[36m########## 系統監控工具安裝完成 ##########\n\033[m" 
+printf "\033[36m########## 系統監控工具安裝完成 ##########\n\033[m"

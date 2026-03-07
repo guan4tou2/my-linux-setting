@@ -435,6 +435,24 @@ test_dev_tools_lazygit_tmpdir() {
     fi
 }
 
+# 檢查 monitoring_tools.sh 在無 systemd 環境不會因 fail2ban 啟動失敗中止
+test_monitoring_tools_systemd_guard() {
+    log_test "檢查 monitoring_tools.sh 的 systemd 容錯..."
+
+    local monitoring_tools="$SCRIPT_DIR/scripts/core/monitoring_tools.sh"
+    if [ ! -f "$monitoring_tools" ]; then
+        log_fail "找不到 monitoring_tools.sh"
+        return
+    fi
+
+    if search_literal 'if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then' "$monitoring_tools" && \
+       search_literal 'sudo systemctl enable --now fail2ban || log_warning "fail2ban 服務啟動失敗，請稍後手動檢查"' "$monitoring_tools"; then
+        log_pass "monitoring_tools.sh 已在無 systemd 環境安全略過服務啟動"
+    else
+        log_fail "monitoring_tools.sh 仍可能因 systemctl 失敗中止"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -503,6 +521,8 @@ run_all_tests() {
     test_terminal_setup_optional_zshrc_backup
     echo
     test_dev_tools_lazygit_tmpdir
+    echo
+    test_monitoring_tools_systemd_guard
     echo
     test_network_dependencies
     echo
