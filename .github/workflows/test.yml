@@ -9,8 +9,14 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      CI: true
+      SKIP_NETWORK_TESTS: true
     steps:
       - uses: actions/checkout@v4
+
+      - name: Run Unified Test Suite (Linux CI)
+        run: ./tests/run_all_tests.sh
       
       - name: Build Docker Image
         run: ./docker-test.sh build

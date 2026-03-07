@@ -121,37 +121,6 @@ if ! command -v lsd >/dev/null 2>&1; then
 else
     log_debug "lsd already installed, skipping"
 fi
-        else
-            if brew install lsd >/dev/null 2>&1; then
-                log_success "lsd 安裝成功 (brew)"
-            else
-                log_warning "Homebrew 安裝失敗，嘗試使用 APT..."
-                BREW_FAILED=1
-            fi
-        fi
-    else
-        log_info "Homebrew 未安裝，嘗試使用 APT..."
-        BREW_FAILED=1
-    fi
-
-    # 方法 2: 如果 Homebrew 失敗或不可用，嘗試 APT
-    if [ "${BREW_FAILED:-0}" = "1" ]; then
-        if command -v install_apt_package >/dev/null 2>&1; then
-            if install_apt_package "lsd" 2>/dev/null; then
-                log_success "lsd 安裝成功 (apt)"
-            else
-                log_warning "lsd 安裝失敗，建議安裝 Homebrew 以獲取更好的支援"
-                log_info "安裝 Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-            fi
-        else
-            if sudo apt-get install -y lsd 2>/dev/null; then
-                log_success "lsd 安裝成功 (apt)"
-            else
-                log_warning "lsd 安裝失敗，建議安裝 Homebrew 以獲取更好的支援"
-            fi
-        fi
-    fi
-fi
 
 # 安裝 tealdeer (快速 TLDR 客戶端)
 # 優先使用 Homebrew 安裝（避免 cargo 編譯耗時）

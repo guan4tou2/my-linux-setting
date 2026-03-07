@@ -170,7 +170,7 @@ ENABLE_SECURE_DOWNLOAD=true
 
 ```bash
 # 執行所有測試
-./tests/run_all_tests.sh
+./tests/run_all_tests.sh  # 依賴/功能測試僅 Linux CI 預設執行
 
 # 單元測試
 ./tests/test_dependencies.sh      # 依賴檢查
@@ -179,6 +179,10 @@ ENABLE_SECURE_DOWNLOAD=true
 
 # 安全審計
 ./tests/security_audit.sh          # 安全檢查
+```
+
+```bash
+FORCE_LINUX_TESTS=true ./tests/run_all_tests.sh   # 本機強制執行 Linux-only 測試
 ```
 
 ### Docker 測試

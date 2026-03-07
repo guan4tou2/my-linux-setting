@@ -22,6 +22,19 @@ FAILED_SUITES=()
 # 測試報告
 REPORT_FILE="/tmp/linux_setting_test_report_$(date +%Y%m%d_%H%M%S).txt"
 
+should_run_linux_only_suites() {
+    # Allow manual override for local debugging.
+    if [ "${FORCE_LINUX_TESTS:-false}" = "true" ]; then
+        return 0
+    fi
+
+    if [ "$(uname -s)" = "Linux" ] && [ "${CI:-false}" = "true" ]; then
+        return 0
+    fi
+
+    return 1
+}
+
 log_header() {
     echo -e "${CYAN}======================================${NC}"
     echo -e "${CYAN}$1${NC}"
@@ -156,7 +169,11 @@ collect_system_info() {
         echo "發行版: $(cat /etc/os-release 2>/dev/null | head -3 || echo '未知')"
         echo "Python 版本: $(python3 --version 2>/dev/null || echo '未安裝')"
         echo "磁盤空間: $(df -h / | tail -1)"
-        echo "內存信息: $(free -h | head -2)"
+        if command -v free >/dev/null 2>&1; then
+            echo "內存信息: $(free -h | head -2)"
+        else
+            echo "內存信息: free 命令不可用"
+        fi
         echo "當前用戶: $(whoami)"
         echo "當前目錄: $(pwd)"
         echo "PATH: $PATH"
@@ -174,12 +191,20 @@ run_all_test_suites() {
     
     # 1. 腳本語法和基礎測試
     run_test_suite "$TESTS_DIR/test_scripts.sh" "腳本語法測試"
-    
-    # 2. 系統依賴測試
-    run_test_suite "$TESTS_DIR/test_dependencies.sh" "系統依賴測試"
-    
-    # 3. 功能測試
-    run_test_suite "$TESTS_DIR/test_functionality.sh" "功能測試"
+
+    if should_run_linux_only_suites; then
+        # 2. 系統依賴測試（Linux CI only）
+        run_test_suite "$TESTS_DIR/test_dependencies.sh" "系統依賴測試"
+
+        # 3. 功能測試（Linux CI only）
+        run_test_suite "$TESTS_DIR/test_functionality.sh" "功能測試"
+    else
+        echo -e "${YELLOW}[SKIP]${NC} 跳過 Linux-only 測試套件 (需要 Linux CI)"
+        echo "  - test_dependencies.sh"
+        echo "  - test_functionality.sh"
+        echo "  提示: 設定 FORCE_LINUX_TESTS=true 可在本機強制執行"
+        echo ""
+    fi
 }
 
 # 生成最終報告

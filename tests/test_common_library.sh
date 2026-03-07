@@ -5,13 +5,19 @@
 # ==============================================================================
 
 # Source the common library
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/../core/common.sh" ]; then
-    source "$SCRIPT_DIR/../core/common.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export LOG_DIR="/tmp/linux-setting-test-logs-$$"
+export BACKUP_DIR="/tmp/linux-setting-test-backups-$$"
+export CACHE_ENABLED="false"
+export SKIP_NETWORK_TESTS="${SKIP_NETWORK_TESTS:-true}"
+if [ -f "$SCRIPT_DIR/scripts/core/common.sh" ]; then
+    source "$SCRIPT_DIR/scripts/core/common.sh"
 else
     echo "Error: Cannot find common.sh"
     exit 1
 fi
+set +e
+set +u
 
 # Test counters
 TESTS_RUN=0
@@ -76,7 +82,7 @@ test_log_functions_exist() {
 test_init_logging() {
     # Test that init_logging creates log directory
     init_logging
-    assert_true "[ -d '$LOG_DIR']" "Log directory created"
+    assert_true "[ -d \"$LOG_DIR\" ]" "Log directory created"
 }
 
 # ==============================================================================
@@ -86,7 +92,7 @@ test_init_logging() {
 test_distro_detection() {
     local distro
     distro=$(detect_distro)
-    assert_true "[ -n '$distro']" "Distro detection returns non-empty string"
+    assert_true "[ -n \"$distro\" ]" "Distro detection returns non-empty string"
 }
 
 test_distro_family() {
@@ -104,7 +110,11 @@ test_package_manager() {
     assert_equals "apt" "$pkg_manager" "Debian uses apt"
 
     pkg_manager=$(get_package_manager "rhel")
-    assert_equals "dnf" "$pkg_manager" "RHEL uses dnf (or yum)"
+    if [ "$pkg_manager" = "dnf" ] || [ "$pkg_manager" = "yum" ]; then
+        assert_equals "$pkg_manager" "$pkg_manager" "RHEL uses dnf or yum"
+    else
+        assert_equals "dnf|yum" "$pkg_manager" "RHEL uses dnf or yum"
+    fi
 
     pkg_manager=$(get_package_manager "arch")
     assert_equals "pacman" "$pkg_manager" "Arch uses pacman"
@@ -152,7 +162,7 @@ test_string_operations() {
     # Test backup file naming
     local test_file="/tmp/test_file_$$"
     touch "$test_file"
-    backup_file "$test_file"
+    backup_file "$test_file" "$BACKUP_DIR"
 
     local backup_count
     backup_count=$(find "$BACKUP_DIR" -name "*test_file_*" 2>/dev/null | wc -l)
@@ -175,11 +185,22 @@ test_safe_download_invalid_url() {
     fi
 
     local test_file="/tmp/test_download_$$"
-    ! safe_download "https://nonexistent.invalid/file.sh" "$test_file"
+    safe_download "https://nonexistent.invalid/file.sh" "$test_file"
     local result=$?
     assert_equals "1" "$result" "Invalid URL download fails"
 
     rm -f "$test_file"
+}
+
+# ==============================================================================
+# Tests for Homebrew fallback behavior
+# ==============================================================================
+
+test_install_with_homebrew_fallback_no_brew() {
+    # Force a PATH without brew to verify fallback behavior
+    PATH="/nonexistent" PREFER_HOMEBREW=true install_with_homebrew_fallback "fakepkg" "fakebin"
+    local result=$?
+    assert_equals "1" "$result" "install_with_homebrew_fallback returns non-zero when brew is missing"
 }
 
 # ==============================================================================
@@ -218,6 +239,10 @@ run_all_tests() {
 
     echo "Testing Safe Download..."
     test_safe_download_invalid_url
+    echo ""
+
+    echo "Testing Homebrew Fallback..."
+    test_install_with_homebrew_fallback_no_brew
     echo ""
 
     # Print summary

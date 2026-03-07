@@ -99,10 +99,14 @@ PARALLEL_JOBS=8 ./install.sh
 ### 本地測試
 
 ```bash
-./tests/run_all_tests.sh          # 執行所有測試
+./tests/run_all_tests.sh          # 測試入口（依賴/功能測試僅 Linux CI 預設執行）
 ./tests/test_dependencies.sh      # 依賴檢查
 ./tests/test_functionality.sh     # 功能測試
 ./scripts/preview_config.sh       # 預覽配置
+```
+
+```bash
+FORCE_LINUX_TESTS=true ./tests/run_all_tests.sh   # 本機強制執行 Linux-only 測試
 ```
 
 ### Docker 測試
