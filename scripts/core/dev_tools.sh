@@ -184,10 +184,11 @@ if ! command -v lazygit > /dev/null 2>&1; then
     if [ "${BREW_FAILED:-0}" = "1" ]; then
         printf "\033[36m從 GitHub 下載 Lazygit\033[0m\n"
         LAZYGIT_VERSION=$(curl -s "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" | grep -Po '"tag_name": "v\K[^"]*')
-        curl -Lo lazygit.tar.gz "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
-        tar xf lazygit.tar.gz lazygit
-        sudo install lazygit /usr/local/bin
-        rm -rf lazygit lazygit.tar.gz
+        lazygit_tmp_dir="$(mktemp -d)"
+        curl -fsSL -o "$lazygit_tmp_dir/lazygit.tar.gz" "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
+        tar -xzf "$lazygit_tmp_dir/lazygit.tar.gz" -C "$lazygit_tmp_dir" lazygit
+        sudo install "$lazygit_tmp_dir/lazygit" /usr/local/bin
+        rm -rf "$lazygit_tmp_dir"
         log_success "Lazygit 安裝成功 (GitHub)"
     fi
 fi

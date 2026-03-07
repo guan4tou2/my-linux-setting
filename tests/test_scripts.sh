@@ -417,6 +417,24 @@ test_terminal_setup_optional_zshrc_backup() {
     fi
 }
 
+# 檢查 dev_tools.sh 下載 lazygit 時使用可寫入暫存目錄
+test_dev_tools_lazygit_tmpdir() {
+    log_test "檢查 dev_tools.sh 的 lazygit 暫存下載路徑..."
+
+    local dev_tools="$SCRIPT_DIR/scripts/core/dev_tools.sh"
+    if [ ! -f "$dev_tools" ]; then
+        log_fail "找不到 dev_tools.sh"
+        return
+    fi
+
+    if search_literal 'lazygit_tmp_dir="$(mktemp -d)"' "$dev_tools" && \
+       search_literal 'curl -fsSL -o "$lazygit_tmp_dir/lazygit.tar.gz"' "$dev_tools"; then
+        log_pass "dev_tools.sh 已使用暫存目錄下載 lazygit"
+    else
+        log_fail "dev_tools.sh 仍可能在不可寫目錄下載 lazygit"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -483,6 +501,8 @@ run_all_tests() {
     test_common_backup_file_strict_default
     echo
     test_terminal_setup_optional_zshrc_backup
+    echo
+    test_dev_tools_lazygit_tmpdir
     echo
     test_network_dependencies
     echo
