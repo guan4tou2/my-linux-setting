@@ -206,6 +206,24 @@ test_preview_script_noninteractive() {
     fi
 }
 
+# 檢查 preview_config.sh 對 set -u 的環境有安全預設值
+test_preview_config_strict_defaults() {
+    log_test "檢查 preview_config.sh 嚴格模式預設值..."
+
+    local preview_script="$SCRIPT_DIR/scripts/config/preview_config.sh"
+    if [ ! -f "$preview_script" ]; then
+        log_fail "找不到 preview_config.sh"
+        return
+    fi
+
+    if search_text "MIRROR_MODE=\\\"\\$\\{MIRROR_MODE:-" "$preview_script" && \
+       search_text "INSTALL_MODE=\\\"\\$\\{INSTALL_MODE:-" "$preview_script"; then
+        log_pass "preview_config.sh 已設定 MIRROR_MODE/INSTALL_MODE 預設值"
+    else
+        log_fail "preview_config.sh 缺少 MIRROR_MODE/INSTALL_MODE 預設值"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -250,6 +268,8 @@ run_all_tests() {
     test_workflow_linux_ci_settings
     echo
     test_preview_script_noninteractive
+    echo
+    test_preview_config_strict_defaults
     echo
     test_network_dependencies
     echo

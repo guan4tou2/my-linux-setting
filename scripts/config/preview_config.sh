@@ -13,6 +13,10 @@ source "$COMMON_SH" || {
     exit 1
 }
 
+# 在嚴格 shell（set -u）環境下提供安全預設值
+MIRROR_MODE="${MIRROR_MODE:-auto}"
+INSTALL_MODE="${INSTALL_MODE:-full}"
+
 log_info "########## 配置預覽工具 ##########"
 
 # 預計安裝時間（分鐘）
