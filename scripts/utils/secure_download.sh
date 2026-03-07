@@ -17,9 +17,9 @@ source "$COMMON_SH" || {
 }
 
 # 安全配置
-readonly DOWNLOAD_TIMEOUT=30
-readonly MAX_SCRIPT_SIZE=1048576  # 1MB
-readonly ALLOWED_DOMAINS=(
+readonly SECURE_DOWNLOAD_TIMEOUT=30
+readonly SECURE_MAX_SCRIPT_SIZE=1048576  # 1MB
+readonly SECURE_ALLOWED_DOMAINS=(
     "raw.githubusercontent.com"
     "get.docker.com"
     "astral.sh"
@@ -32,7 +32,7 @@ verify_domain() {
     local domain
     domain=$(echo "$url" | sed -e 's/[^/]*\/\/\([^@]*@\)\?\([^:/]*\).*/\2/')
     
-    for allowed_domain in "${ALLOWED_DOMAINS[@]}"; do
+    for allowed_domain in "${SECURE_ALLOWED_DOMAINS[@]}"; do
         if [[ "$domain" == "$allowed_domain" ]]; then
             return 0
         fi
@@ -114,7 +114,7 @@ secure_download_and_execute() {
     
     # 下載腳本
     log_info "正在下載腳本..."
-    if ! timeout "$DOWNLOAD_TIMEOUT" curl -fsSL --max-filesize "$MAX_SCRIPT_SIZE" "$url" -o "$temp_script"; then
+    if ! timeout "$SECURE_DOWNLOAD_TIMEOUT" curl -fsSL --max-filesize "$SECURE_MAX_SCRIPT_SIZE" "$url" -o "$temp_script"; then
         log_error "下載失敗: $url"
         return 1
     fi
@@ -122,7 +122,7 @@ secure_download_and_execute() {
     # 檢查文件大小
     local file_size
     file_size=$(stat -f%z "$temp_script" 2>/dev/null || stat -c%s "$temp_script" 2>/dev/null)
-    if [ "$file_size" -gt "$MAX_SCRIPT_SIZE" ]; then
+    if [ "$file_size" -gt "$SECURE_MAX_SCRIPT_SIZE" ]; then
         log_error "腳本文件過大: ${file_size} bytes"
         return 1
     fi

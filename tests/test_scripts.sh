@@ -345,6 +345,25 @@ test_secure_download_common_path() {
     fi
 }
 
+# 檢查 secure_download.sh 避免與 common.sh readonly 變數衝突
+test_secure_download_variable_namespace() {
+    log_test "檢查 secure_download.sh 變數命名空間..."
+
+    local secure_download="$SCRIPT_DIR/scripts/utils/secure_download.sh"
+    if [ ! -f "$secure_download" ]; then
+        log_fail "找不到 secure_download.sh"
+        return
+    fi
+
+    if search_literal 'readonly SECURE_DOWNLOAD_TIMEOUT=' "$secure_download" && \
+       search_literal 'readonly SECURE_MAX_SCRIPT_SIZE=' "$secure_download" && \
+       search_literal 'readonly SECURE_ALLOWED_DOMAINS=' "$secure_download"; then
+        log_pass "secure_download.sh 已使用專用前綴變數"
+    else
+        log_fail "secure_download.sh 仍可能與 common.sh 變數衝突"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -403,6 +422,8 @@ run_all_tests() {
     test_base_tools_update_nonfatal
     echo
     test_secure_download_common_path
+    echo
+    test_secure_download_variable_namespace
     echo
     test_network_dependencies
     echo
