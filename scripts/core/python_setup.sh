@@ -74,15 +74,13 @@ VENV_DIR="$HOME/.local/venv/system-tools"
 # 為虛擬環境安裝基礎依賴（兼容 uv venv 預設不含 pip 的情況）
 install_venv_setuptools() {
     if check_command uv; then
-        if uv pip install --python "$VENV_DIR/bin/python" setuptools >/dev/null 2>&1; then
+        if uv pip install --python "$VENV_DIR/bin/python" "setuptools<81" wheel >/dev/null 2>&1; then
             return 0
         fi
         "$VENV_DIR/bin/python" -m ensurepip --upgrade >/dev/null 2>&1 || true
     fi
 
-    if [ -x "$VENV_DIR/bin/pip" ]; then
-        "$VENV_DIR/bin/pip" install setuptools >/dev/null 2>&1 || true
-    fi
+    "$VENV_DIR/bin/python" -m pip install "setuptools<81" wheel >/dev/null 2>&1 || true
 }
 
 if [ ! -d "$VENV_DIR" ]; then
@@ -119,14 +117,15 @@ if [ -n "$REQUIREMENTS_FILE" ] && [ -f "$REQUIREMENTS_FILE" ]; then
 
     install_requirements_with_fallback() {
         if check_command uv; then
-            if uv pip install -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python"; then
+            if uv pip install --no-build-isolation -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python"; then
                 return 0
             fi
             log_warning "uv 安裝失敗，使用傳統方式"
         fi
 
         "$VENV_DIR/bin/python" -m ensurepip --upgrade >/dev/null 2>&1 || true
-        "$VENV_DIR/bin/python" -m pip install -r "$REQUIREMENTS_FILE"
+        "$VENV_DIR/bin/python" -m pip install "setuptools<81" wheel >/dev/null 2>&1 || true
+        "$VENV_DIR/bin/python" -m pip install --no-build-isolation -r "$REQUIREMENTS_FILE"
     }
 
     install_requirements_with_fallback

@@ -2,7 +2,7 @@
 # 此文件鎖定關鍵 Python 包的版本以確保穩定性
 
 # 基礎依賴 (用於相容性)
-setuptools
+setuptools<81
 
 # 終端增強工具 (固定到最新 master commit 以支援 Python 3.12+)
 # 使用特定 commit hash 確保版本穩定性

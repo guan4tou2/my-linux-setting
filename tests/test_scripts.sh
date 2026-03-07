@@ -267,7 +267,7 @@ test_python_setup_uv_venv_bootstrap() {
         return
     fi
 
-    if search_literal 'uv pip install --python "$VENV_DIR/bin/python" setuptools' "$python_setup"; then
+    if search_literal 'uv pip install --python "$VENV_DIR/bin/python" "setuptools<81" wheel' "$python_setup"; then
         log_pass "python_setup.sh 使用 uv pip 為 venv 安裝 setuptools"
     else
         log_fail "python_setup.sh 缺少 uv venv 的 setuptools 啟動邏輯"
@@ -284,11 +284,29 @@ test_python_setup_requirements_fallback() {
         return
     fi
 
-    if search_literal '"$VENV_DIR/bin/python" -m ensurepip --upgrade' "$python_setup" && \
-       search_literal '"$VENV_DIR/bin/python" -m pip install -r "$REQUIREMENTS_FILE"' "$python_setup"; then
+    if search_literal 'uv pip install --no-build-isolation -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python"' "$python_setup" && \
+       search_literal '"$VENV_DIR/bin/python" -m ensurepip --upgrade' "$python_setup" && \
+       search_literal '"$VENV_DIR/bin/python" -m pip install --no-build-isolation -r "$REQUIREMENTS_FILE"' "$python_setup"; then
         log_pass "python_setup.sh 已使用 python -m pip 作為 requirements 後備"
     else
         log_fail "python_setup.sh requirements 後備仍依賴固定 pip 路徑"
+    fi
+}
+
+# 檢查 requirements.txt 對 setuptools 做相容性鎖定
+test_requirements_setuptools_pin() {
+    log_test "檢查 requirements.txt 的 setuptools 版本鎖定..."
+
+    local requirements="$SCRIPT_DIR/requirements.txt"
+    if [ ! -f "$requirements" ]; then
+        log_fail "找不到 requirements.txt"
+        return
+    fi
+
+    if search_literal 'setuptools<81' "$requirements"; then
+        log_pass "requirements.txt 已鎖定 setuptools<81"
+    else
+        log_fail "requirements.txt 缺少 setuptools<81 相容性鎖定"
     fi
 }
 
@@ -344,6 +362,8 @@ run_all_tests() {
     test_python_setup_uv_venv_bootstrap
     echo
     test_python_setup_requirements_fallback
+    echo
+    test_requirements_setuptools_pin
     echo
     test_network_dependencies
     echo
