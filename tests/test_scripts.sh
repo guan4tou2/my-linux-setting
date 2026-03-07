@@ -328,6 +328,23 @@ test_base_tools_update_nonfatal() {
     fi
 }
 
+# 檢查 secure_download.sh 共用函數路徑正確
+test_secure_download_common_path() {
+    log_test "檢查 secure_download.sh 共用函數路徑..."
+
+    local secure_download="$SCRIPT_DIR/scripts/utils/secure_download.sh"
+    if [ ! -f "$secure_download" ]; then
+        log_fail "找不到 secure_download.sh"
+        return
+    fi
+
+    if search_literal 'COMMON_SH="$SCRIPT_DIR/../core/common.sh"' "$secure_download"; then
+        log_pass "secure_download.sh 使用 scripts/core/common.sh 路徑"
+    else
+        log_fail "secure_download.sh 未使用 scripts/core/common.sh 路徑"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -384,6 +401,8 @@ run_all_tests() {
     test_requirements_setuptools_pin
     echo
     test_base_tools_update_nonfatal
+    echo
+    test_secure_download_common_path
     echo
     test_network_dependencies
     echo

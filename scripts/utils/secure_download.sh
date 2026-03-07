@@ -6,7 +6,12 @@
 
 # 載入共用函數庫
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh" || {
+COMMON_SH="$SCRIPT_DIR/../core/common.sh"
+if [ ! -f "$COMMON_SH" ]; then
+    COMMON_SH="$SCRIPT_DIR/common.sh"
+fi
+
+source "$COMMON_SH" || {
     echo "錯誤: 無法載入共用函數庫"
     exit 1
 }
