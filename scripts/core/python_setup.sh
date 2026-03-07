@@ -117,27 +117,19 @@ show_progress "安裝 Python 工具"
 if [ -n "$REQUIREMENTS_FILE" ] && [ -f "$REQUIREMENTS_FILE" ]; then
     log_info "使用 requirements.txt 安裝套件"
 
-    # 在安靜模式下，隱藏 uv / pip 的詳細輸出，只保留錯誤碼與我們自己的 log
-    if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
+    install_requirements_with_fallback() {
         if check_command uv; then
-            if ! uv pip install -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python"; then
-                log_warning "uv 安裝失敗，使用傳統方式"
-                "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+            if uv pip install -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python"; then
+                return 0
             fi
-        else
-            "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+            log_warning "uv 安裝失敗，使用傳統方式"
         fi
-    else
-        # 一般模式下保留完整輸出，方便除錯
-        if check_command uv; then
-            uv pip install -r "$REQUIREMENTS_FILE" --python "$VENV_DIR/bin/python" || {
-                log_warning "uv 安裝失敗，使用傳統方式"
-                "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
-            }
-        else
-            "$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
-        fi
-    fi
+
+        "$VENV_DIR/bin/python" -m ensurepip --upgrade >/dev/null 2>&1 || true
+        "$VENV_DIR/bin/python" -m pip install -r "$REQUIREMENTS_FILE"
+    }
+
+    install_requirements_with_fallback
 else
     # 回退到單個套件安裝
     uv_packages="thefuck ranger-fm s-tui"

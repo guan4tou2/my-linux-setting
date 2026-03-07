@@ -274,6 +274,24 @@ test_python_setup_uv_venv_bootstrap() {
     fi
 }
 
+# 檢查 python_setup.sh 在 uv 失敗時使用 python -m pip 後備
+test_python_setup_requirements_fallback() {
+    log_test "檢查 python_setup.sh requirements 後備流程..."
+
+    local python_setup="$SCRIPT_DIR/scripts/core/python_setup.sh"
+    if [ ! -f "$python_setup" ]; then
+        log_fail "找不到 python_setup.sh"
+        return
+    fi
+
+    if search_literal '"$VENV_DIR/bin/python" -m ensurepip --upgrade' "$python_setup" && \
+       search_literal '"$VENV_DIR/bin/python" -m pip install -r "$REQUIREMENTS_FILE"' "$python_setup"; then
+        log_pass "python_setup.sh 已使用 python -m pip 作為 requirements 後備"
+    else
+        log_fail "python_setup.sh requirements 後備仍依賴固定 pip 路徑"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -324,6 +342,8 @@ run_all_tests() {
     test_module_manager_strict_safe_access
     echo
     test_python_setup_uv_venv_bootstrap
+    echo
+    test_python_setup_requirements_fallback
     echo
     test_network_dependencies
     echo
