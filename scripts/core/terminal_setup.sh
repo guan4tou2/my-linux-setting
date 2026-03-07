@@ -41,7 +41,11 @@ log_success "Zsh 版本檢查通過: $ZSH_VERSION"
 show_progress "安裝 Oh-my-zsh"
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
     log_info "安裝 oh-my-zsh"
-    backup_file "$HOME/.zshrc"
+    if [ -f "$HOME/.zshrc" ]; then
+        backup_file "$HOME/.zshrc"
+    else
+        log_info "未找到 ~/.zshrc，略過備份"
+    fi
     # 在部分容器 / 非互動環境中，$USER 可能為空，改用 whoami 作為後備
     target_user="${USER:-$(id -un 2>/dev/null || whoami)}"
     if command -v run_as_root >/dev/null 2>&1; then

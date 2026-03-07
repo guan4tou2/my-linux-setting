@@ -381,6 +381,24 @@ test_common_backup_file_strict_default() {
     fi
 }
 
+# 檢查 terminal_setup.sh 在 .zshrc 不存在時不會因 backup_file 回傳失敗而中止
+test_terminal_setup_optional_zshrc_backup() {
+    log_test "檢查 terminal_setup.sh 的 .zshrc 備份容錯..."
+
+    local terminal_setup="$SCRIPT_DIR/scripts/core/terminal_setup.sh"
+    if [ ! -f "$terminal_setup" ]; then
+        log_fail "找不到 terminal_setup.sh"
+        return
+    fi
+
+    if search_literal 'if [ -f "$HOME/.zshrc" ]; then' "$terminal_setup" && \
+       search_literal 'backup_file "$HOME/.zshrc"' "$terminal_setup"; then
+        log_pass "terminal_setup.sh 已在 .zshrc 存在時才執行備份"
+    else
+        log_fail "terminal_setup.sh 仍可能因缺少 .zshrc 造成備份步驟失敗"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -443,6 +461,8 @@ run_all_tests() {
     test_secure_download_variable_namespace
     echo
     test_common_backup_file_strict_default
+    echo
+    test_terminal_setup_optional_zshrc_backup
     echo
     test_network_dependencies
     echo
