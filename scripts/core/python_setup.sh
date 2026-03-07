@@ -70,6 +70,21 @@ log_info "使用全球鏡像源 (https://pypi.org/simple/)"
 # 創建系統工具虛擬環境
 show_progress "創建虛擬環境"
 VENV_DIR="$HOME/.local/venv/system-tools"
+
+# 為虛擬環境安裝基礎依賴（兼容 uv venv 預設不含 pip 的情況）
+install_venv_setuptools() {
+    if check_command uv; then
+        if uv pip install --python "$VENV_DIR/bin/python" setuptools >/dev/null 2>&1; then
+            return 0
+        fi
+        "$VENV_DIR/bin/python" -m ensurepip --upgrade >/dev/null 2>&1 || true
+    fi
+
+    if [ -x "$VENV_DIR/bin/pip" ]; then
+        "$VENV_DIR/bin/pip" install setuptools >/dev/null 2>&1 || true
+    fi
+}
+
 if [ ! -d "$VENV_DIR" ]; then
     log_info "創建系統工具虛擬環境"
     if check_command uv; then
@@ -78,14 +93,12 @@ if [ ! -d "$VENV_DIR" ]; then
         python3 -m venv "$VENV_DIR"
     fi
     # 安裝基礎依賴（包含 setuptools 用於 thefuck）
-    "$VENV_DIR/bin/pip" install setuptools
+    install_venv_setuptools
     log_success "虛擬環境創建成功: $VENV_DIR"
 fi
 
 # 強制確保基礎依賴存在（處理已存在的 venv）
-if [ -x "$VENV_DIR/bin/pip" ]; then
-    "$VENV_DIR/bin/pip" install setuptools >/dev/null 2>&1 || true
-fi
+install_venv_setuptools
 
 # 下載 requirements.txt (不使用快取以確保獲取最新版本)
 show_progress "下載套件需求文件"

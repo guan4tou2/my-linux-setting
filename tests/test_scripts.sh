@@ -257,6 +257,23 @@ test_module_manager_strict_safe_access() {
     fi
 }
 
+# 檢查 python_setup.sh 在 uv venv 下不依賴固定 pip 路徑
+test_python_setup_uv_venv_bootstrap() {
+    log_test "檢查 python_setup.sh 的 uv venv 啟動流程..."
+
+    local python_setup="$SCRIPT_DIR/scripts/core/python_setup.sh"
+    if [ ! -f "$python_setup" ]; then
+        log_fail "找不到 python_setup.sh"
+        return
+    fi
+
+    if search_literal 'uv pip install --python "$VENV_DIR/bin/python" setuptools' "$python_setup"; then
+        log_pass "python_setup.sh 使用 uv pip 為 venv 安裝 setuptools"
+    else
+        log_fail "python_setup.sh 缺少 uv venv 的 setuptools 啟動邏輯"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -305,6 +322,8 @@ run_all_tests() {
     test_preview_config_strict_defaults
     echo
     test_module_manager_strict_safe_access
+    echo
+    test_python_setup_uv_venv_bootstrap
     echo
     test_network_dependencies
     echo
