@@ -113,8 +113,9 @@ if [ ! -f ~/.p10k.zsh ]; then
     echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
 fi
 
-# 安裝 thefuck
-if ! command -v fuck > /dev/null 2>&1; then
+# 安裝 thefuck（若尚未安裝）
+# 注意: 使用 'thefuck' 二進位檔案檢查，而非 'fuck'（'fuck' 是別名，不是命令）
+if ! command -v thefuck > /dev/null 2>&1; then
     printf "\033[36m安裝 thefuck (使用 uv)\033[0m\n"
     
     # 確保 uv 在 PATH 中
@@ -125,10 +126,12 @@ if ! command -v fuck > /dev/null 2>&1; then
     # 使用 uv 安裝 thefuck，如果失敗則使用 pip
     if command -v uv > /dev/null 2>&1; then
         if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
-            uv tool install thefuck >/dev/null 2>&1 || \
+            uv pip install --python "$HOME/.local/venv/system-tools/bin/python" \
+                git+https://github.com/nvbn/thefuck >/dev/null 2>&1 || \
                 pip install git+https://github.com/nvbn/thefuck >/dev/null 2>&1
         else
-            uv tool install thefuck || \
+            uv pip install --python "$HOME/.local/venv/system-tools/bin/python" \
+                git+https://github.com/nvbn/thefuck || \
                 pip install git+https://github.com/nvbn/thefuck
         fi
     else
@@ -139,11 +142,17 @@ if ! command -v fuck > /dev/null 2>&1; then
             pip install git+https://github.com/nvbn/thefuck
         fi
     fi
-    
-    # 添加 thefuck alias 到配置文件
-    if ! grep -q 'eval $(thefuck --alias)' ~/.zshrc; then
-        echo 'eval $(thefuck --alias)' >> ~/.zshrc
+
+    # 創建軟連結到 ~/.local/bin（無論安裝方式為何）
+    if [ -f "$HOME/.local/venv/system-tools/bin/thefuck" ]; then
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$HOME/.local/venv/system-tools/bin/thefuck" "$HOME/.local/bin/thefuck"
     fi
+fi
+
+# 添加 thefuck alias 到配置文件（無論安裝方式為何）
+if ! grep -q 'eval $(thefuck --alias)' ~/.zshrc; then
+    echo 'eval $(thefuck --alias)' >> ~/.zshrc
 fi
 
 # 設定 lsd 別名（若已安裝 lsd）
