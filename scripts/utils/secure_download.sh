@@ -180,7 +180,7 @@ secure_download_and_execute() {
 
 # 預定義的安全安裝函數
 install_docker() {
-    secure_download_and_execute \
+    SECURE_DOWNLOAD_ALLOW_PIPE=1 secure_download_and_execute \
         "https://get.docker.com" \
         "skip" \
         "Docker 安裝腳本"

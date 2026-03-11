@@ -36,6 +36,7 @@ Linux Setting Scripts - 自動安裝腳本 v2.0.1
 
 選項:
   --minimal                       最小安裝模式
+  --non-interactive               無人值守模式（不進入互動選單）
   --update                        更新已安裝的組件
   --dry-run                       預覽模式（不實際安裝）
   -v, --verbose                   顯示詳細日誌
@@ -45,6 +46,7 @@ Linux Setting Scripts - 自動安裝腳本 v2.0.1
 範例:
   ./install.sh                    # 標準安裝（互動式選單）
   ./install.sh --minimal          # 最小安裝
+  ./install.sh --non-interactive --minimal  # 無人值守最小安裝
   ./install.sh --dry-run          # 預覽將要安裝的內容
   ./install.sh --update           # 更新模式
   ./install.sh --verbose          # 詳細模式
@@ -91,11 +93,17 @@ VERBOSE="${VERBOSE:-false}"
 DEBUG="${DEBUG:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 SKIP_PYTHON_CHECK="${SKIP_PYTHON_CHECK:-false}"
+NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --minimal)
             INSTALL_MODE="minimal"
+            shift
+            ;;
+        --non-interactive)
+            NON_INTERACTIVE=true
+            USE_TUI=false
             shift
             ;;
         --update)
@@ -133,7 +141,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Export variables for child scripts
-export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK
+export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK NON_INTERACTIVE
 
 # ==============================================================================
 # Configuration
@@ -511,6 +519,7 @@ setup_logging() {
 
 # 定義模組陣列
 MODULES="python docker base terminal dev monitoring"
+MINIMAL_MODULES="base python terminal"
 selected_modules=""
 installed_modules=""
 
@@ -561,6 +570,22 @@ main() {
         printf "${BLUE}下載 maintenance/update_tools.sh...${NC}\n"
         curl -fsSL "$SCRIPTS_URL/maintenance/update_tools.sh" -o "$SCRIPT_DIR/maintenance/update_tools.sh"
         chmod +x "$SCRIPT_DIR/maintenance/update_tools.sh"
+    fi
+
+    # 無人值守模式：自動選擇模組並直接執行，不進入互動選單
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        USE_TUI=false
+        if [ "$INSTALL_MODE" = "minimal" ]; then
+            selected_modules="$MINIMAL_MODULES"
+        elif [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
+            selected_modules="${MODULE_LIST[*]}"
+        else
+            selected_modules="$MODULES"
+        fi
+
+        install_selected_modules
+        cleanup
+        return 0
     fi
     
     # 進入主循環

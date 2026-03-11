@@ -29,16 +29,17 @@ init_progress 3
 show_progress "安裝 Docker"
 if ! check_command docker; then
     log_info "安裝 Docker（使用安全下載機制）"
-    install_docker || {
-        log_error "Docker 安裝失敗"
-        exit 1
-    }
-    
-    # 將當前用戶加入 docker 群組
-    log_info "將用戶加入 docker 群組"
-    if ! groups "$USER" | grep -q docker; then
-        sudo usermod -aG docker "$USER"
-        log_warning "請重新登入以套用 docker 群組權限"
+    install_docker || log_warning "Docker 安裝失敗，將跳過 Docker 相關配置"
+
+    # 僅在 Docker 安裝成功後處理群組設定
+    if check_command docker; then
+        log_info "將用戶加入 docker 群組"
+        if ! groups "$USER" | grep -q docker; then
+            sudo usermod -aG docker "$USER"
+            log_warning "請重新登入以套用 docker 群組權限"
+        fi
+    else
+        log_warning "Docker 尚未可用，跳過 docker 群組設定"
     fi
 else
     log_info "Docker 已安裝"

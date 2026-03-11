@@ -453,6 +453,79 @@ test_monitoring_tools_systemd_guard() {
     fi
 }
 
+# 檢查 docker_setup.sh 在 Docker 安裝失敗時不會中止整體流程
+test_docker_setup_nonfatal_docker_install() {
+    log_test "檢查 docker_setup.sh 的 Docker 安裝失敗容錯..."
+
+    local docker_setup="$SCRIPT_DIR/scripts/core/docker_setup.sh"
+    if [ ! -f "$docker_setup" ]; then
+        log_fail "找不到 docker_setup.sh"
+        return
+    fi
+
+    if search_literal 'install_docker || log_warning "Docker 安裝失敗，將跳過 Docker 相關配置"' "$docker_setup" && \
+       ! search_text 'install_docker[[:space:]]*\|\|[[:space:]]*\{' "$docker_setup"; then
+        log_pass "docker_setup.sh 已將 Docker 安裝失敗改為非致命"
+    else
+        log_fail "docker_setup.sh 仍可能因 Docker 安裝失敗中止流程"
+    fi
+}
+
+# 檢查 common.sh 可被重複 source 而不觸發 readonly 重新宣告
+test_common_idempotent_source_guard() {
+    log_test "檢查 common.sh 重複載入保護..."
+
+    local common_sh="$SCRIPT_DIR/scripts/core/common.sh"
+    if [ ! -f "$common_sh" ]; then
+        log_fail "找不到 common.sh"
+        return
+    fi
+
+    if search_literal 'if [ "${COMMON_SH_LOADED:-0}" = "1" ]; then' "$common_sh" && \
+       search_literal 'return 0 2>/dev/null || exit 0' "$common_sh"; then
+        log_pass "common.sh 已有重複載入保護"
+    else
+        log_fail "common.sh 缺少重複載入保護，可能觸發 readonly 變數錯誤"
+    fi
+}
+
+# 檢查 common.sh 的 sudo 次數統計不會產生 0\n0 造成整數比較錯誤
+test_common_sudo_count_numeric() {
+    log_test "檢查 common.sh 的 sudo 計數數值穩定性..."
+
+    local common_sh="$SCRIPT_DIR/scripts/core/common.sh"
+    if [ ! -f "$common_sh" ]; then
+        log_fail "找不到 common.sh"
+        return
+    fi
+
+    if search_literal 'sudo_count=$(grep -cE "^\s*(sudo|su)\s" "$script_file" 2>/dev/null || true)' "$common_sh" && \
+       search_literal 'sudo_count="${sudo_count:-0}"' "$common_sh"; then
+        log_pass "common.sh 已避免 sudo_count 非數值輸出"
+    else
+        log_fail "common.sh 的 sudo_count 仍可能造成 integer expression expected"
+    fi
+}
+
+# 檢查 install.sh 提供無人值守入口
+test_install_non_interactive_mode() {
+    log_test "檢查 install.sh 的 non-interactive 模式..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    if [ ! -f "$installer" ]; then
+        log_fail "找不到 install.sh"
+        return
+    fi
+
+    if search_text "non-interactive" "$installer" && \
+       search_literal 'NON_INTERACTIVE="${NON_INTERACTIVE:-false}"' "$installer" && \
+       search_literal 'if [ "$NON_INTERACTIVE" = "true" ]; then' "$installer"; then
+        log_pass "install.sh 已提供 non-interactive 入口"
+    else
+        log_fail "install.sh 仍缺少穩定的 non-interactive 入口"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -523,6 +596,14 @@ run_all_tests() {
     test_dev_tools_lazygit_tmpdir
     echo
     test_monitoring_tools_systemd_guard
+    echo
+    test_docker_setup_nonfatal_docker_install
+    echo
+    test_common_idempotent_source_guard
+    echo
+    test_common_sudo_count_numeric
+    echo
+    test_install_non_interactive_mode
     echo
     test_network_dependencies
     echo

@@ -7,6 +7,13 @@
 # Description: Common functions library for Linux environment setup
 # ==============================================================================
 
+# Guard against repeated sourcing to avoid readonly redefinition errors.
+if [ "${COMMON_SH_LOADED:-0}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
+COMMON_SH_LOADED=1
+export COMMON_SH_LOADED
+
 # Set strict mode
 set -euo pipefail
 
@@ -1358,7 +1365,8 @@ validate_script_content() {
 
     # Check for excessive sudo operations
     local sudo_count
-    sudo_count=$(grep -cE "^\s*(sudo|su)\s" "$script_file" 2>/dev/null || echo 0)
+    sudo_count=$(grep -cE "^\s*(sudo|su)\s" "$script_file" 2>/dev/null || true)
+    sudo_count="${sudo_count:-0}"
 
     if [ "$sudo_count" -gt 20 ]; then
         log_warning "Script contains excessive sudo operations: $sudo_count"
