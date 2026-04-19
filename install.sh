@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # Linux Environment Setup - Main Installation Script
-# Version: 2.2.3
+# Version: 2.2.4
 # ==============================================================================
 
 # 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
@@ -30,7 +30,7 @@ LAST_COMMAND=""
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
-Linux Setting Scripts - 自動安裝腳本 v2.2.3
+Linux Setting Scripts - 自動安裝腳本 v2.2.4
 
 用法: ./install.sh [選項]
 
@@ -64,7 +64,7 @@ show_welcome() {
     printf "\n"
     printf "╔════════════════════════════════════════════════════════╗\n"
     printf "║                                                        ║\n"
-    printf "║          Linux Setting Scripts  v2.2.3                 ║\n"
+    printf "║          Linux Setting Scripts  v2.2.4                 ║\n"
     printf "║            自動化開發環境配置工具                      ║\n"
     printf "║                                                        ║\n"
     printf "╠════════════════════════════════════════════════════════╣\n"
@@ -699,11 +699,18 @@ main() {
                 )
             fi
 
-            # 添加查看詳情選項
+            # 主選單：增加「進階模式」可在此 toggle，並在標題列顯示目前狀態
+            local advanced_label
+            if [ "${ADVANCED_MODE:-false}" = "true" ]; then
+                advanced_label="進階模式: ON  (逐套件選擇 - 點此關閉)"
+            else
+                advanced_label="進階模式: OFF (預設一鍵全裝 - 點此開啟以逐套件挑選)"
+            fi
+
             local action_selection
             action_selection=$(tui_menu "Linux 環境設定安裝程序" \
                 "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n請選擇操作：" \
-                "選擇模組安裝" "查看模組詳情" "退出")
+                "選擇模組安裝" "$advanced_label" "查看模組詳情" "退出")
 
             case "$action_selection" in
                 "查看模組詳情")
@@ -714,6 +721,19 @@ main() {
                     cleanup
                     printf "${CYAN}退出安裝程序${NC}\n"
                     exit 0
+                    ;;
+                "進階模式"*)
+                    # 切換進階模式並回到主選單
+                    if [ "${ADVANCED_MODE:-false}" = "true" ]; then
+                        ADVANCED_MODE=false
+                        tui_msgbox "進階模式" "已關閉進階模式。\n安裝時會直接安裝模組內所有套件。" 2>/dev/null \
+                            || printf "${CYAN}進階模式已關閉${NC}\n"
+                    else
+                        ADVANCED_MODE=true
+                        tui_msgbox "進階模式" "已開啟進階模式。\n按下「選擇模組安裝」並確認後，每個模組會跳出一個套件 checklist，可逐一勾選 / 取消。" 2>/dev/null \
+                            || printf "${YELLOW}進階模式已開啟${NC}\n"
+                    fi
+                    continue
                     ;;
                 "選擇模組安裝"|*)
                     # 繼續進行模組選擇
@@ -748,8 +768,12 @@ main() {
             # 顯示選擇的模組
             printf "\n${GREEN}已選擇的模組：$selected_modules${NC}\n\n"
 
-            # 確認安裝
-            if tui_yesno "確認安裝" "確定要安裝以下模組嗎？\n\n$selected_modules\n\n預估時間：10-15分鐘\n預估空間：500MB-1GB" "yes"; then
+            # 確認安裝（順便顯示進階模式狀態）
+            local _adv_hint=""
+            if [ "${ADVANCED_MODE:-false}" = "true" ]; then
+                _adv_hint="\n\n[進階模式: ON] 將逐模組跳出套件 checklist 讓你細選"
+            fi
+            if tui_yesno "確認安裝" "確定要安裝以下模組嗎？\n\n$selected_modules\n\n預估時間：10-15分鐘\n預估空間：500MB-1GB${_adv_hint}" "yes"; then
                 install_selected_modules
             else
                 selected_modules=""
