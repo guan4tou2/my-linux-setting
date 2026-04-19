@@ -1982,7 +1982,7 @@ init_common_env() {
 func_list="log_error log_info log_success log_warning log_debug init_progress show_progress run_as_root"
 func_list="$func_list check_command check_package_installed check_python_version check_disk_space check_network check_internet_speed"
 func_list="$func_list check_pip_package_installed check_cargo_package_installed check_npm_package_installed"
-func_list="$func_list install_with_fallback install_apt_package install_apt_packages_parallel"
+func_list="$func_list install_with_fallback install_package install_apt_package install_apt_packages_parallel"
 func_list="$func_list backup_file safe_append_to_file"
 func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_cache cleanup_cache"
 func_list="$func_list safe_download download_files_parallel get_best_mirror"
