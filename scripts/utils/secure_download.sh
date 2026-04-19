@@ -234,39 +234,46 @@ install_oh_my_zsh() {
         "--unattended"
 }
 
-# 命令行接口
-case "${1:-help}" in
-    "docker")
-        install_docker
-        ;;
-    "uv")
-        install_uv
-        ;;
-    "superfile")
-        install_superfile
-        ;;
-    "lazydocker")
-        install_lazydocker
-        ;;
-    "oh-my-zsh")
-        install_oh_my_zsh
-        ;;
-    "test-download")
-        if [ -z "$2" ]; then
-            log_error "請提供要測試的 URL"
-            exit 1
-        fi
-        secure_download_and_execute "$2" "skip" "測試腳本"
-        ;;
-    *)
-        echo "用法: $0 <command>"
-        echo ""
-        echo "命令:"
-        echo "  docker      安全安裝 Docker"
-        echo "  uv          安全安裝 UV"
-        echo "  superfile   安全安裝 Superfile"
-        echo "  lazydocker  安全安裝 Lazydocker"
-        echo "  oh-my-zsh   安全安裝 Oh My Zsh"
-        echo "  test-download <url>  測試下載指定 URL"
-        ;;
-esac
+main() {
+    # 命令行接口
+    case "${1:-help}" in
+        "docker")
+            install_docker
+            ;;
+        "uv")
+            install_uv
+            ;;
+        "superfile")
+            install_superfile
+            ;;
+        "lazydocker")
+            install_lazydocker
+            ;;
+        "oh-my-zsh")
+            install_oh_my_zsh
+            ;;
+        "test-download")
+            if [ -z "${2:-}" ]; then
+                log_error "請提供要測試的 URL"
+                exit 1
+            fi
+            secure_download_and_execute "${2}" "skip" "測試腳本"
+            ;;
+        *)
+            echo "用法: $0 <command>"
+            echo ""
+            echo "命令:"
+            echo "  docker      安全安裝 Docker"
+            echo "  uv          安全安裝 UV"
+            echo "  superfile   安全安裝 Superfile"
+            echo "  lazydocker  安全安裝 Lazydocker"
+            echo "  oh-my-zsh   安全安裝 Oh My Zsh"
+            echo "  test-download <url>  測試下載指定 URL"
+            ;;
+    esac
+}
+
+# 僅在直接執行時處理 CLI；被 source 時只提供函數。
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
