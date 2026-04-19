@@ -8,9 +8,7 @@ source "$SCRIPT_DIR/common.sh" || {
 }
 
 # 如果未定義 URL，使用默認值
-if [ -z "$P10K_CONFIG_URL" ]; then
-    P10K_CONFIG_URL="https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh"
-fi
+P10K_CONFIG_URL="${P10K_CONFIG_URL:-https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh}"
 
 log_info "########## 設定終端機環境 ##########"
 
@@ -76,11 +74,20 @@ if [ ! -d "$HOME/.oh-my-zsh" ]; then
         log_warning "找不到安全下載腳本，使用傳統安裝方式"
         sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
     fi
-    ZSH_CUSTOM="$HOME/.oh-my-zsh/custom"
-    export ZSH_CUSTOM
     log_success "Oh-my-zsh 安裝完成"
 else
     log_info "Oh-my-zsh 已安裝"
+fi
+
+# 統一在這裡設 ZSH_CUSTOM；若 oh-my-zsh 安裝失敗（目錄不存在）就直接結束，避免後續步驟誤用空路徑
+ZSH_CUSTOM="$HOME/.oh-my-zsh/custom"
+export ZSH_CUSTOM
+
+if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    log_error "Oh-my-zsh 似乎沒有正確安裝（找不到 $HOME/.oh-my-zsh）"
+    log_error "後續的 zsh 插件 / Powerlevel10k 步驟需要它，先中止本模組以免污染環境"
+    log_info "可以稍後重跑：bash $SCRIPT_DIR/terminal_setup.sh"
+    exit 1
 fi
 
 # 安裝 zsh 插件（idempotent：已存在時 pull，不存在時 clone）
@@ -133,23 +140,78 @@ export COLORTERM=truecolor
 EOF
 fi
 
+# ==============================================================================
 # 安裝 Powerlevel10k
-if [ ! -f ~/.p10k.zsh ]; then
-    printf "\033[36m安裝 Powerlevel10k\033[0m\n"
-    # 下載動作加上 timeout，避免慢 mirror / TCP 掛起卡住 install
-    if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
-        wget -q --timeout=30 --tries=2 "$P10K_CONFIG_URL" -O ~/.p10k.zsh >/dev/null 2>&1
-        GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 \
+# ==============================================================================
+# 過去用 `[ ! -f ~/.p10k.zsh ]` 判斷是否要裝，但這個檔案上次跑可能已下載成功，
+# 但實際的主題目錄 (themes/powerlevel10k) 卻 git clone 失敗（被 `|| true` 吞掉）。
+# 改為：分別處理「主題目錄」、「.p10k.zsh 配置」、「.zshrc 的 ZSH_THEME」、
+# 「POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD 註記」四件事，每件事都 idempotent。
+P10K_THEME_DIR="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k"
+
+# 1. 確保主題目錄存在（不存在就 clone，存在就 git pull）
+if [ -d "$P10K_THEME_DIR/.git" ]; then
+    log_info "Powerlevel10k 主題目錄已存在，嘗試更新..."
+    GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 \
+        git -C "$P10K_THEME_DIR" pull --ff-only --quiet 2>/dev/null \
+        || log_warning "Powerlevel10k 主題更新失敗，沿用既有版本"
+elif [ -d "$P10K_THEME_DIR" ]; then
+    log_warning "$P10K_THEME_DIR 已存在但不是 git repo，跳過（可手動刪除後重裝）"
+else
+    printf "\033[36m安裝 Powerlevel10k 主題\033[0m\n"
+    if GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 \
             git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
-            "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k" >/dev/null 2>&1 || true
+            "$P10K_THEME_DIR" 2>&1; then
+        log_success "Powerlevel10k 主題安裝成功"
     else
-        wget --timeout=30 --tries=2 "$P10K_CONFIG_URL" -O ~/.p10k.zsh
-        GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 \
-            git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
-            "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k" || true
+        log_warning "Powerlevel10k 主題安裝失敗，請檢查網路後手動執行："
+        log_warning "    git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \"$P10K_THEME_DIR\""
     fi
-    sed -i 's/^ZSH_THEME=.*/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc
-    echo 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' >> ~/.zshrc
+fi
+
+# 2. 下載 .p10k.zsh 配置檔（不存在才下載）
+if [ ! -f ~/.p10k.zsh ]; then
+    printf "\033[36m下載 .p10k.zsh 配置\033[0m\n"
+    if wget --timeout=30 --tries=2 -q "$P10K_CONFIG_URL" -O ~/.p10k.zsh.tmp 2>/dev/null \
+            && [ -s ~/.p10k.zsh.tmp ]; then
+        mv ~/.p10k.zsh.tmp ~/.p10k.zsh
+        log_success ".p10k.zsh 已下載"
+    else
+        rm -f ~/.p10k.zsh.tmp
+        log_warning ".p10k.zsh 下載失敗，將沿用 powerlevel10k 預設並啟用首次設定精靈"
+    fi
+fi
+
+# 3. 設定 .zshrc 的 ZSH_THEME（無論主題與配置是否新裝都要檢查；只在還不是 p10k 時改）
+if [ -f ~/.zshrc ] && [ -d "$P10K_THEME_DIR" ]; then
+    if ! grep -Eq '^[[:space:]]*ZSH_THEME=("|'"'"')?powerlevel10k/powerlevel10k' ~/.zshrc; then
+        if grep -q '^[[:space:]]*ZSH_THEME=' ~/.zshrc; then
+            sed -i 's|^[[:space:]]*ZSH_THEME=.*|ZSH_THEME="powerlevel10k/powerlevel10k"|' ~/.zshrc
+            log_info "已將 ~/.zshrc 的 ZSH_THEME 改為 powerlevel10k"
+        else
+            printf '\nZSH_THEME="powerlevel10k/powerlevel10k"\n' >> ~/.zshrc
+            log_info "已加入 ZSH_THEME=powerlevel10k 到 ~/.zshrc"
+        fi
+    fi
+fi
+
+# 4. 加入「停用 p10k 首次設定精靈」與 source ~/.p10k.zsh（idempotent）
+if [ -f ~/.p10k.zsh ]; then
+    if command -v safe_append_to_file >/dev/null 2>&1; then
+        safe_append_to_file \
+            '# linux-setting:p10k-source
+[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true' \
+            ~/.zshrc \
+            '# linux-setting:p10k-source'
+    elif ! grep -q 'linux-setting:p10k-source' ~/.zshrc 2>/dev/null; then
+        cat >> ~/.zshrc << 'P10KEOF'
+
+# linux-setting:p10k-source
+[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true
+P10KEOF
+    fi
 fi
 
 # 安裝 thefuck（若尚未安裝）

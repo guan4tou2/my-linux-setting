@@ -17,6 +17,30 @@ COMMON_SH_LOADED=1
 set -euo pipefail
 
 # ==============================================================================
+# 預設環境變數（避免 set -u 下任何裸用 $VAR 直接 crash）
+# 這些變數都可能在 install.sh / 子腳本執行流程中被使用，
+# 為了讓 common.sh 也能單獨被其他工具腳本 source，先在此提供預設值。
+# ==============================================================================
+: "${VERBOSE:=false}"
+: "${DEBUG:=false}"
+: "${TUI_MODE:=quiet}"
+: "${USE_TUI:=false}"
+: "${NON_INTERACTIVE:=false}"
+: "${INSTALL_MODE:=full}"
+: "${UPDATE_MODE:=false}"
+: "${DRY_RUN:=false}"
+: "${FORCE_REINSTALL:=false}"
+: "${ADVANCED_MODE:=false}"
+: "${ABORT_ON_FAILURE:=false}"
+: "${SKIP_PYTHON_CHECK:=false}"
+: "${REMOTE_INSTALL:=false}"
+: "${ENABLE_PARALLEL_INSTALL:=false}"
+: "${PREFER_HOMEBREW:=true}"
+: "${PREFER_UV:=true}"
+: "${SECURE_DOWNLOAD_ALLOW_PIPE:=0}"
+: "${SKIP_NETWORK_TESTS:=false}"
+
+# ==============================================================================
 # Configuration Loading
 # ==============================================================================
 
@@ -30,7 +54,7 @@ fi
 # Constants
 # ==============================================================================
 
-readonly SCRIPT_VERSION="2.2.1"
+readonly SCRIPT_VERSION="2.2.2"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'

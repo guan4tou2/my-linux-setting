@@ -163,7 +163,7 @@ secure_download_and_execute() {
     fi
     
     # 顯示腳本預覽
-    if [ "$VERBOSE" = "true" ]; then
+    if [ "${VERBOSE:-false}" = "true" ]; then
         log_info "腳本內容預覽（前20行）:"
         head -20 "$temp_script" | sed 's/^/  | /'
         echo ""
