@@ -12,7 +12,6 @@ if [ "${COMMON_SH_LOADED:-0}" = "1" ]; then
     return 0 2>/dev/null || exit 0
 fi
 COMMON_SH_LOADED=1
-export COMMON_SH_LOADED
 
 # Set strict mode
 set -euo pipefail
