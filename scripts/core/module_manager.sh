@@ -37,6 +37,22 @@ declare -A MODULE_POST_INSTALL
 MODULE_LIST=()
 
 # ==============================================================================
+# 進階模式：每個模組的 per-package 覆寫（由互動 filter 設定）
+# 鍵：模組 ID；值：對應類型「實際要安裝」的套件清單（空格分隔）
+# 若某模組未在 override 中出現，則該模組仍走預設（裝全部）
+# 若 override 值為空字串，代表「該類型一個都不裝」
+# 同時保留 MODULE_RUN_SCRIPT 控制 script= 是否要執行
+# ==============================================================================
+declare -A MODULE_PKG_OVERRIDE_APT
+declare -A MODULE_PKG_OVERRIDE_BREW
+declare -A MODULE_PKG_OVERRIDE_PIP
+declare -A MODULE_PKG_OVERRIDE_CARGO
+declare -A MODULE_PKG_OVERRIDE_NPM
+declare -A MODULE_PKG_OVERRIDE_APT_FALLBACK
+declare -A MODULE_RUN_SCRIPT
+declare -A MODULE_HAS_OVERRIDE
+
+# ==============================================================================
 # 配置文件定位
 # ==============================================================================
 
@@ -494,6 +510,174 @@ generate_module_details() {
 }
 
 # ==============================================================================
+# 進階模式：互動式套件選擇
+# ==============================================================================
+
+# 內部 helper：根據包安裝狀態回報 ON/OFF（已裝 → OFF，未裝 → ON）
+_module_pkg_default_state() {
+    local kind="$1" pkg="$2"
+    case "$kind" in
+        apt|apt_fallback) check_package_installed "$pkg" 2>/dev/null && echo "OFF" || echo "ON" ;;
+        brew)             check_brew_package_installed "$pkg" 2>/dev/null && echo "OFF" || echo "ON" ;;
+        pip)              check_pip_package_installed "$pkg" 2>/dev/null && echo "OFF" || echo "ON" ;;
+        cargo)            check_cargo_package_installed "$pkg" 2>/dev/null && echo "OFF" || echo "ON" ;;
+        npm)              check_npm_package_installed "$pkg" 2>/dev/null && echo "OFF" || echo "ON" ;;
+        *)                echo "ON" ;;
+    esac
+}
+
+_module_pkg_status_label() {
+    local kind="$1" pkg="$2"
+    if [ "$(_module_pkg_default_state "$kind" "$pkg")" = "OFF" ]; then
+        echo "已安裝"
+    else
+        echo "未安裝"
+    fi
+}
+
+# 進階模式：對單一模組互動選擇要安裝的套件
+# 設定 MODULE_PKG_OVERRIDE_* / MODULE_RUN_SCRIPT[$module_id] / MODULE_HAS_OVERRIDE[$module_id]
+# 回傳 0 = 已選；1 = 使用者取消整個模組
+module_interactive_package_filter() {
+    local module_id="$1"
+    local name="${MODULE_NAMES[$module_id]:-$module_id}"
+
+    local apt_pkgs="${MODULE_PACKAGES[$module_id]:-}"
+    local brew_pkgs="${MODULE_BREW_PACKAGES[$module_id]:-}"
+    local apt_fb_pkgs="${MODULE_APT_FALLBACK[$module_id]:-}"
+    local pip_pkgs="${MODULE_PIP_PACKAGES[$module_id]:-}"
+    local cargo_pkgs="${MODULE_CARGO_PACKAGES[$module_id]:-}"
+    local npm_pkgs="${MODULE_NPM_PACKAGES[$module_id]:-}"
+    local script="${MODULE_SCRIPTS[$module_id]:-}"
+
+    # 構建 checklist 項目：tag = "kind:pkgname"
+    local items=()
+    local _kind _list _p _state _label
+    # helper: 將 (_kind, _list) 加進 items
+    _add_kind_to_items() {
+        _kind="$1"; _list="$2"
+        [ -z "$_list" ] && return 0
+        for _p in $_list; do
+            _state=$(_module_pkg_default_state "$_kind" "$_p")
+            _label=$(_module_pkg_status_label "$_kind" "$_p")
+            items+=("${_kind}:${_p}" "[$_kind] $_p ($_label)" "$_state")
+        done
+    }
+    _add_kind_to_items apt          "$apt_pkgs"
+    # brew 只有在 brew 可用時才列；否則列 apt_fallback
+    if command -v brew >/dev/null 2>&1; then
+        _add_kind_to_items brew         "$brew_pkgs"
+    elif [ -n "$apt_fb_pkgs" ]; then
+        _add_kind_to_items apt_fallback "$apt_fb_pkgs"
+    fi
+    _add_kind_to_items pip          "$pip_pkgs"
+    _add_kind_to_items cargo        "$cargo_pkgs"
+    _add_kind_to_items npm          "$npm_pkgs"
+    unset -f _add_kind_to_items 2>/dev/null || true
+
+    # script= 也讓使用者選是否執行
+    local has_script_item=0
+    if [ -n "$script" ]; then
+        items+=("__script__:$script" "[script] 執行 $script (額外配置)" "ON")
+        has_script_item=1
+    fi
+
+    # 沒任何項目可選（純空 module）→ 視為走預設
+    if [ ${#items[@]} -eq 0 ]; then
+        MODULE_HAS_OVERRIDE[$module_id]=""
+        return 0
+    fi
+
+    # 嘗試 TUI 模式
+    local selected=""
+    local rc=1
+    if [ "${USE_TUI:-false}" = "true" ] && command -v tui_checklist_with_state >/dev/null 2>&1; then
+        selected=$(tui_checklist_with_state \
+            "進階：選擇 [$name] 要安裝的套件" \
+            "空白鍵切換、方向鍵移動、Enter 確認；已安裝者預設不勾選" \
+            "${items[@]}")
+        rc=$?
+    else
+        # CLI fallback
+        printf "\n\033[36m=== 進階：選擇 [%s] 要安裝的套件 ===\033[0m\n" "$name"
+        local idx=0
+        local -a tag_arr=()
+        local -a desc_arr=()
+        local -a state_arr=()
+        local i=0
+        while [ $i -lt ${#items[@]} ]; do
+            tag_arr+=("${items[$i]}")
+            desc_arr+=("${items[$((i+1))]}")
+            state_arr+=("${items[$((i+2))]}")
+            i=$((i + 3))
+        done
+        local n=${#tag_arr[@]}
+        for ((idx=0; idx<n; idx++)); do
+            local mark="[ ]"
+            [ "${state_arr[$idx]}" = "ON" ] && mark="[x]"
+            printf "  %2d) %s %s\n" "$((idx+1))" "$mark" "${desc_arr[$idx]}"
+        done
+        printf "\n輸入要 \033[33m取消\033[0m勾選的編號（空白分隔，輸入 a 全選、n 全不選、Enter 套用預設）：\n> "
+        local input
+        if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+            input=""
+        else
+            read -r input
+        fi
+        case "$input" in
+            a|A) for ((idx=0; idx<n; idx++)); do state_arr[$idx]="ON"; done ;;
+            n|N) for ((idx=0; idx<n; idx++)); do state_arr[$idx]="OFF"; done ;;
+            "")  : ;; # 套用預設
+            *)   for num in $input; do
+                     if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le "$n" ]; then
+                         state_arr[$((num-1))]="OFF"
+                     fi
+                 done ;;
+        esac
+        local sel_list=()
+        for ((idx=0; idx<n; idx++)); do
+            [ "${state_arr[$idx]}" = "ON" ] && sel_list+=("${tag_arr[$idx]}")
+        done
+        selected="${sel_list[*]}"
+        rc=0
+    fi
+
+    if [ $rc -ne 0 ]; then
+        log_warning "使用者取消模組 $name 的進階選擇"
+        return 1
+    fi
+
+    # 將選中的 tag 拆回各類型 override
+    local out_apt="" out_brew="" out_pip="" out_cargo="" out_npm="" out_apt_fb=""
+    local run_script=0
+    for tag in $selected; do
+        case "$tag" in
+            apt:*)          out_apt+=" ${tag#apt:}" ;;
+            brew:*)         out_brew+=" ${tag#brew:}" ;;
+            apt_fallback:*) out_apt_fb+=" ${tag#apt_fallback:}" ;;
+            pip:*)          out_pip+=" ${tag#pip:}" ;;
+            cargo:*)        out_cargo+=" ${tag#cargo:}" ;;
+            npm:*)          out_npm+=" ${tag#npm:}" ;;
+            __script__:*)   run_script=1 ;;
+        esac
+    done
+
+    MODULE_PKG_OVERRIDE_APT[$module_id]="${out_apt# }"
+    MODULE_PKG_OVERRIDE_BREW[$module_id]="${out_brew# }"
+    MODULE_PKG_OVERRIDE_APT_FALLBACK[$module_id]="${out_apt_fb# }"
+    MODULE_PKG_OVERRIDE_PIP[$module_id]="${out_pip# }"
+    MODULE_PKG_OVERRIDE_CARGO[$module_id]="${out_cargo# }"
+    MODULE_PKG_OVERRIDE_NPM[$module_id]="${out_npm# }"
+    if [ "$has_script_item" = "1" ]; then
+        MODULE_RUN_SCRIPT[$module_id]="$run_script"
+    fi
+    MODULE_HAS_OVERRIDE[$module_id]="1"
+
+    log_info "[$name] 進階選擇完成（apt:$(echo $out_apt | wc -w) brew:$(echo $out_brew | wc -w) pip:$(echo $out_pip | wc -w) cargo:$(echo $out_cargo | wc -w) npm:$(echo $out_npm | wc -w) script:${run_script:-1}）"
+    return 0
+}
+
+# ==============================================================================
 # 模組安裝
 # ==============================================================================
 
@@ -537,6 +721,20 @@ install_module() {
     local npm_packages="${MODULE_NPM_PACKAGES[$module_id]:-}"
     local script="${MODULE_SCRIPTS[$module_id]:-}"
     local post_install="${MODULE_POST_INSTALL[$module_id]:-}"
+
+    # 進階模式 override：若該模組已被使用者經 module_interactive_package_filter 過濾，
+    # 則改用 override 後的子集，並決定是否要跑 script
+    local should_run_script=1
+    if [ "${MODULE_HAS_OVERRIDE[$module_id]:-}" = "1" ]; then
+        log_info "套用進階模式套件選擇（$name）"
+        packages="${MODULE_PKG_OVERRIDE_APT[$module_id]:-}"
+        brew_packages="${MODULE_PKG_OVERRIDE_BREW[$module_id]:-}"
+        apt_fallback="${MODULE_PKG_OVERRIDE_APT_FALLBACK[$module_id]:-}"
+        pip_packages="${MODULE_PKG_OVERRIDE_PIP[$module_id]:-}"
+        cargo_packages="${MODULE_PKG_OVERRIDE_CARGO[$module_id]:-}"
+        npm_packages="${MODULE_PKG_OVERRIDE_NPM[$module_id]:-}"
+        should_run_script="${MODULE_RUN_SCRIPT[$module_id]:-1}"
+    fi
 
     # 檢查模組安裝狀態
     local module_status
@@ -687,8 +885,10 @@ install_module() {
         fi
     fi
 
-    # 6. 執行自訂安裝腳本（無論狀態都執行，因為腳本可能有額外配置）
-    if [ -n "$script" ]; then
+    # 6. 執行自訂安裝腳本
+    # 一般模式：無論狀態都執行（腳本可能有額外配置）
+    # 進階模式：依 should_run_script 決定（使用者可在 checklist 取消 [script] 項）
+    if [ -n "$script" ] && [ "$should_run_script" = "1" ]; then
         local script_path="$SCRIPT_DIR/core/$script"
         if [ -f "$script_path" ]; then
             log_info "執行安裝腳本: $script"
@@ -699,6 +899,8 @@ install_module() {
         else
             log_warning "找不到腳本: $script_path"
         fi
+    elif [ -n "$script" ] && [ "$should_run_script" != "1" ]; then
+        log_info "進階模式：使用者選擇跳過 $script"
     fi
 
     # 7. 執行安裝後命令
@@ -769,3 +971,4 @@ export -f get_module_packages get_module_brew_packages get_module_script module_
 export -f generate_cli_menu generate_tui_checklist_items generate_module_details 2>/dev/null || true
 export -f get_module_id_by_number install_module init_module_manager 2>/dev/null || true
 export -f check_module_status get_module_detail_status get_module_status_icon 2>/dev/null || true
+export -f module_interactive_package_filter _module_pkg_default_state _module_pkg_status_label 2>/dev/null || true

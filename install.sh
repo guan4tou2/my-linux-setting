@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # Linux Environment Setup - Main Installation Script
-# Version: 2.1.2
+# Version: 2.2.0
 # ==============================================================================
 
 # 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
@@ -30,7 +30,7 @@ LAST_COMMAND=""
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
-Linux Setting Scripts - 自動安裝腳本 v2.1.2
+Linux Setting Scripts - 自動安裝腳本 v2.2.0
 
 用法: ./install.sh [選項]
 
@@ -40,6 +40,7 @@ Linux Setting Scripts - 自動安裝腳本 v2.1.2
   --update                        更新已安裝的組件
   --dry-run                       預覽模式（不實際安裝）
   --force, --force-reinstall      強制重新安裝（不跳過已安裝的模組）
+  -a, --advanced                  進階模式：每個模組進去再選具體要裝的套件
   -v, --verbose                   顯示詳細日誌
   -h, --help                      顯示此幫助訊息
   --config <file>                 指定配置文件路徑
@@ -62,7 +63,7 @@ show_welcome() {
     printf "\n"
     printf "╔════════════════════════════════════════════════════════╗\n"
     printf "║                                                        ║\n"
-    printf "║          Linux Setting Scripts  v2.1.2                 ║\n"
+    printf "║          Linux Setting Scripts  v2.2.0                 ║\n"
     printf "║            自動化開發環境配置工具                      ║\n"
     printf "║                                                        ║\n"
     printf "╠════════════════════════════════════════════════════════╣\n"
@@ -96,6 +97,7 @@ DRY_RUN="${DRY_RUN:-false}"
 SKIP_PYTHON_CHECK="${SKIP_PYTHON_CHECK:-false}"
 NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
 FORCE_REINSTALL="${FORCE_REINSTALL:-false}"
+ADVANCED_MODE="${ADVANCED_MODE:-false}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -118,6 +120,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force|--force-reinstall)
             FORCE_REINSTALL=true
+            shift
+            ;;
+        --advanced|-a)
+            ADVANCED_MODE=true
             shift
             ;;
         -v|--verbose)
@@ -147,7 +153,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Export variables for child scripts
-export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK NON_INTERACTIVE FORCE_REINSTALL
+export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK NON_INTERACTIVE FORCE_REINSTALL ADVANCED_MODE
 
 # ==============================================================================
 # Configuration
@@ -777,6 +783,16 @@ main() {
                         show_module_details
                     fi
                     ;;
+                a|A)
+                    # 切換進階模式
+                    if [ "${ADVANCED_MODE:-false}" = "true" ]; then
+                        ADVANCED_MODE=false
+                        printf "${CYAN}進階模式已關閉${NC}\n"
+                    else
+                        ADVANCED_MODE=true
+                        printf "${YELLOW}進階模式已開啟${NC}（按 [i] 開始安裝時，會逐模組讓你挑套件）\n"
+                    fi
+                    ;;
                 q|Q|0)
                     cleanup
                     printf "${CYAN}退出安裝程序${NC}\n"
@@ -855,7 +871,13 @@ show_menu() {
     fi
 
     printf "${CYAN}│                                                             │${NC}\n"
-    printf "${CYAN}│${NC}  ${BLUE}[i]${NC} 開始安裝  ${BLUE}[c]${NC} 清除  ${BLUE}[d]${NC} 詳細說明  ${BLUE}[q]${NC} 退出        ${CYAN}│${NC}\n"
+    # 進階模式狀態
+    if [ "${ADVANCED_MODE:-false}" = "true" ]; then
+        printf "${CYAN}│${NC}  ${YELLOW}進階模式: ON${NC} (按 [a] 關閉；安裝時會逐模組選套件)        ${CYAN}│${NC}\n"
+    else
+        printf "${CYAN}│${NC}  進階模式: OFF (按 [a] 開啟；可逐模組挑套件)             ${CYAN}│${NC}\n"
+    fi
+    printf "${CYAN}│${NC}  ${BLUE}[i]${NC} 開始安裝  ${BLUE}[c]${NC} 清除  ${BLUE}[d]${NC} 詳細  ${BLUE}[a]${NC} 進階  ${BLUE}[q]${NC} 退出 ${CYAN}│${NC}\n"
     printf "${CYAN}└─────────────────────────────────────────────────────────────┘${NC}\n"
     printf "\n輸入選項 (例如: 1 3 4): "
 }
@@ -1299,6 +1321,30 @@ install_selected_modules() {
 
     printf "${CYAN}開始安裝以下模組：$selected_modules${NC}\n"
     printf "${BLUE}總共 $total_modules 個模組${NC}\n\n"
+
+    # 進階模式：在開始安裝前，逐模組讓使用者再選具體要裝的套件
+    if [ "${ADVANCED_MODE:-false}" = "true" ] \
+       && [ "$USE_MODULE_MANAGER" = "true" ] \
+       && command -v module_interactive_package_filter >/dev/null 2>&1 \
+       && [ "${NON_INTERACTIVE:-false}" != "true" ]; then
+        printf "${CYAN}━━━ 進階模式：逐模組選擇套件 ━━━${NC}\n"
+        for module in "${install_order[@]}"; do
+            case " $selected_modules " in
+                *" $module "*) ;;
+                *) continue ;;
+            esac
+            module_interactive_package_filter "$module" || {
+                printf "${YELLOW}使用者取消模組 $module，將從清單移除${NC}\n"
+                selected_modules=$(echo " $selected_modules " | sed "s/ $module / /g" | xargs)
+                total_modules=$((total_modules - 1))
+            }
+        done
+        printf "${CYAN}━━━ 進階選擇完成 ━━━${NC}\n\n"
+        if [ -z "$selected_modules" ] || [ "$total_modules" -le 0 ]; then
+            printf "${YELLOW}所有模組都被取消，結束安裝${NC}\n"
+            return 0
+        fi
+    fi
 
     # 為了確保依賴順序，實際安裝順序固定為：
     # 1. base       - 提供 git/curl/wget 等基礎工具與 APT 相關套件

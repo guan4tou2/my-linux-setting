@@ -30,7 +30,7 @@ fi
 # Constants
 # ==============================================================================
 
-readonly SCRIPT_VERSION="2.1.2"
+readonly SCRIPT_VERSION="2.2.0"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
@@ -1818,6 +1818,54 @@ tui_checklist() {
     fi
 }
 
+# TUI 多選 checklist（每個項目可指定預設 ON / OFF / 文字描述）
+# 用法：
+#   tui_checklist_with_state "標題" "提示文字" \
+#       tag1 "描述1" ON \
+#       tag2 "描述2" OFF \
+#       ...
+# 回傳 stdout：使用者選中的 tag（用空白分隔），return 0
+# 使用者取消 / 按 ESC：return 1
+tui_checklist_with_state() {
+    local title="$1"
+    local prompt="$2"
+    shift 2
+
+    if [ "$USE_TUI" != "true" ]; then
+        return 1
+    fi
+
+    # 收集 tag/description/state 為 whiptail 所需的位置參數
+    local checklist_args=()
+    local item_count=0
+    while [ $# -ge 3 ]; do
+        checklist_args+=("$1" "$2" "$3")
+        item_count=$((item_count + 1))
+        shift 3
+    done
+
+    if [ "$item_count" -eq 0 ]; then
+        return 1
+    fi
+
+    local height=$((item_count + 10))
+    [ $height -gt 25 ] && height=25 || true
+    local list_height=$item_count
+    [ $list_height -gt 15 ] && list_height=15 || true
+    local width=78
+
+    local result
+    result=$(whiptail --title "$title" --checklist "$prompt" \
+        $height $width $list_height "${checklist_args[@]}" 3>&1 1>&2 2>&3)
+    local exit_code=$?
+
+    if [ $exit_code -eq 0 ]; then
+        echo "$result" | tr -d '"'
+        return 0
+    fi
+    return 1
+}
+
 # TUI 單選菜單（返回選中的項目）
 tui_menu() {
     local title="$1"
@@ -2099,7 +2147,7 @@ func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_ca
 func_list="$func_list safe_download download_files_parallel get_best_mirror"
 func_list="$func_list optimize_apt_performance cleanup_apt_system select_fastest_apt_mirror"
 func_list="$func_list version_greater_equal check_architecture_compatibility install_arch_specific_package"
-func_list="$func_list ensure_tui_available tui_checklist tui_menu tui_yesno tui_msgbox tui_gauge tui_inputbox"
+func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_gauge tui_inputbox"
 func_list="$func_list cleanup_temp_files get_elapsed_time check_sudo_access init_common_env detect_and_inject_tool_paths"
 func_list="$func_list is_non_interactive safe_read"
 
