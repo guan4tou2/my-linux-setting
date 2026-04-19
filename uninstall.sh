@@ -122,6 +122,13 @@ fi
 
 # 確認
 if [ "$AUTO_YES" != true ]; then
+    # 非互動模式：除非明確 -y / --yes 或設定 NON_INTERACTIVE=false 仍想互動，
+    # 否則直接拒絕執行（避免誤刪）
+    if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+        printf "${RED}非互動模式且未指定 -y / --yes，安全起見終止卸載${NC}\n"
+        printf "${YELLOW}如需自動卸載，請加上 --yes 參數${NC}\n"
+        exit 1
+    fi
     printf "${RED}警告: 此操作將移除已安裝的組件！${NC}\n"
     read -p "確認繼續？(y/N) " confirm
     if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then

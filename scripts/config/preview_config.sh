@@ -365,6 +365,12 @@ interactive_preview() {
         echo "9) files      - 顯示配置文件預覽"
         echo "0) exit       - 退出"
         echo ""
+        # 非互動模式不阻塞，直接顯示完整預覽然後離開
+        if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+            log_info "非互動模式：顯示完整安裝預覽後結束"
+            show_full_preview "python base terminal dev"
+            break
+        fi
         read -p "請輸入選項 (例如: 1 3 4): " -r input
         
         case "$input" in
@@ -417,6 +423,10 @@ interactive_preview() {
         esac
         
         echo ""
+        # 非互動模式跳過 "Enter 繼續"
+        if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+            break
+        fi
         read -p "按 Enter 繼續..." -r
     done
 }

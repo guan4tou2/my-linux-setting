@@ -400,26 +400,32 @@ merge_conflicted_file() {
             fi
             ;;
         "ask")
-            echo "文件衝突: $(basename "$local_file")"
-            echo "1) 使用本地版本"
-            echo "2) 使用遠程版本"
-            echo "3) 手動編輯"
-            read -p "請選擇 (1-3): " choice
-            
-            case "$choice" in
-                1) cp "$local_file" "$output_file" ;;
-                2) cp "$remote_file" "$output_file" ;;
-                3)
-                    if command -v "$EDITOR" >/dev/null 2>&1; then
-                        cp "$local_file" "$output_file"
-                        "$EDITOR" "$output_file"
-                    else
-                        cp "$local_file" "$output_file"
-                        echo "請手動編輯: $output_file"
-                    fi
-                    ;;
-                *) cp "$local_file" "$output_file" ;;
-            esac
+            # 非互動模式：預設使用本地版本，避免阻塞
+            if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+                log_remote_sync "WARN" "非互動模式，文件衝突自動使用本地版本: $(basename "$local_file")"
+                cp "$local_file" "$output_file"
+            else
+                echo "文件衝突: $(basename "$local_file")"
+                echo "1) 使用本地版本"
+                echo "2) 使用遠程版本"
+                echo "3) 手動編輯"
+                read -p "請選擇 (1-3): " choice
+
+                case "$choice" in
+                    1) cp "$local_file" "$output_file" ;;
+                    2) cp "$remote_file" "$output_file" ;;
+                    3)
+                        if command -v "$EDITOR" >/dev/null 2>&1; then
+                            cp "$local_file" "$output_file"
+                            "$EDITOR" "$output_file"
+                        else
+                            cp "$local_file" "$output_file"
+                            echo "請手動編輯: $output_file"
+                        fi
+                        ;;
+                    *) cp "$local_file" "$output_file" ;;
+                esac
+            fi
             ;;
     esac
 }
@@ -591,19 +597,38 @@ list_remote_devices() {
 setup_remote_sync() {
     echo "設置遠程同步配置"
     echo ""
-    
+
+    # 非互動模式：必須由環境變數預先提供，否則直接退出
+    if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+        if [ -z "${SYNC_SERVER_URL:-}" ] || [ -z "${SYNC_TOKEN:-}" ]; then
+            log_remote_sync "ERROR" "非互動模式下需設定 SYNC_SERVER_URL 與 SYNC_TOKEN"
+            log_remote_sync "ERROR" "範例：SYNC_SERVER_URL=... SYNC_TOKEN=... SYNC_RESOLUTION=local $0 setup"
+            return 1
+        fi
+        set_config "sync_server_url" "$SYNC_SERVER_URL"
+        set_config "sync_token" "$SYNC_TOKEN"
+        local resolution="${SYNC_RESOLUTION:-local}"
+        case "$resolution" in
+            local|remote|merge|ask) set_config "sync_resolution" "$resolution" ;;
+            *) log_remote_sync "WARN" "未知 SYNC_RESOLUTION='$resolution'，使用 local"
+               set_config "sync_resolution" "local" ;;
+        esac
+        log_remote_sync "INFO" "遠程同步設定（非互動）已完成"
+        return 0
+    fi
+
     # 輸入服務器URL
     read -p "同步服務器 URL: " server_url
     if [ -n "$server_url" ]; then
         set_config "sync_server_url" "$server_url"
     fi
-    
+
     # 輸入同步令牌
     read -p "同步令牌: " token
     if [ -n "$token" ]; then
         set_config "sync_token" "$token"
     fi
-    
+
     # 選擇衝突解決策略
     echo "衝突解決策略:"
     echo "1) 本地優先 (local)"

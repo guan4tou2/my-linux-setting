@@ -465,18 +465,28 @@ interactive_diagnosis() {
     suggestions_file=$(generate_fix_suggestions "$diagnostic_log")
     echo "✓ 修復建議已生成: $suggestions_file"
     
-    echo ""
-    echo "是否查看詳細診斷報告？(y/N)"
-    read -r response
-    if [[ "$response" =~ ^[Yy] ]]; then
+    # 非互動模式：不詢問，直接列印診斷報告與建議到 stdout，不阻塞流程
+    if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+        echo ""
+        echo "=== 詳細診斷報告 ==="
         cat "$diagnostic_log"
-    fi
-    
-    echo ""
-    echo "是否查看修復建議？(y/N)"
-    read -r response
-    if [[ "$response" =~ ^[Yy] ]]; then
+        echo ""
+        echo "=== 修復建議 ==="
         cat "$suggestions_file"
+    else
+        echo ""
+        echo "是否查看詳細診斷報告？(y/N)"
+        read -r response
+        if [[ "$response" =~ ^[Yy] ]]; then
+            cat "$diagnostic_log"
+        fi
+
+        echo ""
+        echo "是否查看修復建議？(y/N)"
+        read -r response
+        if [[ "$response" =~ ^[Yy] ]]; then
+            cat "$suggestions_file"
+        fi
     fi
 }
 

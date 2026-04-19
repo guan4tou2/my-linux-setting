@@ -52,7 +52,19 @@ if [ $backup_count -eq 0 ]; then
 fi
 
 echo ""
-read -p "選擇要回滾的備份編號 (或按 Ctrl+C 取消): " backup_choice
+# 非互動模式：可用環境變數 ROLLBACK_INDEX=N 指定備份編號（沒設定就終止）
+if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+    if [ -n "${ROLLBACK_INDEX:-}" ]; then
+        backup_choice="$ROLLBACK_INDEX"
+        echo -e "${BLUE}非互動模式：使用 ROLLBACK_INDEX=$backup_choice${NC}"
+    else
+        echo -e "${RED}非互動模式且未設定 ROLLBACK_INDEX，安全起見終止回滾${NC}"
+        echo -e "${YELLOW}用法：ROLLBACK_INDEX=1 ROLLBACK_CONFIRM=yes $0${NC}"
+        exit 1
+    fi
+else
+    read -p "選擇要回滾的備份編號 (或按 Ctrl+C 取消): " backup_choice
+fi
 
 if [ -z "$backup_choice" ]; then
     echo ""
@@ -84,7 +96,12 @@ for backup_file in "$backup_path"/*; do
 done
 
 echo ""
-read -p "確認要回滾嗎？(yes/no): " confirm
+if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+    confirm="${ROLLBACK_CONFIRM:-no}"
+    echo -e "${BLUE}非互動模式：ROLLBACK_CONFIRM=$confirm${NC}"
+else
+    read -p "確認要回滾嗎？(yes/no): " confirm
+fi
 
 if [[ ! $confirm =~ ^[Yy][Ee][Ss]$ ]]; then
     echo ""

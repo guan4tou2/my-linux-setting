@@ -30,7 +30,7 @@ fi
 # Constants
 # ==============================================================================
 
-readonly SCRIPT_VERSION="2.1.1"
+readonly SCRIPT_VERSION="2.1.2"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
@@ -1182,6 +1182,33 @@ backup_file() {
     fi
 }
 
+# 統一判斷是否為非互動模式
+# - NON_INTERACTIVE=true 環境變數
+# - stdin 不是 tty（curl|bash、CI、cron 等）
+# 任一條件成立即視為非互動。
+is_non_interactive() {
+    [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]
+}
+
+# 互動安全 read
+# 用法：safe_read <提示文字> <預設答案> <變數名> [read 額外參數...]
+# 在非互動模式下不阻塞，直接把預設答案寫進指定變數並回 0
+safe_read() {
+    local prompt="$1"
+    local default_value="$2"
+    local var_name="$3"
+    shift 3 || true
+
+    if is_non_interactive; then
+        printf -v "$var_name" '%s' "$default_value"
+        log_debug "non-interactive: $var_name=$default_value (prompt='$prompt')"
+        return 0
+    fi
+
+    # 互動模式：照常 read
+    read ${1+"$@"} -p "$prompt" "$var_name"
+}
+
 safe_append_to_file() {
     local content="$1"
     local file="$2"
@@ -2074,6 +2101,7 @@ func_list="$func_list optimize_apt_performance cleanup_apt_system select_fastest
 func_list="$func_list version_greater_equal check_architecture_compatibility install_arch_specific_package"
 func_list="$func_list ensure_tui_available tui_checklist tui_menu tui_yesno tui_msgbox tui_gauge tui_inputbox"
 func_list="$func_list cleanup_temp_files get_elapsed_time check_sudo_access init_common_env detect_and_inject_tool_paths"
+func_list="$func_list is_non_interactive safe_read"
 
 for func in $func_list; do
     if declare -f "$func" > /dev/null 2>&1; then

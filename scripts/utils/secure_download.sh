@@ -149,16 +149,15 @@ secure_download_and_execute() {
         log_error "腳本安全檢查失敗"
         
         # 詢問用戶是否繼續（僅在互動模式下）
-        if [ -t 0 ]; then
-            echo ""
-            log_warning "腳本可能包含危險操作，是否仍要執行？"
-            read -p "輸入 'yes' 繼續執行，其他任意鍵取消: " -r
-            if [ "$REPLY" != "yes" ]; then
-                log_info "用戶取消執行"
-                return 1
-            fi
-        else
+        if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
             log_error "非互動模式下不執行可疑腳本"
+            return 1
+        fi
+        echo ""
+        log_warning "腳本可能包含危險操作，是否仍要執行？"
+        read -p "輸入 'yes' 繼續執行，其他任意鍵取消: " -r
+        if [ "$REPLY" != "yes" ]; then
+            log_info "用戶取消執行"
             return 1
         fi
     fi

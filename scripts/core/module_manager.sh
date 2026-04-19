@@ -486,8 +486,11 @@ generate_module_details() {
     done
 
     printf "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
-    printf "\n按 Enter 返回選單..."
-    read -r
+    # 非互動模式不要求 Enter，避免阻塞
+    if ! { [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; }; then
+        printf "\n按 Enter 返回選單..."
+        read -r
+    fi
 }
 
 # ==============================================================================
