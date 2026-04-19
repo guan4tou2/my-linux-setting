@@ -99,7 +99,9 @@ if ! command -v cargo >/dev/null 2>&1; then
         log_info "這比通過 APT 安裝快得多，且版本更新"
 
         # 下載並安裝 rustup（非互動模式）
-        if curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path; then
+        # 設定 connect/max time，避免壞 mirror 或 TCP 掛起讓整段 install 無限阻塞
+        if curl --proto '=https' --tlsv1.2 -sSf --connect-timeout 15 --max-time 300 \
+                https://sh.rustup.rs | sh -s -- -y --no-modify-path; then
             # 載入 cargo 環境
             if [ -f "$HOME/.cargo/env" ]; then
                 source "$HOME/.cargo/env"
@@ -117,17 +119,25 @@ else
 fi
 
 # 安裝 LazyVim 配置
-if [ ! -d ~/.config/nvim ]; then
+# - 若 ~/.config/nvim 是空的或不存在，直接 clone
+# - 若已存在且不是 LazyVim starter（沒有 lazy-lock.json 等標記），先備份再安裝
+# - 若看起來已經是 LazyVim，印訊息後跳過，避免覆蓋使用者配置
+if [ ! -d ~/.config/nvim ] || [ -z "$(ls -A ~/.config/nvim 2>/dev/null)" ]; then
     printf "\033[36m安裝 LazyVim 配置\033[0m\n"
-
-    # 備份現有配置（如果存在）
-    if [ -d ~/.config/nvim ]; then
-        mv ~/.config/nvim ~/.config/nvim.bak.$(date +%Y%m%d_%H%M%S)
-    fi
-
-    # 克隆 LazyVim starter
     git clone https://github.com/LazyVim/starter ~/.config/nvim
     rm -rf ~/.config/nvim/.git
+elif [ -f ~/.config/nvim/lazy-lock.json ] || [ -f ~/.config/nvim/lua/config/lazy.lua ]; then
+    log_info "~/.config/nvim 已是 LazyVim 或相容配置，跳過"
+else
+    local_backup="$HOME/.config/nvim.bak.$(date +%Y%m%d_%H%M%S)"
+    printf "\033[33m發現既有 nvim 配置，先備份到 %s 再安裝 LazyVim\033[0m\n" "$local_backup"
+    mv ~/.config/nvim "$local_backup"
+    git clone https://github.com/LazyVim/starter ~/.config/nvim
+    rm -rf ~/.config/nvim/.git
+fi
+
+# LazyVim 安裝後的通用步驟（npm / zsh wrapper）：只要 ~/.config/nvim 存在就跑
+if [ -d ~/.config/nvim ]; then
 
     # 安裝 neovim npm 包（用於某些插件）
     if command -v npm > /dev/null 2>&1; then

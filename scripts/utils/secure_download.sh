@@ -95,12 +95,16 @@ calculate_checksum() {
 }
 
 # 安全下載並執行腳本
+# 用法: secure_download_and_execute <url> <checksum|skip> <description> [額外參數...]
+#       額外參數會原樣傳給下載回來的腳本，例如 "--unattended"。
 secure_download_and_execute() {
     local url="$1"
     local expected_checksum="$2"
     local description="$3"
+    shift 3 || true
+    local script_args=("$@")
     local temp_script
-    
+
     log_info "安全下載: $description"
     
     # 驗證域名
@@ -167,9 +171,10 @@ secure_download_and_execute() {
         echo ""
     fi
     
-    # 執行腳本
-    log_info "執行腳本: $description"
-    if bash "$temp_script"; then
+    # 執行腳本（把額外參數傳給下載的腳本）
+    log_info "執行腳本: $description${script_args[*]:+ (args: ${script_args[*]})}"
+    # 使用 ${arr[@]+"${arr[@]}"} 慣用法避免 set -u 下空陣列報錯
+    if bash "$temp_script" ${script_args[@]+"${script_args[@]}"}; then
         log_success "$description 安裝成功"
         return 0
     else

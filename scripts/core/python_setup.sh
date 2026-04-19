@@ -40,7 +40,7 @@ if ! check_command uv; then
         bash "$SCRIPT_DIR/secure_download.sh" uv
     else
         log_warning "找不到安全下載腳本，使用傳統安裝方式"
-        if curl -LsSf https://astral.sh/uv/install.sh | sh; then
+        if curl -LsSf --connect-timeout 15 --max-time 180 https://astral.sh/uv/install.sh | sh; then
             log_success "uv 安裝成功"
         else
             log_error "uv 安裝失敗"

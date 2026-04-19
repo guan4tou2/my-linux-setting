@@ -30,7 +30,7 @@ fi
 # Constants
 # ==============================================================================
 
-readonly SCRIPT_VERSION="2.0.3"
+readonly SCRIPT_VERSION="2.1.0"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
@@ -64,17 +64,27 @@ TOTAL_STEPS=0
 CURRENT_STEP=0
 
 # 統一處理 root 權限執行
+# 對 apt/apt-get 一律注入 DEBIAN_FRONTEND=noninteractive 與 --force-confold，
+# 避免 dpkg 設定檔 prompt 在非互動環境下卡死。
 run_as_root() {
-    # 統一處理提權邏輯，並在 TUI_MODE=quiet 時自動壓縮 apt 輸出
     local cmd="$1"
     shift || true
 
-    # 在安靜模式下，針對 apt / apt-get 自動加上 -qq，並隱藏標準輸出（保留錯誤訊息）
-    if [ "${TUI_MODE:-quiet}" = "quiet" ] && { [ "$cmd" = "apt" ] || [ "$cmd" = "apt-get" ]; }; then
-        if [ "$EUID" -eq 0 ]; then
-            "$cmd" -qq "$@" >/dev/null
+    # apt / apt-get 特殊處理：一律非互動
+    if [ "$cmd" = "apt" ] || [ "$cmd" = "apt-get" ]; then
+        local apt_opts=(-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+        if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
+            if [ "$EUID" -eq 0 ]; then
+                DEBIAN_FRONTEND=noninteractive "$cmd" -qq "${apt_opts[@]}" "$@" >/dev/null
+            else
+                sudo DEBIAN_FRONTEND=noninteractive "$cmd" -qq "${apt_opts[@]}" "$@" >/dev/null
+            fi
         else
-            sudo "$cmd" -qq "$@" >/dev/null
+            if [ "$EUID" -eq 0 ]; then
+                DEBIAN_FRONTEND=noninteractive "$cmd" "${apt_opts[@]}" "$@"
+            else
+                sudo DEBIAN_FRONTEND=noninteractive "$cmd" "${apt_opts[@]}" "$@"
+            fi
         fi
         return $?
     fi
@@ -320,7 +330,12 @@ check_package_installed() {
     local package="$1"
     case "${PKG_MANAGER:-apt}" in
         apt)
-            dpkg -l | grep -q "^ii  $package" 2>/dev/null
+            # 使用 dpkg-query 比 `dpkg -l | grep` 穩定：
+            # - 正確處理多架構（libfoo:amd64 vs libfoo:i386）
+            # - 不會被包名內的 regex 特殊字符誤判
+            # - 不依賴 locale 下的欄位寬度
+            dpkg-query -W -f='${Status}\n' "$package" 2>/dev/null \
+                | grep -q '^install ok installed$'
             ;;
         dnf|yum)
             rpm -q "$package" >/dev/null 2>&1
@@ -629,9 +644,11 @@ install_with_fallback() {
                 fi
                 ;;
             pip)
-                log_info "Installing $package via pip"
-                if pip install "$package" 2>/dev/null; then
-                    log_success "$package installed via pip"
+                # 明確呼叫 python3 -m pip 避免 `pip` 指到 Python 2 或錯 venv
+                log_info "Installing $package via python3 -m pip"
+                if command -v python3 >/dev/null 2>&1 \
+                   && python3 -m pip install --user "$package" 2>/dev/null; then
+                    log_success "$package installed via python3 -m pip --user"
                     return 0
                 fi
                 ;;
@@ -1931,32 +1948,111 @@ get_elapsed_time() {
 check_sudo_access() {
     if sudo -n true 2>/dev/null; then
         return 0
-    else
-        log_warning "需要 sudo 權限，請輸入密碼"
-        sudo -v
-        return $?
     fi
+
+    # 非互動 / 無 tty 環境不允許等密碼，否則會永久卡住
+    if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ] || [ ! -t 1 ]; then
+        log_error "需要 sudo 權限但當前為非互動環境（無法輸入密碼）"
+        log_error "請先在 shell 中執行 'sudo -v'，或設定 NOPASSWD sudo，再重跑此腳本"
+        return 1
+    fi
+
+    log_warning "需要 sudo 權限，請輸入密碼"
+    sudo -v
+    return $?
 }
 
 # ==============================================================================
 # 初始化函數
 # ==============================================================================
 
+# 探測並把語言工具 PATH 注入目前 session
+# 解決非互動 shell（bash -c / curl|bash）下不 source .bashrc 導致的誤判「未安裝」。
+# 回傳值恆為 0，只是印出探測到的工具，不強制安裝。
+detect_and_inject_tool_paths() {
+    local injected=()
+
+    # Homebrew / Linuxbrew
+    if ! command -v brew >/dev/null 2>&1; then
+        for cand in \
+            /home/linuxbrew/.linuxbrew/bin/brew \
+            "$HOME/.linuxbrew/bin/brew" \
+            /opt/homebrew/bin/brew \
+            /usr/local/bin/brew; do
+            if [ -x "$cand" ]; then
+                eval "$("$cand" shellenv)" 2>/dev/null || export PATH="$(dirname "$cand"):$PATH"
+                injected+=("brew@$cand")
+                break
+            fi
+        done
+    fi
+
+    # Cargo / rustup
+    if ! command -v cargo >/dev/null 2>&1 && [ -x "$HOME/.cargo/bin/cargo" ]; then
+        export PATH="$HOME/.cargo/bin:$PATH"
+        injected+=("cargo@$HOME/.cargo/bin")
+    fi
+
+    # uv / pipx / 其他 pip tool
+    if ! command -v uv >/dev/null 2>&1 && [ -x "$HOME/.local/bin/uv" ]; then
+        export PATH="$HOME/.local/bin:$PATH"
+        injected+=("uv@$HOME/.local/bin")
+    fi
+
+    # pyenv
+    if ! command -v pyenv >/dev/null 2>&1 && [ -x "$HOME/.pyenv/bin/pyenv" ]; then
+        export PATH="$HOME/.pyenv/bin:$PATH"
+        injected+=("pyenv@$HOME/.pyenv/bin")
+    fi
+
+    # nvm / node（只確保 ~/.nvm/current 或最新 default 的 bin 被加進 PATH）
+    if ! command -v node >/dev/null 2>&1; then
+        if [ -s "$HOME/.nvm/nvm.sh" ]; then
+            # nvm.sh 會定義 node 預設版本
+            # shellcheck disable=SC1091
+            . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 || true
+            command -v node >/dev/null 2>&1 && injected+=("node@nvm")
+        elif [ -x "$HOME/.fnm/fnm" ]; then
+            export PATH="$HOME/.fnm:$PATH"
+            injected+=("fnm@$HOME/.fnm")
+        fi
+    fi
+
+    # Go
+    if ! command -v go >/dev/null 2>&1 && [ -x "/usr/local/go/bin/go" ]; then
+        export PATH="/usr/local/go/bin:$PATH"
+        injected+=("go@/usr/local/go/bin")
+    fi
+
+    if [ ${#injected[@]} -gt 0 ]; then
+        log_debug "注入工具 PATH: ${injected[*]}"
+    fi
+    return 0
+}
+
 init_common_env() {
     # 設置錯誤處理
+    # 只啟用 errtrace 旗標，不在這裡註冊 ERR trap：
+    # - install.sh 會自己設 `trap 'handle_error ...' ERR`，過去這裡會覆蓋掉它，
+    #   導致使用者看不到錯誤 menu / 自動 cleanup / rollback。
+    # - 對於直接執行 `scripts/core/*.sh` 的情境，bash 的 `set -e` 已足夠。
+    # - 如仍想要預設 ERR 訊息，可在呼叫端自行 `trap 'log_error ...' ERR`。
     set -eE
-    trap 'log_error "腳本在第 $LINENO 行出錯"' ERR
-    
+
     # 創建必要目錄
     mkdir -p "$HOME/.local/bin"
     mkdir -p "$HOME/.config"
-    
+
     # 初始化快取系統
     init_cache_system
-    
-    # 設置 PATH
+
+    # 基本 PATH 擴充
     export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-    
+
+    # 偵測已存在於常見安裝位置但不在 PATH 的工具並注入，
+    # 這樣 `command -v brew/cargo/uv/...` 後續才能正確判定已安裝。
+    detect_and_inject_tool_paths
+
     # PARALLEL_JOBS 已在檔案頂部定義為 readonly
     log_info "共用環境初始化完成（並行任務: $PARALLEL_JOBS）"
 }
@@ -1977,7 +2073,7 @@ func_list="$func_list safe_download download_files_parallel get_best_mirror"
 func_list="$func_list optimize_apt_performance cleanup_apt_system select_fastest_apt_mirror"
 func_list="$func_list version_greater_equal check_architecture_compatibility install_arch_specific_package"
 func_list="$func_list ensure_tui_available tui_checklist tui_menu tui_yesno tui_msgbox tui_gauge tui_inputbox"
-func_list="$func_list cleanup_temp_files get_elapsed_time check_sudo_access init_common_env"
+func_list="$func_list cleanup_temp_files get_elapsed_time check_sudo_access init_common_env detect_and_inject_tool_paths"
 
 for func in $func_list; do
     if declare -f "$func" > /dev/null 2>&1; then

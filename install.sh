@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # Linux Environment Setup - Main Installation Script
-# Version: 2.0.3
+# Version: 2.1.0
 # ==============================================================================
 
 # 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
@@ -30,7 +30,7 @@ LAST_COMMAND=""
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
-Linux Setting Scripts - 自動安裝腳本 v2.0.3
+Linux Setting Scripts - 自動安裝腳本 v2.1.0
 
 用法: ./install.sh [選項]
 
@@ -62,7 +62,7 @@ show_welcome() {
     printf "\n"
     printf "╔════════════════════════════════════════════════════════╗\n"
     printf "║                                                        ║\n"
-    printf "║          Linux Setting Scripts  v2.0.3                 ║\n"
+    printf "║          Linux Setting Scripts  v2.1.0                 ║\n"
     printf "║            自動化開發環境配置工具                      ║\n"
     printf "║                                                        ║\n"
     printf "╠════════════════════════════════════════════════════════╣\n"
@@ -175,13 +175,22 @@ export ENABLE_PARALLEL_INSTALL PARALLEL_JOBS
 # Remote Installation with Security Verification
 # ==============================================================================
 
-SCRIPT_DIR="$PWD/scripts"
+# 以 install.sh 所在目錄推導 SCRIPT_DIR，避免使用者 `cd /tmp && bash ~/repo/install.sh`
+# 或透過絕對路徑執行時被誤判為「找不到本地檔案」而走遠端下載。
+# 注意：`bash -c "$(curl ... install.sh)"` 時 BASH_SOURCE[0] 為空，這種情況才會走遠端。
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    INSTALL_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SCRIPT_DIR="$INSTALL_SH_DIR/scripts"
+else
+    SCRIPT_DIR="$PWD/scripts"
+fi
 REMOTE_INSTALL=false
 
 # Try local common.sh first
 if [ -f "$SCRIPT_DIR/core/common.sh" ]; then
     source "$SCRIPT_DIR/core/common.sh"
 elif [ -f "./scripts/core/common.sh" ]; then
+    SCRIPT_DIR="$PWD/scripts"
     source "./scripts/core/common.sh"
 else
     # Remote installation - bootstrap without common.sh functions
@@ -348,7 +357,10 @@ check_environment() {
     fi
 
     # 檢測並啟用 TUI（如果可用）
-    if [ -t 0 ] && [ "${INSTALL_MODE}" != "minimal" ]; then
+    # NON_INTERACTIVE 與 minimal 模式不嘗試啟用 TUI，也不安裝 whiptail/dialog
+    if [ -t 0 ] \
+       && [ "${INSTALL_MODE}" != "minimal" ] \
+       && [ "${NON_INTERACTIVE:-false}" != "true" ]; then
         if command -v ensure_tui_available >/dev/null 2>&1; then
             ensure_tui_available && log_success "TUI 模式已啟用" || log_info "使用命令行模式"
         fi
@@ -582,21 +594,24 @@ main() {
         # 創建必要的子目錄
         mkdir -p "$SCRIPT_DIR/core" "$SCRIPT_DIR/utils" "$SCRIPT_DIR/maintenance"
 
+        # 所有 REMOTE 下載統一加 connect/max timeout，避免 GitHub/raw 慢或掛起讓 install 卡住
+        local curl_opts=(-fsSL --connect-timeout 15 --max-time "${DOWNLOAD_TIMEOUT:-60}")
+
         # 下載核心模組腳本（common.sh 已經在初始化時下載）
         for script in python_setup.sh docker_setup.sh terminal_setup.sh base_tools.sh dev_tools.sh monitoring_tools.sh; do
             printf "${BLUE}下載 core/$script...${NC}\n"
-            curl -fsSL "$SCRIPTS_URL/core/$script" -o "$SCRIPT_DIR/core/$script"
+            curl "${curl_opts[@]}" "$SCRIPTS_URL/core/$script" -o "$SCRIPT_DIR/core/$script"
             chmod +x "$SCRIPT_DIR/core/$script"
         done
 
         # 下載工具腳本
         printf "${BLUE}下載 utils/secure_download.sh...${NC}\n"
-        curl -fsSL "$SCRIPTS_URL/utils/secure_download.sh" -o "$SCRIPT_DIR/utils/secure_download.sh"
+        curl "${curl_opts[@]}" "$SCRIPTS_URL/utils/secure_download.sh" -o "$SCRIPT_DIR/utils/secure_download.sh"
         chmod +x "$SCRIPT_DIR/utils/secure_download.sh"
 
         # 下載維護腳本
         printf "${BLUE}下載 maintenance/update_tools.sh...${NC}\n"
-        curl -fsSL "$SCRIPTS_URL/maintenance/update_tools.sh" -o "$SCRIPT_DIR/maintenance/update_tools.sh"
+        curl "${curl_opts[@]}" "$SCRIPTS_URL/maintenance/update_tools.sh" -o "$SCRIPT_DIR/maintenance/update_tools.sh"
         chmod +x "$SCRIPT_DIR/maintenance/update_tools.sh"
     fi
 

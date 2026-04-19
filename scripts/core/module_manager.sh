@@ -547,6 +547,9 @@ install_module() {
 
     log_info "安裝模組: $name"
 
+    # 累計每個模組的整體失敗（非單純 log warning），最後回報給 caller
+    local module_failures=()
+
     if [ "$module_status" = "installed" ]; then
         log_info "模組 $name 套件已全部安裝，跳過套件安裝步驟（仍會執行設定腳本）"
     else
@@ -562,8 +565,12 @@ install_module() {
                     log_info "✓ $pkg 已安裝，跳過"
                     skipped_count=$((skipped_count + 1))
                 else
-                    install_package "$pkg" || log_warning "套件安裝失敗: $pkg"
-                    installed_count=$((installed_count + 1))
+                    if install_package "$pkg"; then
+                        installed_count=$((installed_count + 1))
+                    else
+                        log_warning "套件安裝失敗: $pkg"
+                        module_failures+=("apt:$pkg")
+                    fi
                 fi
             done
         fi
@@ -576,8 +583,12 @@ install_module() {
                     log_info "✓ $pkg 已安裝 (brew)，跳過"
                     skipped_count=$((skipped_count + 1))
                 else
-                    install_brew_package "$pkg" || log_warning "Brew 套件安裝失敗: $pkg"
-                    installed_count=$((installed_count + 1))
+                    if install_brew_package "$pkg"; then
+                        installed_count=$((installed_count + 1))
+                    else
+                        log_warning "Brew 套件安裝失敗: $pkg"
+                        module_failures+=("brew:$pkg")
+                    fi
                 fi
             done
         elif [ -n "$apt_fallback" ]; then
@@ -588,8 +599,12 @@ install_module() {
                     log_info "✓ $pkg 已安裝，跳過"
                     skipped_count=$((skipped_count + 1))
                 else
-                    install_package "$pkg" || log_warning "套件安裝失敗: $pkg"
-                    installed_count=$((installed_count + 1))
+                    if install_package "$pkg"; then
+                        installed_count=$((installed_count + 1))
+                    else
+                        log_warning "套件安裝失敗: $pkg"
+                        module_failures+=("apt:$pkg")
+                    fi
                 fi
             done
         fi
@@ -601,7 +616,7 @@ install_module() {
             # 確保 uv 已安裝
             if ! command -v uv >/dev/null 2>&1; then
                 log_info "安裝 uv..."
-                curl -LsSf https://astral.sh/uv/install.sh | sh
+                curl -LsSf --connect-timeout 15 --max-time 180 https://astral.sh/uv/install.sh | sh
                 export PATH="$HOME/.local/bin:$PATH"
             fi
 
@@ -620,6 +635,7 @@ install_module() {
                             installed_count=$((installed_count + 1))
                         else
                             log_warning "無法安裝 $pkg"
+                            module_failures+=("pip:$pkg")
                         fi
                     fi
                 fi
@@ -638,6 +654,7 @@ install_module() {
                         installed_count=$((installed_count + 1))
                     else
                         log_warning "Cargo 套件安裝失敗: $pkg"
+                        module_failures+=("cargo:$pkg")
                     fi
                 fi
             done
@@ -655,6 +672,7 @@ install_module() {
                         installed_count=$((installed_count + 1))
                     else
                         log_warning "NPM 套件安裝失敗: $pkg"
+                        module_failures+=("npm:$pkg")
                     fi
                 fi
             done
@@ -684,6 +702,20 @@ install_module() {
     if [ -n "$post_install" ]; then
         log_info "執行安裝後命令..."
         eval "$post_install" || log_warning "安裝後命令執行失敗"
+    fi
+
+    # 若有任何套件安裝失敗，明確回報但不中斷（避免一個 transient 失敗拖垮整段安裝）
+    if [ ${#module_failures[@]} -gt 0 ]; then
+        log_warning "====================================================="
+        log_warning "模組 $name 已完成，但有 ${#module_failures[@]} 個套件失敗："
+        for f in "${module_failures[@]}"; do
+            log_warning "  ✗ $f"
+        done
+        log_warning "  （若需強制重裝，重跑時加 --force）"
+        log_warning "====================================================="
+        # 紀錄到全域陣列供後續總結使用（安全初始化避免 set -u 報錯）
+        MODULE_INSTALL_FAILURES=(${MODULE_INSTALL_FAILURES[@]+"${MODULE_INSTALL_FAILURES[@]}"} "$name: ${module_failures[*]}")
+        return 0
     fi
 
     log_success "模組安裝完成: $name"

@@ -48,10 +48,24 @@ if [ ! -d "$HOME/.oh-my-zsh" ]; then
     fi
     # 在部分容器 / 非互動環境中，$USER 可能為空，改用 whoami 作為後備
     target_user="${USER:-$(id -un 2>/dev/null || whoami)}"
-    if command -v run_as_root >/dev/null 2>&1; then
-        run_as_root chsh -s "$(command -v zsh)" "$target_user"
+
+    # 若使用者已經是 zsh 了就跳過，避免再呼叫 chsh（可能觸發密碼 prompt）
+    current_shell=$(getent passwd "$target_user" 2>/dev/null | cut -d: -f7 || echo "")
+    target_shell="$(command -v zsh)"
+    if [ "$current_shell" = "$target_shell" ]; then
+        log_info "預設 shell 已是 zsh ($target_shell)，跳過 chsh"
+    elif [ "${NON_INTERACTIVE:-false}" = "true" ] && ! sudo -n true 2>/dev/null; then
+        log_warning "非互動模式且無 NOPASSWD sudo，跳過 chsh；請事後手動執行："
+        log_warning "    sudo chsh -s \"$target_shell\" \"$target_user\""
     else
-        sudo -k chsh -s "$(command -v zsh)" "$target_user"
+        # 使用 run_as_root 會走 sudo（若需要）；避免 -k 立即清空憑證快取
+        if command -v run_as_root >/dev/null 2>&1; then
+            run_as_root chsh -s "$target_shell" "$target_user" \
+                || log_warning "chsh 失敗，請手動執行 sudo chsh -s $target_shell $target_user"
+        else
+            sudo chsh -s "$target_shell" "$target_user" \
+                || log_warning "chsh 失敗，請手動執行 sudo chsh -s $target_shell $target_user"
+        fi
     fi
     if [ -f "$SCRIPT_DIR/../utils/secure_download.sh" ]; then
         bash "$SCRIPT_DIR/../utils/secure_download.sh" oh-my-zsh
@@ -70,12 +84,24 @@ else
     log_info "Oh-my-zsh 已安裝"
 fi
 
-# 安裝 zsh 插件
-printf "\033[36m安裝 zsh 插件\033[0m\n"
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions 2>/dev/null || true
-git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting 2>/dev/null || true
-git clone https://github.com/zsh-users/zsh-history-substring-search ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-history-substring-search 2>/dev/null || true
-git clone https://github.com/MichaelAquilina/zsh-you-should-use.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/you-should-use 2>/dev/null || true
+# 安裝 zsh 插件（idempotent：已存在時 pull，不存在時 clone）
+printf "\033[36m安裝 / 更新 zsh 插件\033[0m\n"
+_zsh_plugins_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins"
+mkdir -p "$_zsh_plugins_dir"
+_clone_or_pull() {
+    local url="$1" dest="$2"
+    if [ -d "$dest/.git" ]; then
+        git -C "$dest" pull --ff-only --quiet 2>/dev/null || log_warning "更新 $(basename "$dest") 失敗，沿用舊版"
+    elif [ -d "$dest" ]; then
+        log_warning "$dest 已存在但不是 git repo，跳過（可手動刪除後重裝）"
+    else
+        git clone --depth=1 "$url" "$dest" 2>/dev/null || log_warning "安裝 $(basename "$dest") 失敗"
+    fi
+}
+_clone_or_pull https://github.com/zsh-users/zsh-autosuggestions                  "$_zsh_plugins_dir/zsh-autosuggestions"
+_clone_or_pull https://github.com/zsh-users/zsh-syntax-highlighting.git          "$_zsh_plugins_dir/zsh-syntax-highlighting"
+_clone_or_pull https://github.com/zsh-users/zsh-history-substring-search         "$_zsh_plugins_dir/zsh-history-substring-search"
+_clone_or_pull https://github.com/MichaelAquilina/zsh-you-should-use.git         "$_zsh_plugins_dir/you-should-use"
 
 # 設定 plugins
 if ! grep -q "zsh-autosuggestions zsh-syntax-highlighting zsh-history-substring-search you-should-use" ~/.zshrc; then

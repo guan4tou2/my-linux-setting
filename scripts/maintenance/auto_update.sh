@@ -414,7 +414,7 @@ update_uv() {
         # 如果自更新失敗，嘗試重新安裝
         log_update $UPDATE_LEVEL_WARNING "UV 自更新失敗，嘗試重新安裝..."
         
-        if curl -LsSf https://astral.sh/uv/install.sh | sh; then
+        if curl -LsSf --connect-timeout 15 --max-time 180 https://astral.sh/uv/install.sh | sh; then
             log_update $UPDATE_LEVEL_INFO "UV 重新安裝成功"
             return 0
         else

@@ -472,7 +472,7 @@ fix_uv_missing() {
     
     # 使用安全方式安裝 uv
     if command -v curl >/dev/null 2>&1; then
-        if curl -LsSf https://astral.sh/uv/install.sh | sh; then
+        if curl -LsSf --connect-timeout 15 --max-time 180 https://astral.sh/uv/install.sh | sh; then
             # 更新 PATH
             export PATH="$HOME/.local/bin:$PATH"
             log_repair $REPAIR_LEVEL_INFO "UV 安裝成功"
