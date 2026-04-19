@@ -862,7 +862,9 @@ install_module() {
         fi
 
         # 5. 安裝 NPM 套件（跳過已安裝的）
+        # 先確保使用者級 npm prefix 已設定（避免 /usr/local 寫權限問題）
         if [ -n "$npm_packages" ] && command -v npm >/dev/null 2>&1; then
+            ensure_npm_user_prefix 2>/dev/null || true
             log_info "檢查 Node.js 套件..."
             for pkg in $npm_packages; do
                 if check_npm_package_installed "$pkg" 2>/dev/null; then

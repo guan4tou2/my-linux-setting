@@ -139,8 +139,15 @@ fi
 if [ -d ~/.config/nvim ]; then
 
     # 安裝 neovim npm 包（用於某些插件）
+    # 先設定使用者級 npm prefix，避免 /usr/local/lib/node_modules EACCES；
+    # 失敗也不要中斷整個 dev 模組（neovim npm 包並非絕對必要）
     if command -v npm > /dev/null 2>&1; then
-        npm install -g neovim
+        ensure_npm_user_prefix 2>/dev/null || true
+        if npm install -g neovim 2>&1; then
+            log_success "neovim npm 包安裝成功"
+        else
+            log_warning "neovim npm 包安裝失敗（不影響 LazyVim 主功能，可日後手動執行 'npm install -g neovim'）"
+        fi
     fi
 
     # 添加 nvim 函數包裝器（修復目錄切換問題）

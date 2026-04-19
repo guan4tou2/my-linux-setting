@@ -30,7 +30,7 @@ fi
 # Constants
 # ==============================================================================
 
-readonly SCRIPT_VERSION="2.2.0"
+readonly SCRIPT_VERSION="2.2.1"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
@@ -1182,6 +1182,47 @@ backup_file() {
     fi
 }
 
+# 確保 npm 使用使用者層級 prefix（~/.npm-global），避免 `npm install -g` 因
+# /usr/local/lib/node_modules 沒寫權限而 EACCES。
+# 已正確設定（prefix 在 $HOME 下）就直接 return 0。
+# 第一次設定時：建立 ~/.npm-global、寫入 npm config、注入 PATH，並 idempotent
+# 寫一行到 ~/.bashrc / ~/.zshrc。
+ensure_npm_user_prefix() {
+    if ! command -v npm >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local current_prefix
+    current_prefix=$(npm config get prefix 2>/dev/null || true)
+
+    # 已經是使用者目錄底下就不動
+    case "$current_prefix" in
+        "$HOME"/*) export PATH="$current_prefix/bin:$PATH"; return 0 ;;
+    esac
+
+    local target="$HOME/.npm-global"
+    log_info "設定 npm 使用者級 prefix → $target（避免需要 sudo）"
+    mkdir -p "$target"
+
+    if ! npm config set prefix "$target" 2>/dev/null; then
+        log_warning "npm config set prefix 失敗"
+        return 1
+    fi
+
+    export PATH="$target/bin:$PATH"
+
+    # 寫一行 PATH 到 shell rc（idempotent）
+    local rc_line='export PATH="$HOME/.npm-global/bin:$PATH"  # linux-setting:npm-prefix'
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+        if [ -f "$rc" ] && ! grep -Fq 'linux-setting:npm-prefix' "$rc"; then
+            printf '\n%s\n' "$rc_line" >> "$rc"
+            log_debug "已注入 npm-prefix PATH 到 $rc"
+        fi
+    done
+
+    return 0
+}
+
 # 統一判斷是否為非互動模式
 # - NON_INTERACTIVE=true 環境變數
 # - stdin 不是 tty（curl|bash、CI、cron 等）
@@ -2149,7 +2190,7 @@ func_list="$func_list optimize_apt_performance cleanup_apt_system select_fastest
 func_list="$func_list version_greater_equal check_architecture_compatibility install_arch_specific_package"
 func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_gauge tui_inputbox"
 func_list="$func_list cleanup_temp_files get_elapsed_time check_sudo_access init_common_env detect_and_inject_tool_paths"
-func_list="$func_list is_non_interactive safe_read"
+func_list="$func_list is_non_interactive safe_read ensure_npm_user_prefix"
 
 for func in $func_list; do
     if declare -f "$func" > /dev/null 2>&1; then

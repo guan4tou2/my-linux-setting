@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # Linux Environment Setup - Main Installation Script
-# Version: 2.2.0
+# Version: 2.2.1
 # ==============================================================================
 
 # 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
@@ -30,7 +30,7 @@ LAST_COMMAND=""
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
-Linux Setting Scripts - 自動安裝腳本 v2.2.0
+Linux Setting Scripts - 自動安裝腳本 v2.2.1
 
 用法: ./install.sh [選項]
 
@@ -41,6 +41,7 @@ Linux Setting Scripts - 自動安裝腳本 v2.2.0
   --dry-run                       預覽模式（不實際安裝）
   --force, --force-reinstall      強制重新安裝（不跳過已安裝的模組）
   -a, --advanced                  進階模式：每個模組進去再選具體要裝的套件
+  --abort-on-failure              單一模組失敗就中斷（預設僅警告並繼續）
   -v, --verbose                   顯示詳細日誌
   -h, --help                      顯示此幫助訊息
   --config <file>                 指定配置文件路徑
@@ -63,7 +64,7 @@ show_welcome() {
     printf "\n"
     printf "╔════════════════════════════════════════════════════════╗\n"
     printf "║                                                        ║\n"
-    printf "║          Linux Setting Scripts  v2.2.0                 ║\n"
+    printf "║          Linux Setting Scripts  v2.2.1                 ║\n"
     printf "║            自動化開發環境配置工具                      ║\n"
     printf "║                                                        ║\n"
     printf "╠════════════════════════════════════════════════════════╣\n"
@@ -98,6 +99,7 @@ SKIP_PYTHON_CHECK="${SKIP_PYTHON_CHECK:-false}"
 NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
 FORCE_REINSTALL="${FORCE_REINSTALL:-false}"
 ADVANCED_MODE="${ADVANCED_MODE:-false}"
+ABORT_ON_FAILURE="${ABORT_ON_FAILURE:-false}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -124,6 +126,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --advanced|-a)
             ADVANCED_MODE=true
+            shift
+            ;;
+        --abort-on-failure)
+            ABORT_ON_FAILURE=true
             shift
             ;;
         -v|--verbose)
@@ -153,7 +159,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Export variables for child scripts
-export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK NON_INTERACTIVE FORCE_REINSTALL ADVANCED_MODE
+export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK NON_INTERACTIVE FORCE_REINSTALL ADVANCED_MODE ABORT_ON_FAILURE
 
 # ==============================================================================
 # Configuration
@@ -1203,9 +1209,18 @@ show_installation_report() {
     report+="備份位置：$BACKUP_DIR\n"
     report+="日誌文件：$LOG_FILE\n\n"
 
-    # 若有任何模組套件安裝失敗，集中顯示於報告頂部
+    # 若有整個模組安裝失敗（install_module return non-zero），集中顯示
+    if [ ${#FAILED_MODULES[@]+x} ] && [ ${#FAILED_MODULES[@]} -gt 0 ]; then
+        report+="✗ 以下模組整體安裝失敗：\n"
+        for m in "${FAILED_MODULES[@]}"; do
+            report+="    • $m\n"
+        done
+        report+="   建議：檢查日誌後對失敗模組單獨重跑\n\n"
+    fi
+
+    # 若有部分套件失敗（仍視為模組成功，但有 partial failures），集中顯示
     if [ ${#MODULE_INSTALL_FAILURES[@]+x} ] && [ ${#MODULE_INSTALL_FAILURES[@]} -gt 0 ]; then
-        report+="⚠ 以下模組有套件安裝失敗（已略過；詳見日誌）：\n"
+        report+="⚠ 以下模組有部分套件安裝失敗（已略過；詳見日誌）：\n"
         for f in "${MODULE_INSTALL_FAILURES[@]}"; do
             report+="    • $f\n"
         done
@@ -1380,11 +1395,38 @@ install_selected_modules() {
         # 跟踪最後執行的命令
         LAST_COMMAND="execute_script \"core/${module}_setup.sh\" \"$module\""
 
+        # 模組失敗策略：
+        # - 預設 ABORT_ON_FAILURE=false：印警告 + 加入失敗清單，繼續下一個模組
+        # - --abort-on-failure：保持原本行為，立即中止整段安裝
+        # - 互動模式且非 abort：詢問是否繼續
+        _handle_module_failure() {
+            local mod="$1"
+            # 安全初始化（兼容 set -u）
+            FAILED_MODULES=(${FAILED_MODULES[@]+"${FAILED_MODULES[@]}"} "$mod")
+            printf "${RED}✗ 模組 $mod 安裝失敗${NC}\n"
+
+            if [ "${ABORT_ON_FAILURE:-false}" = "true" ]; then
+                printf "${RED}--abort-on-failure 已啟用，中止安裝${NC}\n"
+                return 1
+            fi
+
+            if [ -t 0 ] && [ "${NON_INTERACTIVE:-false}" != "true" ]; then
+                printf "${YELLOW}是否繼續安裝其餘模組？${NC} [Y/n]: "
+                local ans
+                read -r ans
+                case "${ans,,}" in
+                    n|no) printf "${YELLOW}使用者選擇中止${NC}\n"; return 1 ;;
+                esac
+            fi
+            printf "${YELLOW}繼續安裝下一個模組（失敗模組會在最後報告）${NC}\n"
+            return 0
+        }
+
         if [ "$USE_MODULE_MANAGER" = "true" ] && command -v install_module >/dev/null 2>&1; then
             LAST_COMMAND="install_module \"$module\""
             install_module "$module" || {
-                printf "${RED}安裝過程中出現錯誤，中止安裝${NC}\n"
-                return 1
+                _handle_module_failure "$module" || return 1
+                continue
             }
         else
             case $module in
@@ -1395,8 +1437,8 @@ install_selected_modules() {
                 monitoring) execute_script "core/monitoring_tools.sh" "monitoring" ;;
                 docker) execute_script "core/docker_setup.sh" "docker" ;;
             esac || {
-                printf "${RED}安裝過程中出現錯誤，中止安裝${NC}\n"
-                return 1
+                _handle_module_failure "$module" || return 1
+                continue
             }
         fi
     done
