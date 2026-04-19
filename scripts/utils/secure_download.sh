@@ -257,7 +257,7 @@ main() {
                 log_error "請提供要測試的 URL"
                 exit 1
             fi
-            secure_download_and_execute "$2" "skip" "測試腳本"
+            secure_download_and_execute "${2}" "skip" "測試腳本"
             ;;
         *)
             echo "用法: $0 <command>"
