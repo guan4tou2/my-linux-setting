@@ -24,24 +24,6 @@ elif [ "$DISTRO_FAMILY" = "debian" ]; then
     log_info "預設不啟用 ipinfo 第三方套件源（設 ENABLE_IPINFO_REPO=true 可啟用）"
 fi
 
-# 使用通用更新函數
-if command -v update_system >/dev/null 2>&1; then
-    update_system || log_warning "系統套件列表更新失敗，將繼續安裝流程"
-else
-    # 後備：直接更新
-    case "${PKG_MANAGER:-apt}" in
-        apt)
-            sudo apt-get update || log_warning "APT 套件列表更新失敗，將繼續安裝流程"
-            ;;
-        dnf|yum)
-            sudo ${PKG_MANAGER} check-update || true
-            ;;
-        pacman)
-            sudo pacman -Sy
-            ;;
-    esac
-fi
-
 # 基礎套件（根據發行版系列調整）
 # 這些是核心工具，lsd 和 tealdeer 會透過 cargo 單獨處理
 case "$DISTRO_FAMILY" in
@@ -68,6 +50,41 @@ case "$DISTRO_FAMILY" in
         ;;
 esac
 
+# 預先檢查哪些套件還沒裝；全部已安裝時跳過 apt update（節省時間）
+need_install=0
+if command -v check_package_installed >/dev/null 2>&1; then
+    for pkg in $base_packages; do
+        if ! check_package_installed "$pkg" 2>/dev/null; then
+            need_install=1
+            break
+        fi
+    done
+else
+    need_install=1
+fi
+
+if [ "$need_install" = "1" ]; then
+    # 使用通用更新函數
+    if command -v update_system >/dev/null 2>&1; then
+        update_system || log_warning "系統套件列表更新失敗，將繼續安裝流程"
+    else
+        # 後備：直接更新
+        case "${PKG_MANAGER:-apt}" in
+            apt)
+                sudo DEBIAN_FRONTEND=noninteractive apt-get update || log_warning "APT 套件列表更新失敗，將繼續安裝流程"
+                ;;
+            dnf|yum)
+                sudo ${PKG_MANAGER} check-update || true
+                ;;
+            pacman)
+                sudo pacman -Sy
+                ;;
+        esac
+    fi
+else
+    log_info "所有基礎 APT 套件皆已安裝，跳過 apt update"
+fi
+
 # 安裝基礎套件（使用批量安裝支持並行）
 if command -v install_packages_batch >/dev/null 2>&1; then
     # 將空格分隔的字符串轉換為數組
@@ -85,7 +102,7 @@ else
             install_package "$pkg" || true
         else
             case "${PKG_MANAGER:-apt}" in
-                apt) sudo apt-get install -y "$pkg" || true ;;
+                apt) sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" || true ;;
                 dnf|yum) sudo ${PKG_MANAGER} install -y "$pkg" || true ;;
                 pacman) sudo pacman -S --noconfirm "$pkg" || true ;;
             esac
@@ -108,7 +125,7 @@ if ! command -v lsd >/dev/null 2>&1; then
                 log_info "Install Homebrew for better support: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
             fi
         else
-            if sudo apt-get install -y lsd 2>/dev/null; then
+            if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y lsd 2>/dev/null; then
                 log_success "lsd installed via APT"
             else
                 log_warning "lsd installation failed"

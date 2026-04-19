@@ -59,7 +59,7 @@ else
         if command -v install_apt_package >/dev/null 2>&1; then
             install_apt_package "$pkg" || true
         else
-            sudo apt-get install -y "$pkg"
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg"
         fi
     done
 fi

@@ -39,6 +39,7 @@ Linux Setting Scripts - 自動安裝腳本 v2.0.1
   --non-interactive               無人值守模式（不進入互動選單）
   --update                        更新已安裝的組件
   --dry-run                       預覽模式（不實際安裝）
+  --force, --force-reinstall      強制重新安裝（不跳過已安裝的模組）
   -v, --verbose                   顯示詳細日誌
   -h, --help                      顯示此幫助訊息
   --config <file>                 指定配置文件路徑
@@ -94,6 +95,7 @@ DEBUG="${DEBUG:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 SKIP_PYTHON_CHECK="${SKIP_PYTHON_CHECK:-false}"
 NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
+FORCE_REINSTALL="${FORCE_REINSTALL:-false}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -112,6 +114,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --force|--force-reinstall)
+            FORCE_REINSTALL=true
             shift
             ;;
         -v|--verbose)
@@ -141,7 +147,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Export variables for child scripts
-export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK NON_INTERACTIVE
+export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK NON_INTERACTIVE FORCE_REINSTALL
 
 # ==============================================================================
 # Configuration
@@ -1247,9 +1253,22 @@ install_selected_modules() {
         printf "${GREEN}進度: [$current_module/$total_modules]${NC} 安裝模組: ${BLUE}$module${NC}\n"
         printf "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
 
+        # 模組層級「已安裝偵測」：若模組已完全安裝且未指定強制重裝，則直接跳過
+        # 可用 FORCE_REINSTALL=true 或 --force 強制重新執行模組
+        if [ "${FORCE_REINSTALL:-false}" != "true" ] \
+           && [ "$USE_MODULE_MANAGER" = "true" ] \
+           && command -v check_module_status >/dev/null 2>&1; then
+            module_status=$(check_module_status "$module" 2>/dev/null || echo "not_installed")
+            if [ "$module_status" = "installed" ]; then
+                printf "${GREEN}✓ 模組 ${BLUE}$module${GREEN} 已完全安裝，跳過${NC}\n"
+                printf "${CYAN}  （如需重新安裝，請設定 FORCE_REINSTALL=true 或加上 --force）${NC}\n\n"
+                continue
+            fi
+        fi
+
         # 跟踪最後執行的命令
         LAST_COMMAND="execute_script \"core/${module}_setup.sh\" \"$module\""
-        
+
         if [ "$USE_MODULE_MANAGER" = "true" ] && command -v install_module >/dev/null 2>&1; then
             LAST_COMMAND="install_module \"$module\""
             install_module "$module" || {

@@ -399,93 +399,60 @@ check_internet_speed() {
 # 並行安裝函數
 # ==============================================================================
 
-# 並行安裝多個 APT 套件
+# 批次安裝多個 APT 套件（使用單一 apt 呼叫，避免 dpkg lock 競爭與 sudo 提示卡死）
+#
+# 設計考量：
+# - 不再用「多個並行 sudo apt-get install」，因為 dpkg 用獨佔鎖，平行只會互相等鎖；
+#   且背景 sudo 的 stdin 被導向 log file 時，若需要密碼或互動 prompt 會永久卡住。
+# - 改用 `apt-get install -y pkg1 pkg2 ...` 一次性安裝，apt 內部本來就會平行下載。
+# - 強制 DEBIAN_FRONTEND=noninteractive，避免 dpkg 跳出設定視窗。
+# - 仍保留逐套件 fallback：批次失敗時逐個重試以隔離有問題的套件。
 install_apt_packages_parallel() {
     local packages=("$@")
-    local max_jobs="${PARALLEL_JOBS:-4}"
-    local temp_dir
-    temp_dir=$(mktemp -d)
-    local pids=()
     local failed_packages=()
-    
-    log_info "並行安裝 ${#packages[@]} 個套件（最多 $max_jobs 個並發任務）"
-    
-    # 函數：安裝單個套件
-    install_single_package() {
-        local package="$1"
-        local log_file="$2"
-        {
-            if install_apt_package "$package"; then
-                echo "SUCCESS:$package"
-            else
-                echo "FAILED:$package"
-            fi
-        } > "$log_file" 2>&1
-    }
-    
-    # 導出函數供子 shell 使用
-    for func in install_single_package install_apt_package check_package_installed log_info log_success log_error; do
-        if declare -f "$func" > /dev/null 2>&1; then
-            export -f "$func" 2>/dev/null || true
+
+    if [ ${#packages[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    log_info "批次安裝 ${#packages[@]} 個 APT 套件: ${packages[*]}"
+
+    local apt_env="DEBIAN_FRONTEND=noninteractive"
+    local apt_opts=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+
+    # 步驟 1：嘗試一次性批次安裝
+    if [ "${TUI_MODE:-normal}" = "quiet" ]; then
+        if sudo $apt_env apt-get install "${apt_opts[@]}" "${packages[@]}" >/dev/null 2>&1; then
+            log_success "批次安裝完成: ${#packages[@]}/${#packages[@]} 成功"
+            return 0
         fi
-    done
-    
-    # 啟動並行任務
-    local job_count=0
-    for package in "${packages[@]}"; do
-        local log_file="$temp_dir/$package.log"
-        
-        # 等待任務槽位可用
-        while [ ${#pids[@]} -ge $max_jobs ]; do
-            for i in "${!pids[@]}"; do
-                if ! kill -0 "${pids[i]}" 2>/dev/null; then
-                    unset pids[i]
-                fi
-            done
-            pids=("${pids[@]}") # 重新索引數組
-            sleep 0.1
-        done
-        
-        # 啟動新任務
-        install_single_package "$package" "$log_file" &
-        pids+=($!)
-        job_count=$((job_count + 1))
-        
-        log_debug "啟動安裝任務 $job_count/${#packages[@]}: $package (PID: ${pids[-1]})"
-    done
-    
-    # 等待所有任務完成
-    for pid in "${pids[@]}"; do
-        wait "$pid"
-    done
-    
-    # 收集結果
+    else
+        if sudo $apt_env apt-get install "${apt_opts[@]}" "${packages[@]}"; then
+            log_success "批次安裝完成: ${#packages[@]}/${#packages[@]} 成功"
+            return 0
+        fi
+    fi
+
+    # 步驟 2：批次失敗時，逐個重試以找出真正壞掉的套件
+    log_warning "批次安裝失敗，改為逐個安裝以隔離問題套件..."
     local success_count=0
     for package in "${packages[@]}"; do
-        local log_file="$temp_dir/$package.log"
-        if [ -f "$log_file" ]; then
-            local result
-            result=$(tail -n1 "$log_file" 2>/dev/null)
-            if [[ "$result" == SUCCESS:* ]]; then
-                success_count=$((success_count + 1))
-                log_success "✓ $package"
-            else
-                failed_packages+=("$package")
-                log_error "✗ $package"
-            fi
+        if sudo $apt_env apt-get install "${apt_opts[@]}" "$package" >/dev/null 2>&1; then
+            success_count=$((success_count + 1))
+            log_success "✓ $package"
+        else
+            failed_packages+=("$package")
+            log_error "✗ $package"
         fi
     done
-    
-    # 清理臨時文件
-    rm -rf "$temp_dir"
-    
-    log_info "並行安裝完成: $success_count/${#packages[@]} 成功"
-    
+
+    log_info "安裝完成: $success_count/${#packages[@]} 成功"
+
     if [ ${#failed_packages[@]} -gt 0 ]; then
         log_warning "失敗的套件: ${failed_packages[*]}"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -706,10 +673,11 @@ install_package() {
     log_info "安裝 $package (使用 ${PKG_MANAGER:-apt})"
 
     # 根據包管理器選擇安裝命令
+    # 對 apt 一律加上 DEBIAN_FRONTEND=noninteractive，避免 dpkg 跳出設定視窗造成卡死
     local install_cmd
     case "${PKG_MANAGER:-apt}" in
         apt)
-            install_cmd="sudo apt install -y"
+            install_cmd="sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
             ;;
         dnf)
             install_cmd="sudo dnf install -y"
@@ -777,11 +745,11 @@ install_packages_batch() {
         return 0
     fi
 
-    # 如果啟用並行安裝且包數量 >= 3，使用並行模式
+    # 對於 Debian 系列，使用批次安裝（單一 apt 呼叫，避免 dpkg lock 競爭）
+    # 注意：保留 ENABLE_PARALLEL_INSTALL 變數名向後相容，實際底層改用單次 apt batch
     if [ "${ENABLE_PARALLEL_INSTALL:-false}" = "true" ] && [ ${#to_install[@]} -ge 3 ]; then
-        log_info "使用並行模式安裝 ${#to_install[@]} 個套件"
-        # 對於 Debian 系列，使用並行安裝
         if [ "$DISTRO_FAMILY" = "debian" ] && command -v install_apt_packages_parallel >/dev/null 2>&1; then
+            log_info "使用批次模式安裝 ${#to_install[@]} 個套件"
             install_apt_packages_parallel "${to_install[@]}"
             return $?
         fi
@@ -873,9 +841,9 @@ ensure_homebrew_installed() {
     case "${PKG_MANAGER:-apt}" in
         apt)
             if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-                sudo apt-get install -y $brew_deps >/dev/null 2>&1 || log_warning "部分依賴安裝失敗"
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $brew_deps >/dev/null 2>&1 || log_warning "部分依賴安裝失敗"
             else
-                sudo apt-get install -y $brew_deps || log_warning "部分依賴安裝失敗"
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $brew_deps || log_warning "部分依賴安裝失敗"
             fi
             ;;
         dnf|yum)
