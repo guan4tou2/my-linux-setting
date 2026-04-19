@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-#!/bin/bash
 
 # 載入共用函數庫
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -269,11 +268,18 @@ main() {
     log_info "建議重新啟動終端以載入所有更新"
     
     # 可選：執行健康檢查
+    # 非互動或無 tty 時不詢問，預設跳過（透過 AUTO_HEALTH_CHECK=true 可強制執行）
     if [ -f "$SCRIPT_DIR/health_check.sh" ]; then
-        read -p "是否要執行健康檢查？(y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if [ "${AUTO_HEALTH_CHECK:-false}" = "true" ]; then
             bash "$SCRIPT_DIR/health_check.sh"
+        elif [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+            log_info "非互動模式，跳過健康檢查（如需執行，設定 AUTO_HEALTH_CHECK=true）"
+        else
+            read -p "是否要執行健康檢查？(y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                bash "$SCRIPT_DIR/health_check.sh"
+            fi
         fi
     fi
 }

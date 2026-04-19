@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-#!/bin/bash
 
 # 載入共用函數庫
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

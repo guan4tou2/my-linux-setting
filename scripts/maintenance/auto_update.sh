@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-#!/bin/bash
 
 # 自動更新機制 - 系統和工具自動更新
 
@@ -849,11 +848,16 @@ case "${1:-help}" in
         ;;
     "reboot")
         if [ -f "/var/run/reboot-required" ]; then
-            echo "系統需要重啟，是否現在重啟？(y/N)"
-            read -r response
-            if [[ "$response" =~ ^[Yy] ]]; then
-                log_info "系統將在 1 分鐘後重啟..."
-                sudo shutdown -r +1 "系統更新後自動重啟"
+            # 非互動：絕不自動重啟，只提示。互動時才詢問。
+            if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+                log_warning "系統需要重啟，但當前為非互動模式。請手動執行 'sudo reboot' 或 'sudo shutdown -r now'"
+            else
+                echo "系統需要重啟，是否現在重啟？(y/N)"
+                read -r response
+                if [[ "$response" =~ ^[Yy] ]]; then
+                    log_info "系統將在 1 分鐘後重啟..."
+                    sudo shutdown -r +1 "系統更新後自動重啟"
+                fi
             fi
         else
             echo "系統不需要重啟"

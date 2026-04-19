@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-#!/bin/bash
 
 # 載入共用函數庫
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -109,8 +108,19 @@ if ! grep -q "zsh-autosuggestions zsh-syntax-highlighting zsh-history-substring-
 fi
 
 # 設定 PATH
-if ! grep -q "export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH" ~/.zshrc; then
-    sed -i -e 's|# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH|export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH|' ~/.zshrc
+# 使用 safe_append_to_file 的 pattern 檢查（# linux-setting:path-block）
+# 避免原本 sed 搭配含 $HOME 混合展開導致 idempotent 檢查誤判
+if command -v safe_append_to_file >/dev/null 2>&1; then
+    safe_append_to_file \
+        '# linux-setting:path-block
+export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH"' \
+        ~/.zshrc \
+        '# linux-setting:path-block'
+elif ! grep -q 'linux-setting:path-block' ~/.zshrc 2>/dev/null; then
+    printf '\n%s\n%s\n' \
+        '# linux-setting:path-block' \
+        'export PATH="$HOME/bin:$HOME/.local/bin:/usr/local/bin:$HOME/go/bin:$PATH"' \
+        >> ~/.zshrc
 fi
 
 # 設定終端環境變數（修復 nvim 顯示問題）
@@ -126,13 +136,16 @@ fi
 # 安裝 Powerlevel10k
 if [ ! -f ~/.p10k.zsh ]; then
     printf "\033[36m安裝 Powerlevel10k\033[0m\n"
+    # 下載動作加上 timeout，避免慢 mirror / TCP 掛起卡住 install
     if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
-        wget -q "$P10K_CONFIG_URL" -O ~/.p10k.zsh >/dev/null 2>&1
-        git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
+        wget -q --timeout=30 --tries=2 "$P10K_CONFIG_URL" -O ~/.p10k.zsh >/dev/null 2>&1
+        GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 \
+            git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
             "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k" >/dev/null 2>&1 || true
     else
-        wget "$P10K_CONFIG_URL" -O ~/.p10k.zsh
-        git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
+        wget --timeout=30 --tries=2 "$P10K_CONFIG_URL" -O ~/.p10k.zsh
+        GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30 \
+            git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
             "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k" || true
     fi
     sed -i 's/^ZSH_THEME=.*/ZSH_THEME="powerlevel10k\/powerlevel10k"/g' ~/.zshrc

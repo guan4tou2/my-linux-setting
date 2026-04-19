@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-#!/bin/bash
 
 # 載入共用函數庫
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -80,9 +79,9 @@ if ! check_command lazydocker; then
         }
     fi
 
-    # 添加別名
+    # 添加別名（第 3 參數為 idempotent 檢查用的 pattern，容忍引號變體）
     if command -v lazydocker >/dev/null 2>&1; then
-        safe_append_to_file 'alias lzd="lazydocker"' ~/.zshrc
+        safe_append_to_file 'alias lzd="lazydocker"' ~/.zshrc 'alias lzd='
     fi
 else
     log_info "Lazydocker 已安裝"

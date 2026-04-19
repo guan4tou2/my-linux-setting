@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # Linux Environment Setup - Main Installation Script
-# Version: 2.1.0
+# Version: 2.1.1
 # ==============================================================================
 
 # 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
@@ -30,7 +30,7 @@ LAST_COMMAND=""
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
-Linux Setting Scripts - 自動安裝腳本 v2.1.0
+Linux Setting Scripts - 自動安裝腳本 v2.1.1
 
 用法: ./install.sh [選項]
 
@@ -62,7 +62,7 @@ show_welcome() {
     printf "\n"
     printf "╔════════════════════════════════════════════════════════╗\n"
     printf "║                                                        ║\n"
-    printf "║          Linux Setting Scripts  v2.1.0                 ║\n"
+    printf "║          Linux Setting Scripts  v2.1.1                 ║\n"
     printf "║            自動化開發環境配置工具                      ║\n"
     printf "║                                                        ║\n"
     printf "╠════════════════════════════════════════════════════════╣\n"
@@ -442,22 +442,25 @@ check_environment() {
         log_info "跳過 Python 版本檢查（環境變數設定）"
     elif ! check_python_version "3.8"; then
         log_warning "Python 版本不滿足要求，嘗試安裝 Python 3+"
-        # 使用通用安裝方式
+        # 使用通用安裝方式；避免原本依賴 "$?" 在複合 if/case 結構下的歧義
         if command -v update_system >/dev/null 2>&1; then
-            update_system
+            update_system || true
         fi
+
+        local py_rc=0
         if command -v install_package >/dev/null 2>&1; then
-            install_package python3 && install_package python3-pip
+            install_package python3 && install_package python3-pip || py_rc=$?
         else
             case "$PKG_MANAGER" in
-                apt) run_as_root apt-get install -y python3 python3-venv python3-pip ;;
-                dnf|yum) run_as_root $PKG_MANAGER install -y python3 python3-pip ;;
-                pacman) run_as_root pacman -S --noconfirm python python-pip ;;
+                apt) run_as_root apt-get install -y python3 python3-venv python3-pip || py_rc=$? ;;
+                dnf|yum) run_as_root $PKG_MANAGER install -y python3 python3-pip || py_rc=$? ;;
+                pacman) run_as_root pacman -S --noconfirm python python-pip || py_rc=$? ;;
+                *) py_rc=1 ;;
             esac
         fi
-        if [ $? -eq 0 ]; then
+
+        if [ "$py_rc" -eq 0 ]; then
             log_success "Python 3 安裝完成"
-            # 再次檢查，即使未通過也不中斷
             if check_python_version "3.8"; then
                 log_success "Python 版本現在滿足要求"
             else
@@ -533,11 +536,13 @@ check_environment() {
 }
 
 # 備份配置文件
+# 自動保留最新 N 份（預設 10），透過 BACKUP_RETENTION 環境變數調整
 backup_config_files() {
     printf "${BLUE}備份配置文件...${NC}\n"
-    BACKUP_DIR="$HOME/.config/linux-setting-backup/$(date +%Y%m%d_%H%M%S)"
+    local backup_root="$HOME/.config/linux-setting-backup"
+    BACKUP_DIR="$backup_root/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$BACKUP_DIR"
-    
+
     # 備份現有的配置文件
     for file in ~/.zshrc ~/.p10k.zsh ~/.config/nvim; do
         if [ -e "$file" ]; then
@@ -545,6 +550,20 @@ backup_config_files() {
             printf "${GREEN}已備份：$file${NC}\n"
         fi
     done
+
+    # Retention：保留最新 N 份，刪除更舊的
+    local retention="${BACKUP_RETENTION:-10}"
+    if [ -d "$backup_root" ] && [ "$retention" -gt 0 ] 2>/dev/null; then
+        # 列出所有備份子目錄（依日期格式排序）並移除超出 retention 的舊者
+        local old_backups
+        old_backups=$(ls -1t "$backup_root" 2>/dev/null | tail -n +$((retention + 1)))
+        if [ -n "$old_backups" ]; then
+            while IFS= read -r dir; do
+                [ -n "$dir" ] && rm -rf "$backup_root/$dir" \
+                    && printf "${CYAN}已清理舊備份：$dir${NC}\n"
+            done <<< "$old_backups"
+        fi
+    fi
 }
 
 # 設置日誌
@@ -1161,6 +1180,15 @@ show_installation_report() {
 
     report+="備份位置：$BACKUP_DIR\n"
     report+="日誌文件：$LOG_FILE\n\n"
+
+    # 若有任何模組套件安裝失敗，集中顯示於報告頂部
+    if [ ${#MODULE_INSTALL_FAILURES[@]+x} ] && [ ${#MODULE_INSTALL_FAILURES[@]} -gt 0 ]; then
+        report+="⚠ 以下模組有套件安裝失敗（已略過；詳見日誌）：\n"
+        for f in "${MODULE_INSTALL_FAILURES[@]}"; do
+            report+="    • $f\n"
+        done
+        report+="   建議：確認網路/倉庫狀態後重跑（可加 --force）\n\n"
+    fi
 
     # 添加提示信息
     if ! echo "$installed_modules" | grep -q "terminal"; then

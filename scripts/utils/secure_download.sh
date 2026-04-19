@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-#!/bin/bash
 
 # 安全下載與執行腳本工具
 # 用於替換直接執行遠程腳本的危險做法
@@ -209,7 +208,9 @@ install_lazydocker() {
     # lazydocker 使用更安全的 GitHub releases 安裝方式
     log_info "安裝 lazydocker"
     local version
-    version=$(curl -s https://api.github.com/repos/jesseduffield/lazydocker/releases/latest | grep tag_name | cut -d '"' -f 4)
+    version=$(curl -s --connect-timeout 10 --max-time 30 \
+        https://api.github.com/repos/jesseduffield/lazydocker/releases/latest \
+        | grep tag_name | cut -d '"' -f 4)
     
     if [ -n "$version" ]; then
         local url="https://github.com/jesseduffield/lazydocker/releases/download/$version/lazydocker_${version#v}_Linux_x86_64.tar.gz"

@@ -2,10 +2,27 @@
 
 # 載入共用函數庫（使用與其他模組一致的 TUI / 日誌 / 安裝行為）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh" 2>/dev/null || {
-    # 在極簡環境下找不到 common.sh 時，仍然盡量完成基礎安裝
-    printf "\033[33m警告: 無法載入共用函數庫，將使用簡化模式安裝基礎工具\033[0m\n"
-}
+if ! source "$SCRIPT_DIR/common.sh" 2>/dev/null; then
+    # 極簡環境 fallback：提供最低限度的 log_* / 系統變數，讓後續流程仍能跑
+    printf "\033[33m警告: 無法載入共用函數庫，啟用簡化模式\033[0m\n"
+    log_info()    { printf "\033[36mINFO:\033[0m %s\n" "$*"; }
+    log_success() { printf "\033[32mSUCCESS:\033[0m %s\n" "$*"; }
+    log_warning() { printf "\033[33mWARNING:\033[0m %s\n" "$*"; }
+    log_error()   { printf "\033[31mERROR:\033[0m %s\n" "$*" >&2; }
+    log_debug()   { [ "${DEBUG:-false}" = "true" ] && printf "DEBUG: %s\n" "$*" || true; }
+    # 粗略偵測包管理器
+    if command -v apt-get >/dev/null 2>&1; then
+        PKG_MANAGER="apt";    DISTRO_FAMILY="debian"; DISTRO="${DISTRO:-ubuntu}"
+    elif command -v dnf >/dev/null 2>&1; then
+        PKG_MANAGER="dnf";    DISTRO_FAMILY="rhel";   DISTRO="${DISTRO:-fedora}"
+    elif command -v yum >/dev/null 2>&1; then
+        PKG_MANAGER="yum";    DISTRO_FAMILY="rhel";   DISTRO="${DISTRO:-centos}"
+    elif command -v pacman >/dev/null 2>&1; then
+        PKG_MANAGER="pacman"; DISTRO_FAMILY="arch";   DISTRO="${DISTRO:-arch}"
+    else
+        PKG_MANAGER="unknown"; DISTRO_FAMILY="unknown"; DISTRO="${DISTRO:-unknown}"
+    fi
+fi
 
 log_info "########## 安裝基礎工具 ##########"
 log_info "檢測到系統：$DISTRO ($DISTRO_FAMILY) - 包管理器：$PKG_MANAGER"
