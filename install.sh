@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # Linux Environment Setup - Main Installation Script
-# Version: 2.0.2
+# Version: 2.0.3
 # ==============================================================================
 
 # 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
@@ -30,7 +30,7 @@ LAST_COMMAND=""
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
-Linux Setting Scripts - 自動安裝腳本 v2.0.2
+Linux Setting Scripts - 自動安裝腳本 v2.0.3
 
 用法: ./install.sh [選項]
 
@@ -62,7 +62,7 @@ show_welcome() {
     printf "\n"
     printf "╔════════════════════════════════════════════════════════╗\n"
     printf "║                                                        ║\n"
-    printf "║          Linux Setting Scripts  v2.0.2                 ║\n"
+    printf "║          Linux Setting Scripts  v2.0.3                 ║\n"
     printf "║            自動化開發環境配置工具                      ║\n"
     printf "║                                                        ║\n"
     printf "╠════════════════════════════════════════════════════════╣\n"
@@ -355,6 +355,28 @@ check_environment() {
     fi
 
     # 檢查並提示安裝 Homebrew（可選）
+    # 先試 PATH，失敗時再檢查 Linuxbrew/macOS 的常見安裝路徑，
+    # 因為 Homebrew 的 `brew-on` alias 只在互動 shell 生效，
+    # `bash -c` 這類非互動入口會誤判為「未安裝」。
+    if ! command -v brew >/dev/null 2>&1; then
+        local brew_bin=""
+        for candidate in \
+            /home/linuxbrew/.linuxbrew/bin/brew \
+            "$HOME/.linuxbrew/bin/brew" \
+            /opt/homebrew/bin/brew \
+            /usr/local/bin/brew; do
+            if [ -x "$candidate" ]; then
+                brew_bin="$candidate"
+                break
+            fi
+        done
+        if [ -n "$brew_bin" ]; then
+            log_success "檢測到 Homebrew 已安裝於 $brew_bin"
+            eval "$("$brew_bin" shellenv)" 2>/dev/null || export PATH="$(dirname "$brew_bin"):$PATH"
+            log_info "已將 Homebrew 注入當前 session 的 PATH"
+        fi
+    fi
+
     if ! command -v brew >/dev/null 2>&1; then
         log_info "檢測到系統未安裝 Homebrew"
         log_info "Homebrew 可以簡化某些工具的安裝（如 lsd、tealdeer、lazygit 等）"

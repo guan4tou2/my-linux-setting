@@ -30,7 +30,7 @@ fi
 # Constants
 # ==============================================================================
 
-readonly SCRIPT_VERSION="2.0.2"
+readonly SCRIPT_VERSION="2.0.3"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
@@ -829,6 +829,26 @@ ensure_homebrew_installed() {
     if command -v brew >/dev/null 2>&1; then
         log_success "Homebrew 已安裝: $(brew --version | head -n1)"
         return 0
+    fi
+
+    # 非互動 shell 下 PATH 不含 brew 時，檢查常見安裝路徑
+    local brew_bin=""
+    for candidate in \
+        /home/linuxbrew/.linuxbrew/bin/brew \
+        "$HOME/.linuxbrew/bin/brew" \
+        /opt/homebrew/bin/brew \
+        /usr/local/bin/brew; do
+        if [ -x "$candidate" ]; then
+            brew_bin="$candidate"
+            break
+        fi
+    done
+    if [ -n "$brew_bin" ]; then
+        eval "$("$brew_bin" shellenv)" 2>/dev/null || export PATH="$(dirname "$brew_bin"):$PATH"
+        if command -v brew >/dev/null 2>&1; then
+            log_success "Homebrew 已安裝 (從 $brew_bin 注入 PATH): $(brew --version | head -n1)"
+            return 0
+        fi
     fi
 
     log_info "檢測到系統未安裝 Homebrew，開始安裝..."
