@@ -24,7 +24,9 @@ set -euo pipefail
 : "${VERBOSE:=false}"
 : "${DEBUG:=false}"
 : "${TUI_MODE:=quiet}"
-: "${USE_TUI:=false}"
+# 注意：USE_TUI 預設 "auto"（不是 false），讓 ensure_tui_available 有機會偵測 whiptail；
+# 這份檔案後段 line ~1804 也有同樣設定，這裡早設一次是為了 set -u 安全
+: "${USE_TUI:=auto}"
 : "${NON_INTERACTIVE:=false}"
 : "${INSTALL_MODE:=full}"
 : "${UPDATE_MODE:=false}"
@@ -54,7 +56,7 @@ fi
 # Constants
 # ==============================================================================
 
-readonly SCRIPT_VERSION="2.2.2"
+readonly SCRIPT_VERSION="2.2.3"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
