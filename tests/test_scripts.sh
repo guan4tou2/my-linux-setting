@@ -320,8 +320,10 @@ test_base_tools_update_nonfatal() {
         return
     fi
 
+    # 接受兩種寫法：原本 'sudo apt-get update' 與我們新加的 'sudo DEBIAN_FRONTEND=... apt-get update'
     if search_literal 'update_system || log_warning "系統套件列表更新失敗，將繼續安裝流程"' "$base_tools" && \
-       search_literal 'sudo apt-get update || log_warning "APT 套件列表更新失敗，將繼續安裝流程"' "$base_tools"; then
+       { search_literal 'sudo apt-get update || log_warning "APT 套件列表更新失敗，將繼續安裝流程"' "$base_tools" || \
+         search_literal 'sudo DEBIAN_FRONTEND=noninteractive apt-get update || log_warning "APT 套件列表更新失敗，將繼續安裝流程"' "$base_tools"; }; then
         log_pass "base_tools.sh 已容忍套件庫更新失敗"
     else
         log_fail "base_tools.sh 套件庫更新失敗仍可能中止流程"
@@ -427,8 +429,10 @@ test_dev_tools_lazygit_tmpdir() {
         return
     fi
 
-    if search_literal 'lazygit_tmp_dir="$(mktemp -d)"' "$dev_tools" && \
-       search_literal 'curl -fsSL -o "$lazygit_tmp_dir/lazygit.tar.gz"' "$dev_tools"; then
+    # curl 那行被換行加 timeout 切成多行，改用較鬆的 token 檢查
+    if search_literal 'lazygit_tmp_dir="$(mktemp -d)"' "$dev_tools" \
+       && search_literal '$lazygit_tmp_dir/lazygit.tar.gz' "$dev_tools" \
+       && grep -q 'curl -fsSL' "$dev_tools"; then
         log_pass "dev_tools.sh 已使用暫存目錄下載 lazygit"
     else
         log_fail "dev_tools.sh 仍可能在不可寫目錄下載 lazygit"

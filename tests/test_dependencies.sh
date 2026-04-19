@@ -113,47 +113,57 @@ test_network_connectivity() {
 }
 
 # 測試必要命令可用性
+# - HARD requirements：缺了 install.sh 跑不起來
+# - OPTIONAL：install.sh 會自己安裝；缺了只 warn 不 fail
 test_required_commands() {
     log_test "測試必要命令可用性..."
-    
+
+    # 真正必要的（沒這些就連跑 install.sh 都不行）
     local required_commands=(
         "curl"
         "wget"
         "sudo"
         "apt-get"
         "python3"
-        "pip3"
         "git"
         "bash"
-        "zsh"
         "grep"
         "sed"
         "awk"
     )
-    
+
+    # install.sh 會幫忙裝的（CI 環境通常沒有，缺了只 warn）
+    local optional_commands=(
+        "zsh"
+        "pip3"
+    )
+
     for cmd in "${required_commands[@]}"; do
         if command -v "$cmd" >/dev/null 2>&1; then
             local version
             case "$cmd" in
-                "python3")
-                    version=$(python3 --version 2>&1 | cut -d' ' -f2)
-                    ;;
-                "git")
-                    version=$(git --version 2>&1 | cut -d' ' -f3)
-                    ;;
-                "bash")
-                    version=$(bash --version 2>&1 | head -1 | cut -d' ' -f4)
-                    ;;
-                "zsh")
-                    version=$(zsh --version 2>&1 | cut -d' ' -f2)
-                    ;;
-                *)
-                    version="已安裝"
-                    ;;
+                python3) version=$(python3 --version 2>&1 | cut -d' ' -f2) ;;
+                git)     version=$(git --version 2>&1 | cut -d' ' -f3) ;;
+                bash)    version=$(bash --version 2>&1 | head -1 | cut -d' ' -f4) ;;
+                *)       version="已安裝" ;;
             esac
             log_pass "$cmd ($version)"
         else
             log_fail "$cmd 未安裝"
+        fi
+    done
+
+    for cmd in "${optional_commands[@]}"; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            local version
+            case "$cmd" in
+                zsh)  version=$(zsh --version 2>&1 | cut -d' ' -f2) ;;
+                pip3) version=$(pip3 --version 2>&1 | cut -d' ' -f2) ;;
+                *)    version="已安裝" ;;
+            esac
+            log_pass "$cmd ($version)"
+        else
+            log_warn "$cmd 未安裝（install.sh 會處理，非阻塞）"
         fi
     done
 }
@@ -233,8 +243,11 @@ test_permissions() {
     log_test "測試權限..."
     
     # sudo 權限測試
+    # 非互動環境（CI / docker / cron）絕不要呼叫 sudo -v 等密碼，避免阻塞
     if sudo -n true 2>/dev/null; then
         log_pass "sudo 權限可用 (無需密碼)"
+    elif [ "${CI:-false}" = "true" ] || [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
+        log_warn "sudo 需要密碼但當前為非互動環境（跳過實測，僅警告）"
     elif sudo -v 2>/dev/null; then
         log_pass "sudo 權限可用"
     else
@@ -242,15 +255,19 @@ test_permissions() {
     fi
     
     # 寫入權限測試
+    # 對 ~/.local 等使用者目錄，不存在時自動建立後再判定（這是 install.sh 自己也會做的事）
     local test_dirs=(
         "$HOME"
         "$HOME/.local"
         "$HOME/.config"
         "/tmp"
     )
-    
+
     for dir in "${test_dirs[@]}"; do
-        if [ -w "$dir" ]; then
+        if [ ! -d "$dir" ]; then
+            mkdir -p "$dir" 2>/dev/null || true
+        fi
+        if [ -d "$dir" ] && [ -w "$dir" ]; then
             log_pass "$dir 可寫"
         else
             log_fail "$dir 不可寫"
@@ -270,11 +287,11 @@ test_network_speed() {
     log_test "測試網路速度..."
     
     # 檢查是否在測試環境中跳過網路測試
-    if [ "$TEST_ENVIRONMENT" = "docker" ] || [ "$SKIP_NETWORK_TESTS" = "true" ]; then
+    if [ "${TEST_ENVIRONMENT:-}" = "docker" ] || [ "${SKIP_NETWORK_TESTS:-false}" = "true" ]; then
         log_warn "跳過網路速度測試 (Docker/測試環境)"
         return 0
     fi
-    
+
     # 下載小文件測試速度
     local test_url="http://cachefly.cachefly.net/100kb.test"
     local start_time end_time duration speed
@@ -311,7 +328,7 @@ test_package_sources() {
     log_test "測試套件源可用性..."
     
     # 檢查是否在測試環境中跳過網路相關測試
-    if [ "$TEST_ENVIRONMENT" = "docker" ] || [ "$SKIP_NETWORK_TESTS" = "true" ]; then
+    if [ "${TEST_ENVIRONMENT:-}" = "docker" ] || [ "${SKIP_NETWORK_TESTS:-false}" = "true" ]; then
         log_warn "跳過套件源測試 (Docker/測試環境)"
         return 0
     fi
