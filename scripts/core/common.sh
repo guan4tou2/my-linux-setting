@@ -779,9 +779,9 @@ update_system() {
     case "${PKG_MANAGER:-apt}" in
         apt)
             if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-                sudo apt-get update >/dev/null 2>&1
+                sudo DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null 2>&1
             else
-                sudo apt-get update
+                sudo DEBIAN_FRONTEND=noninteractive apt-get update
             fi
             ;;
         dnf)
@@ -1484,17 +1484,17 @@ cleanup_apt_system() {
     log_info "清理 APT 系統..."
     
     # 清理套件快取
-    sudo apt autoclean
-    
+    sudo DEBIAN_FRONTEND=noninteractive apt-get autoclean
+
     # 移除不需要的套件
-    sudo apt autoremove -y
-    
+    sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -y
+
     # 清理孤立套件
     if check_command deborphan; then
         local orphaned
         orphaned=$(deborphan)
         if [ -n "$orphaned" ]; then
-            echo "$orphaned" | sudo xargs apt remove -y
+            echo "$orphaned" | sudo xargs DEBIAN_FRONTEND=noninteractive apt-get remove -y
             log_info "已清理孤立套件"
         fi
     fi
@@ -1510,8 +1510,8 @@ select_fastest_apt_mirror() {
         log_info "安裝 apt-fast 以提高下載速度..."
         if [ ! -f "/etc/apt/sources.list.d/apt-fast.list" ]; then
             sudo add-apt-repository ppa:apt-fast/stable -y
-            sudo apt update
-            sudo apt install apt-fast -y
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y apt-fast
         fi
     fi
     

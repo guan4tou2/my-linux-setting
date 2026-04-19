@@ -1253,16 +1253,16 @@ install_selected_modules() {
         printf "${GREEN}進度: [$current_module/$total_modules]${NC} 安裝模組: ${BLUE}$module${NC}\n"
         printf "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
 
-        # 模組層級「已安裝偵測」：若模組已完全安裝且未指定強制重裝，則直接跳過
-        # 可用 FORCE_REINSTALL=true 或 --force 強制重新執行模組
+        # 模組層級「已安裝偵測」：印出訊息；實際「跳過套件但仍跑 script / post_install」
+        # 的邏輯由 module_manager.sh::install_module 處理。
+        # 設 FORCE_REINSTALL=true 或 --force 可強制重裝所有套件。
         if [ "${FORCE_REINSTALL:-false}" != "true" ] \
            && [ "$USE_MODULE_MANAGER" = "true" ] \
            && command -v check_module_status >/dev/null 2>&1; then
             module_status=$(check_module_status "$module" 2>/dev/null || echo "not_installed")
             if [ "$module_status" = "installed" ]; then
-                printf "${GREEN}✓ 模組 ${BLUE}$module${GREEN} 已完全安裝，跳過${NC}\n"
-                printf "${CYAN}  （如需重新安裝，請設定 FORCE_REINSTALL=true 或加上 --force）${NC}\n\n"
-                continue
+                printf "${GREEN}✓ 模組 ${BLUE}$module${GREEN} 套件已全部安裝，將跳過套件階段並執行設定腳本${NC}\n"
+                printf "${CYAN}  （如需強制重裝套件，請加 --force 或設定 FORCE_REINSTALL=true）${NC}\n\n"
             fi
         fi
 

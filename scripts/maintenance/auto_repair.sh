@@ -320,7 +320,7 @@ fix_apt_lock() {
     sudo dpkg --configure -a
     
     # 測試 APT
-    if sudo apt update >/dev/null 2>&1; then
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null 2>&1; then
         log_repair $REPAIR_LEVEL_INFO "APT 鎖定修復成功"
         return 0
     else
@@ -332,17 +332,17 @@ fix_apt_lock() {
 # 破損套件修復
 fix_broken_packages() {
     log_repair $REPAIR_LEVEL_INFO "修復破損套件..."
-    
+
     backup_before_repair "apt"
-    
+
     # 修復破損的依賴關係
-    if sudo apt --fix-broken install -y; then
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get --fix-broken install -y; then
         log_repair $REPAIR_LEVEL_INFO "破損套件修復成功"
-        
+
         # 清理不需要的套件
-        sudo apt autoremove -y
-        sudo apt autoclean
-        
+        sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -y
+        sudo DEBIAN_FRONTEND=noninteractive apt-get autoclean
+
         return 0
     else
         log_repair $REPAIR_LEVEL_ERROR "破損套件修復失敗"
@@ -376,10 +376,10 @@ fix_missing_packages() {
         log_repair $REPAIR_LEVEL_INFO "發現缺失的套件: ${missing_packages[*]}"
         
         # 更新套件列表
-        sudo apt update
-        
+        sudo DEBIAN_FRONTEND=noninteractive apt-get update
+
         # 安裝缺失的套件
-        if sudo apt install -y "${missing_packages[@]}"; then
+        if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_packages[@]}"; then
             log_repair $REPAIR_LEVEL_INFO "缺失套件安裝成功"
             return 0
         else
@@ -437,7 +437,7 @@ fix_python_missing() {
     log_repair $REPAIR_LEVEL_INFO "修復 Python 缺失問題..."
     
     # 安裝 Python
-    if sudo apt update && sudo apt install -y python3 python3-pip python3-venv; then
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip python3-venv; then
         log_repair $REPAIR_LEVEL_INFO "Python 安裝成功"
         
         # 創建符號連結
@@ -489,8 +489,8 @@ fix_disk_full() {
     log_repair $REPAIR_LEVEL_INFO "修復磁盤空間不足問題..."
     
     # 清理 APT 緩存
-    sudo apt clean
-    sudo apt autoremove -y
+    sudo DEBIAN_FRONTEND=noninteractive apt-get clean
+    sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -y
     
     # 清理日誌
     sudo journalctl --vacuum-time=7d

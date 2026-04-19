@@ -413,7 +413,8 @@ recover_ssh_service() {
     
     # 檢查 SSH 是否安裝
     if ! command -v sshd >/dev/null 2>&1; then
-        sudo apt update && sudo apt install -y openssh-server
+        sudo DEBIAN_FRONTEND=noninteractive apt-get update \
+            && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
     fi
     
     # 啟動 SSH 服務
@@ -453,7 +454,8 @@ recover_python() {
     log_recovery $RECOVERY_LEVEL_INFO "恢復 Python 環境..."
     
     # 安裝 Python
-    sudo apt update && sudo apt install -y python3 python3-pip python3-venv
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update \
+        && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip python3-venv
     
     # 創建符號連結
     if [ ! -L "/usr/bin/python" ] && [ -f "/usr/bin/python3" ]; then
@@ -466,8 +468,9 @@ recover_python() {
 # Git 恢復
 recover_git() {
     log_recovery $RECOVERY_LEVEL_INFO "恢復 Git..."
-    
-    sudo apt update && sudo apt install -y git
+
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update \
+        && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y git
     
     return $?
 }
@@ -475,8 +478,9 @@ recover_git() {
 # Curl 恢復
 recover_curl() {
     log_recovery $RECOVERY_LEVEL_INFO "恢復 Curl..."
-    
-    sudo apt update && sudo apt install -y curl
+
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update \
+        && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl
     
     return $?
 }

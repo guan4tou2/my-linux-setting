@@ -35,7 +35,7 @@ if ! command -v nvim >/dev/null 2>&1; then
             run_as_root apt-get update
         else
             sudo add-apt-repository ppa:neovim-ppa/unstable -y
-            sudo apt-get update
+            sudo DEBIAN_FRONTEND=noninteractive apt-get update
         fi
     fi
 fi

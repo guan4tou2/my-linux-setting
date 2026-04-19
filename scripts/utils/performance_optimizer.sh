@@ -145,7 +145,7 @@ cache_apt_update() {
     fi
     
     log_info "執行 apt update 並緩存結果"
-    if sudo apt update; then
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get update; then
         touch "$cache_file"
         return 0
     else
@@ -153,43 +153,52 @@ cache_apt_update() {
     fi
 }
 
-# 並行安裝包
+# 批次安裝包
+# 注意：過去使用「多個 sudo apt install 平行跑」會因 dpkg 獨佔鎖導致互相等鎖，
+# 且背景 sudo 的互動 prompt 被吞掉容易永久卡住；改用單次 apt-get 批次安裝。
 install_packages_parallel() {
     local packages=("$@")
-    local batch_size="${MAX_PARALLEL_JOBS}"
-    
+
+    # 先過濾掉已安裝的套件
+    local to_install=()
+    for pkg in "${packages[@]}"; do
+        if dpkg -l | grep -q "^ii  $pkg "; then
+            echo "- $pkg (已安裝)" >&2
+        else
+            to_install+=("$pkg")
+        fi
+    done
+
+    if [ ${#to_install[@]} -eq 0 ]; then
+        log_info "所有套件皆已安裝"
+        return 0
+    fi
+
     # 確保 apt 緩存是最新的
     cache_apt_update || return 1
-    
-    log_info "並行安裝 ${#packages[@]} 個包（批次大小：$batch_size）"
-    
-    for ((i=0; i<${#packages[@]}; i+=batch_size)); do
-        local batch=("${packages[@]:i:batch_size}")
-        local pids=()
-        
-        log_info "安裝批次 $((i/batch_size + 1)): ${batch[*]}"
-        
-        for pkg in "${batch[@]}"; do
-            (
-                if ! dpkg -l | grep -q "^ii  $pkg "; then
-                    sudo apt install -y "$pkg" 2>/dev/null
-                    echo "✓ $pkg" >&2
-                else
-                    echo "- $pkg (已安裝)" >&2
-                fi
-            ) &
-            pids+=($!)
+
+    log_info "批次安裝 ${#to_install[@]} 個包：${to_install[*]}"
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+            "${to_install[@]}"; then
+        for pkg in "${to_install[@]}"; do
+            echo "✓ $pkg" >&2
         done
-        
-        # 等待當前批次完成
-        for pid in "${pids[@]}"; do
-            wait "$pid"
+        return 0
+    else
+        log_warning "批次安裝失敗，改為逐個重試"
+        local failed=()
+        for pkg in "${to_install[@]}"; do
+            if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" 2>/dev/null; then
+                echo "✓ $pkg" >&2
+            else
+                echo "✗ $pkg" >&2
+                failed+=("$pkg")
+            fi
         done
-        
-        log_info "批次 $((i/batch_size + 1)) 完成"
-    done
-    
-    log_success "並行安裝完成"
+        [ ${#failed[@]} -eq 0 ]
+        return $?
+    fi
 }
 
 # 優化的 git clone

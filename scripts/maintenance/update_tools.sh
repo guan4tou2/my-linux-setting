@@ -16,16 +16,17 @@ init_progress 10
 update_apt_packages() {
     show_progress "更新 APT 套件庫"
     log_info "更新 APT 套件庫..."
-    if sudo apt update; then
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get update; then
         log_success "APT 套件庫更新成功"
     else
         log_error "APT 套件庫更新失敗"
         return 1
     fi
-    
+
     show_progress "升級系統套件"
     log_info "升級可更新的套件..."
-    if sudo apt upgrade -y; then
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
+            -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold; then
         log_success "系統套件升級完成"
     else
         log_error "系統套件升級失敗"
@@ -219,8 +220,8 @@ cleanup_system() {
     log_info "清理系統緩存和不需要的套件..."
     
     # 清理 APT 緩存
-    sudo apt autoremove -y || log_warning "自動移除失敗"
-    sudo apt autoclean || log_warning "自動清理失敗"
+    sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -y || log_warning "自動移除失敗"
+    sudo DEBIAN_FRONTEND=noninteractive apt-get autoclean || log_warning "自動清理失敗"
     
     # 清理 pip 緩存
     if check_command pip3; then

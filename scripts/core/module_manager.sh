@@ -539,10 +539,16 @@ install_module() {
     local module_status
     module_status=$(check_module_status "$module_id" 2>/dev/null || echo "not_installed")
 
+    # 若設定 FORCE_REINSTALL=true，視同未安裝，強制重跑所有套件安裝步驟
+    if [ "${FORCE_REINSTALL:-false}" = "true" ] && [ "$module_status" = "installed" ]; then
+        log_info "FORCE_REINSTALL=true，強制重新安裝模組 $name 的所有套件"
+        module_status="not_installed"
+    fi
+
     log_info "安裝模組: $name"
 
     if [ "$module_status" = "installed" ]; then
-        log_info "模組 $name 已完全安裝，跳過套件安裝步驟"
+        log_info "模組 $name 套件已全部安裝，跳過套件安裝步驟（仍會執行設定腳本）"
     else
         # 統計安裝情況
         local skipped_count=0

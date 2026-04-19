@@ -187,26 +187,27 @@ update_system_packages() {
     log_update $UPDATE_LEVEL_INFO "更新系統套件..."
     
     # 更新套件列表
-    if ! sudo apt update; then
+    if ! sudo DEBIAN_FRONTEND=noninteractive apt-get update; then
         log_update $UPDATE_LEVEL_ERROR "更新套件列表失敗"
         return 1
     fi
-    
+
     # 檢查可更新的套件
     local upgradeable
     upgradeable=$(apt list --upgradeable 2>/dev/null | grep -c upgradeable || true)
-    
+
     if [ "$upgradeable" -gt 0 ]; then
         log_update $UPDATE_LEVEL_INFO "發現 $upgradeable 個可更新的套件"
-        
-        # 執行更新
-        if sudo apt upgrade -y; then
+
+        # 執行更新（保留舊設定檔，避免 dpkg 互動 prompt 造成腳本卡住）
+        if sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
+                -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold; then
             log_update $UPDATE_LEVEL_INFO "系統套件更新成功"
-            
+
             # 清理無用的套件
-            sudo apt autoremove -y
-            sudo apt autoclean
-            
+            sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -y
+            sudo DEBIAN_FRONTEND=noninteractive apt-get autoclean
+
             return 0
         else
             log_update $UPDATE_LEVEL_ERROR "系統套件更新失敗"
@@ -230,7 +231,10 @@ update_security_patches() {
         log_update $UPDATE_LEVEL_WARNING "發現 $security_updates 個安全更新"
         
         # 只更新安全相關套件
-        if sudo unattended-upgrade -d 2>/dev/null || sudo apt upgrade -y $(apt list --upgradeable 2>/dev/null | grep -i security | cut -d'/' -f1); then
+        if sudo DEBIAN_FRONTEND=noninteractive unattended-upgrade -d 2>/dev/null \
+            || sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
+                   -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+                   $(apt list --upgradeable 2>/dev/null | grep -i security | cut -d'/' -f1); then
             log_update $UPDATE_LEVEL_INFO "安全補丁更新成功"
             return 0
         else
@@ -258,7 +262,9 @@ update_kernel() {
         log_update $UPDATE_LEVEL_WARNING "發現核心更新，當前版本: $current_kernel"
         
         # 更新核心（需要小心處理）
-        if sudo apt install -y linux-image-generic linux-headers-generic; then
+        if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+                linux-image-generic linux-headers-generic; then
             log_update $UPDATE_LEVEL_INFO "核心更新成功，需要重啟生效"
             touch "/var/run/reboot-required"
             return 0
@@ -520,7 +526,7 @@ check_updates() {
     
     # 檢查系統套件更新
     if [ "$SYSTEM_UPDATE_ENABLED" = "true" ]; then
-        sudo apt update >/dev/null 2>&1
+        sudo DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null 2>&1
         local upgradeable
         upgradeable=$(apt list --upgradeable 2>/dev/null | grep -c upgradeable || true)
         

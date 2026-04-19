@@ -369,7 +369,8 @@ auto_fix() {
             local package="$2"
             if [ -n "$package" ]; then
                 log_info "嘗試安裝缺失的包: $package"
-                sudo apt update && sudo apt install -y "$package"
+                sudo DEBIAN_FRONTEND=noninteractive apt-get update \
+                    && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$package"
             fi
             ;;
         "network-issue")

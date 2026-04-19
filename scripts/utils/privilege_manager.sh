@@ -74,7 +74,7 @@ install_package_minimal_privilege() {
     
     # 最後使用 apt（需要 sudo）
     log_info "使用 apt 安裝 $package（需要 sudo）"
-    safe_sudo apt install -y "$package"
+    safe_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y "$package"
 }
 
 # 驗證 sudo 操作的必要性
