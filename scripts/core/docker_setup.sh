@@ -30,6 +30,18 @@ if ! check_command docker; then
     log_info "安裝 Docker（使用安全下載機制）"
     install_docker || log_warning "Docker 安裝失敗，將跳過 Docker 相關配置"
 
+    # get.docker.com 安裝後，同一 shell 內 command -v 有時找不到新二進位；刷新 hash 並補常見路徑
+    hash -r 2>/dev/null || true
+    if ! check_command docker; then
+        for _dp in /usr/bin/docker /usr/local/bin/docker; do
+            if [ -x "$_dp" ]; then
+                log_info "偵測到 Docker 於 $_dp，補入 PATH 供本腳本後續檢查"
+                export PATH="$(dirname "$_dp"):$PATH"
+                break
+            fi
+        done
+    fi
+
     # 僅在 Docker 安裝成功後處理群組設定
     if check_command docker; then
         log_info "將用戶加入 docker 群組"

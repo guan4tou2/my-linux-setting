@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # Linux Environment Setup - Main Installation Script
-# Version: 2.2.7
+# Version: 2.2.8
 # ==============================================================================
 
 # 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
@@ -30,7 +30,7 @@ LAST_COMMAND=""
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
-Linux Setting Scripts - 自動安裝腳本 v2.2.7
+Linux Setting Scripts - 自動安裝腳本 v2.2.8
 
 用法: ./install.sh [選項]
 
@@ -64,7 +64,7 @@ show_welcome() {
     printf "\n"
     printf "╔════════════════════════════════════════════════════════╗\n"
     printf "║                                                        ║\n"
-    printf "║          Linux Setting Scripts  v2.2.7                 ║\n"
+    printf "║          Linux Setting Scripts  v2.2.8                 ║\n"
     printf "║            自動化開發環境配置工具                      ║\n"
     printf "║                                                        ║\n"
     printf "╠════════════════════════════════════════════════════════╣\n"
@@ -711,17 +711,18 @@ main() {
                         esac
                     fi
 
-                    checklist_items+=("${module_id}|${status_mark}${name} (${desc})")
+                    # tag 僅用 module_id（無空白）；描述放第二欄，避免 whiptail 回傳被 shell 拆壞
+                    checklist_items+=("$module_id" "${status_mark}${name} (${desc})")
                 done
             else
-                # 備用靜態選項
+                # 備用靜態選項（tag + 顯示文字成對）
                 checklist_items=(
-                    "python|Python開發環境(python3,pip,uv,ranger)"
-                    "docker|Docker相關工具(docker-ce,lazydocker)"
-                    "base|基礎工具(git,lsd,bat,ripgrep,fzf)"
-                    "terminal|終端設定(zsh,oh-my-zsh,p10k)"
-                    "dev|開發工具(neovim,lazygit,rust,nodejs)"
-                    "monitoring|系統監控工具(btop,htop,fail2ban)"
+                    "python"  "Python開發環境(python3,pip,uv,ranger)"
+                    "docker"  "Docker相關工具(docker-ce,lazydocker)"
+                    "base"    "基礎工具(git,lsd,bat,ripgrep,fzf)"
+                    "terminal" "終端設定(zsh,oh-my-zsh,p10k)"
+                    "dev"     "開發工具(neovim,lazygit,rust,nodejs)"
+                    "monitoring" "系統監控工具(btop,htop,fail2ban)"
                 )
             fi
 
@@ -787,12 +788,17 @@ main() {
                 fi
             fi
 
-            # 解析選擇的模組（whiptail 返回格式: "python docker base"）
+            # 解析選擇的模組（whiptail 回傳為選中 tag，空白分隔；tag 為純 module_id）
             selected_modules=""
+            local _seen=" "
             for item in $module_selection; do
-                # 去除可能的引號和提取模組名（在|之前）
-                module_name=$(echo "$item" | cut -d'|' -f1 | tr -d '"')
-                selected_modules="$selected_modules $module_name"
+                item=$(echo "$item" | tr -d '"')
+                [ -z "$item" ] && continue
+                case "$_seen" in
+                    *" $item "*) continue ;;
+                esac
+                _seen+=" $item "
+                selected_modules="$selected_modules $item"
             done
 
             # 顯示選擇的模組

@@ -56,7 +56,7 @@ fi
 # Constants
 # ==============================================================================
 
-readonly SCRIPT_VERSION="2.2.7"
+readonly SCRIPT_VERSION="2.2.8"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
@@ -1843,7 +1843,9 @@ ensure_tui_available() {
     return 1
 }
 
-# TUI 多選菜單（返回選中的項目，以空格分隔）
+# TUI 多選菜單（返回選中的 tag，以空白分隔）
+# 參數：title prompt tag1 item1 tag2 item2 ...
+# tag 必須為單一「模組 id」等無空白字元；描述可含空白（顯示在第二欄），否則 whiptail 回傳含空白的 tag 會被 shell 拆字而無法還原。
 tui_checklist() {
     local title="$1"
     local prompt="$2"
@@ -1855,25 +1857,32 @@ tui_checklist() {
         return 1
     fi
 
-    # 構建 whiptail checklist 參數
-    local checklist_args=()
-    local index=0
-    local default_state="ON"  # 預設全部選中
+    local n=${#items[@]}
+    if [ $((n % 2)) -ne 0 ]; then
+        log_error "tui_checklist: 參數須為偶數（tag 與描述須成對），目前 $n 個"
+        return 1
+    fi
 
-    for item in "${items[@]}"; do
-        # 每個項目格式: "tag" "description" "status"
-        checklist_args+=("$item" "" "$default_state")
-        index=$((index + 1))
+    # 構建 whiptail checklist 參數：每列 tag / item / status
+    local checklist_args=()
+    local default_state="ON"  # 預設全部選中
+    local i=0
+    while [ "$i" -lt "$n" ]; do
+        checklist_args+=("${items[$i]}" "${items[$((i + 1))]}" "$default_state")
+        i=$((i + 2))
     done
 
+    local item_count=$((n / 2))
     # 計算窗口大小
-    local height=$((${#items[@]} + 10))
-    [ $height -gt 25 ] && height=25 || true
-    local width=70
+    local height=$((item_count + 10))
+    [ "$height" -gt 25 ] && height=25 || true
+    local list_height=$item_count
+    [ "$list_height" -gt 15 ] && list_height=15 || true
+    local width=78
 
     # 顯示 checklist 並捕獲結果
     local result
-    result=$(whiptail --title "$title" --checklist "$prompt" $height $width $((${#items[@]})) "${checklist_args[@]}" 3>&1 1>&2 2>&3)
+    result=$(whiptail --title "$title" --checklist "$prompt" $height $width $list_height "${checklist_args[@]}" 3>&1 1>&2 2>&3)
     local exit_code=$?
 
     # 返回選中的項目（去除引號）
