@@ -56,7 +56,7 @@ fi
 # Constants
 # ==============================================================================
 
-readonly SCRIPT_VERSION="2.2.4"
+readonly SCRIPT_VERSION="2.2.6"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
@@ -2010,9 +2010,15 @@ tui_msgbox() {
         return 1
     fi
 
-    # 計算窗口大小（根據消息長度）
-    local height=15
-    local width=70
+    # 依內容行數調整高度（避免長內容在固定 15 行內像「空白」）
+    local width=76
+    local lines=1
+    if [ -n "$message" ]; then
+        lines=$(printf '%b' "$message" | wc -l)
+    fi
+    local height=$((lines + 7))
+    [ "$height" -lt 12 ] && height=12
+    [ "$height" -gt 28 ] && height=28
 
     whiptail --title "$title" --msgbox "$message" $height $width 3>&1 1>&2 2>&3
 }

@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # Linux Environment Setup - Main Installation Script
-# Version: 2.2.4
+# Version: 2.2.6
 # ==============================================================================
 
 # 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
@@ -30,7 +30,7 @@ LAST_COMMAND=""
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
-Linux Setting Scripts - 自動安裝腳本 v2.2.4
+Linux Setting Scripts - 自動安裝腳本 v2.2.6
 
 用法: ./install.sh [選項]
 
@@ -64,7 +64,7 @@ show_welcome() {
     printf "\n"
     printf "╔════════════════════════════════════════════════════════╗\n"
     printf "║                                                        ║\n"
-    printf "║          Linux Setting Scripts  v2.2.4                 ║\n"
+    printf "║          Linux Setting Scripts  v2.2.6                 ║\n"
     printf "║            自動化開發環境配置工具                      ║\n"
     printf "║                                                        ║\n"
     printf "╠════════════════════════════════════════════════════════╣\n"
@@ -644,6 +644,32 @@ main() {
         printf "${BLUE}下載 maintenance/update_tools.sh...${NC}\n"
         curl "${curl_opts[@]}" "$SCRIPTS_URL/maintenance/update_tools.sh" -o "$SCRIPT_DIR/maintenance/update_tools.sh"
         chmod +x "$SCRIPT_DIR/maintenance/update_tools.sh"
+
+        # 模組管理器與設定（先前 bootstrap 僅載入 common.sh；缺少此檔會導致進階模式 / 模組詳情無效）
+        printf "${BLUE}下載 core/module_manager.sh...${NC}\n"
+        curl "${curl_opts[@]}" "$SCRIPTS_URL/core/module_manager.sh" -o "$SCRIPT_DIR/core/module_manager.sh"
+        chmod +x "$SCRIPT_DIR/core/module_manager.sh"
+
+        printf "${BLUE}下載 config/modules.conf...${NC}\n"
+        mkdir -p "$SCRIPT_DIR/../config"
+        curl "${curl_opts[@]}" "$REPO_URL/config/modules.conf" -o "$SCRIPT_DIR/../config/modules.conf"
+    fi
+
+    # 遠端流程下載完成後補載入 module_manager（啟用進階模式、模組詳情、動態 checklist）
+    if [ -f "$SCRIPT_DIR/core/module_manager.sh" ] \
+       && [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] \
+       && [ "${USE_MODULE_MANAGER:-false}" != "true" ]; then
+        # shellcheck source=/dev/null
+        if source "$SCRIPT_DIR/core/module_manager.sh"; then
+            if init_module_manager; then
+                USE_MODULE_MANAGER=true
+                log_success "模組管理器已啟用（${#MODULE_LIST[@]} 個模組）"
+            else
+                log_warning "模組管理器初始化失敗，進階模式與詳情將使用備援顯示"
+            fi
+        else
+            log_warning "無法載入 module_manager.sh，進階模式與詳情將使用備援顯示"
+        fi
     fi
 
     # 無人值守模式：自動選擇模組並直接執行，不進入互動選單
@@ -912,17 +938,66 @@ show_menu() {
     printf "\n輸入選項 (例如: 1 3 4): "
 }
 
+# 無 module_manager 設定檔時的單一模組說明（與靜態 checklist 一致）
+_show_static_module_detail_msg() {
+    local mid="$1"
+    local title="模組詳情"
+    local body=""
+    case "$mid" in
+        python)
+            title="模組詳情: Python 開發環境"
+            body="內容概覽：python3、pip、venv、uv、ranger、s-t-ui 等。\n\n若看不到套件級狀態，請確認已下載 config/modules.conf 並成功載入模組管理器。"
+            ;;
+        docker)
+            title="模組詳情: Docker 工具"
+            body="內容概覽：Docker CE、lazydocker（安裝流程由 docker_setup.sh 處理）。"
+            ;;
+        base)
+            title="模組詳情: 基礎工具"
+            body="內容概覽：git、curl、wget、建置工具、lsd/bat/ripgrep/fzf 等 CLI（依系統與 Homebrew 可用性）。"
+            ;;
+        terminal)
+            title="模組詳情: 終端設定"
+            body="內容概覽：zsh、Oh My Zsh、Powerlevel10k 與常用插件。"
+            ;;
+        dev)
+            title="模組詳情: 開發工具"
+            body="內容概覽：Neovim/LazyVim、lazygit、Node.js、Rust 工具鏈等。"
+            ;;
+        monitoring)
+            title="模組詳情: 監控工具"
+            body="內容概覽：btop、htop、iftop、nethogs、fail2ban 等。"
+            ;;
+        *)
+            title="模組詳情"
+            body="未知模組 ID：$mid"
+            ;;
+    esac
+    if [ "$USE_TUI" = "true" ] && command -v tui_msgbox >/dev/null 2>&1; then
+        tui_msgbox "$title" "$(printf '%b' "$body")"
+    else
+        printf '%b\n\n' "$body"
+        printf "按 Enter 返回..."
+        read -r
+    fi
+}
+
 # 顯示單個模組詳細資訊（TUI 對話框）
 show_module_detail_dialog() {
     local module_id="$1"
 
     if [ "$USE_MODULE_MANAGER" != "true" ] || ! module_exists "$module_id" 2>/dev/null; then
         log_warning "模組不存在: $module_id"
+        _show_static_module_detail_msg "$module_id"
         return 1
     fi
 
     local detail
-    detail=$(get_module_detail_status "$module_id" 2>/dev/null)
+    detail=$(get_module_detail_status "$module_id" 2>/dev/null || true)
+
+    if [ -z "$detail" ]; then
+        detail="（無法產生詳細狀態，可能缺少設定或檢查函數失敗）\n模組 ID：$module_id"
+    fi
 
     if [ "$USE_TUI" = "true" ] && command -v tui_msgbox >/dev/null 2>&1; then
         local name="${MODULE_NAMES[$module_id]:-$module_id}"
@@ -937,38 +1012,86 @@ show_module_detail_dialog() {
 # 顯示模組選擇選單（用於查看詳情）
 show_detail_selection_menu() {
     if [ "$USE_TUI" = "true" ] && command -v tui_menu >/dev/null 2>&1; then
-        # TUI 模式：使用選單選擇模組
-        local menu_items=()
-        for module_id in "${MODULE_LIST[@]}"; do
-            local name="${MODULE_NAMES[$module_id]:-$module_id}"
-            local status_icon=""
-            if command -v check_module_status >/dev/null 2>&1; then
-                local status
-                status=$(check_module_status "$module_id" 2>/dev/null)
-                case "$status" in
-                    installed)     status_icon="[✓] " ;;
-                    partial)       status_icon="[◐] " ;;
-                    not_installed) status_icon="[ ] " ;;
-                esac
-            fi
-            menu_items+=("${status_icon}${name}")
-        done
-        menu_items+=("返回主選單")
+        # 並行維護「顯示標籤」與「模組 ID」，避免只靠字串剥離狀態圖示導致對應失敗
+        local menu_labels=()
+        local menu_ids=()
 
-        local selection
-        selection=$(tui_menu "查看模組詳情" "選擇要查看的模組：" "${menu_items[@]}")
-
-        if [ -n "$selection" ] && [ "$selection" != "返回主選單" ]; then
-            # 從選單項目反查模組 ID
-            local selected_name="${selection#\[*\] }"  # 去除狀態標記
+        if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
             for module_id in "${MODULE_LIST[@]}"; do
                 local name="${MODULE_NAMES[$module_id]:-$module_id}"
-                if [ "$name" = "$selected_name" ]; then
-                    show_module_detail_dialog "$module_id"
-                    return 0
+                local status_icon=""
+                if command -v check_module_status >/dev/null 2>&1; then
+                    local status
+                    status=$(check_module_status "$module_id" 2>/dev/null || true)
+                    case "$status" in
+                        installed)     status_icon="[✓] " ;;
+                        partial)       status_icon="[◐] " ;;
+                        not_installed) status_icon="[ ] " ;;
+                    esac
                 fi
+                menu_labels+=("${status_icon}${name}")
+                menu_ids+=("$module_id")
+            done
+        else
+            local _static_ids=(python docker base terminal dev monitoring)
+            local _static_labels=(
+                "Python 開發環境"
+                "Docker 工具"
+                "基礎工具"
+                "終端設定"
+                "開發工具"
+                "監控工具"
+            )
+            local _si=0
+            for module_id in "${_static_ids[@]}"; do
+                local name="${_static_labels[$_si]}"
+                _si=$((_si + 1))
+                local status_icon=""
+                if command -v check_module_status >/dev/null 2>&1; then
+                    local status
+                    status=$(check_module_status "$module_id" 2>/dev/null || true)
+                    case "$status" in
+                        installed)     status_icon="[✓] " ;;
+                        partial)       status_icon="[◐] " ;;
+                        not_installed) status_icon="[ ] " ;;
+                    esac
+                fi
+                menu_labels+=("${status_icon}${name}")
+                menu_ids+=("$module_id")
             done
         fi
+
+        menu_labels+=("返回主選單")
+        menu_ids+=("RETURN")
+
+        local selection
+        selection=$(tui_menu "查看模組詳情" "選擇要查看的模組：" "${menu_labels[@]}") || return 0
+
+        if [ -z "$selection" ] || [ "$selection" = "返回主選單" ]; then
+            return 0
+        fi
+
+        local _i=0
+        local picked_id=""
+        for lbl in "${menu_labels[@]}"; do
+            if [ "$lbl" = "$selection" ]; then
+                picked_id="${menu_ids[_i]}"
+                break
+            fi
+            _i=$((_i + 1))
+        done
+
+        if [ -z "$picked_id" ] || [ "$picked_id" = "RETURN" ]; then
+            return 0
+        fi
+
+        if [ "$USE_MODULE_MANAGER" = "true" ] && command -v module_exists >/dev/null 2>&1 \
+            && module_exists "$picked_id" 2>/dev/null; then
+            show_module_detail_dialog "$picked_id" || true
+        else
+            _show_static_module_detail_msg "$picked_id"
+        fi
+        return 0
     else
         # 命令行模式：顯示完整的模組詳情
         show_module_details
@@ -1234,7 +1357,9 @@ show_installation_report() {
     report+="日誌文件：$LOG_FILE\n\n"
 
     # 若有整個模組安裝失敗（install_module return non-zero），集中顯示
-    if [ ${#FAILED_MODULES[@]+x} ] && [ ${#FAILED_MODULES[@]} -gt 0 ]; then
+    # 注意：不要寫 `${#FAILED_MODULES[@]+x}`，bash 不支援這個 ${#var+x} 組合，會 bad substitution。
+    # 改用「先確認變數已被定義」+「再讀長度」兩段。
+    if declare -p FAILED_MODULES &>/dev/null && [ ${#FAILED_MODULES[@]} -gt 0 ]; then
         report+="✗ 以下模組整體安裝失敗：\n"
         for m in "${FAILED_MODULES[@]}"; do
             report+="    • $m\n"
@@ -1243,7 +1368,7 @@ show_installation_report() {
     fi
 
     # 若有部分套件失敗（仍視為模組成功，但有 partial failures），集中顯示
-    if [ ${#MODULE_INSTALL_FAILURES[@]+x} ] && [ ${#MODULE_INSTALL_FAILURES[@]} -gt 0 ]; then
+    if declare -p MODULE_INSTALL_FAILURES &>/dev/null && [ ${#MODULE_INSTALL_FAILURES[@]} -gt 0 ]; then
         report+="⚠ 以下模組有部分套件安裝失敗（已略過；詳見日誌）：\n"
         for f in "${MODULE_INSTALL_FAILURES[@]}"; do
             report+="    • $f\n"
