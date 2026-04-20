@@ -12,6 +12,39 @@ P10K_CONFIG_URL="${P10K_CONFIG_URL:-https://raw.githubusercontent.com/guan4tou2/
 
 log_info "########## 設定終端機環境 ##########"
 
+# 將登入 shell 改為 zsh（與是否「首次」安裝 Oh My Zsh 無關；舊版只在新裝 omz 時 chsh，已存在 ~/.oh-my-zsh 時會永遠跳過）
+ensure_login_shell_zsh() {
+    local target_user="${USER:-$(id -un 2>/dev/null || whoami)}"
+    local target_shell
+    target_shell="$(command -v zsh 2>/dev/null)" || true
+    if [ -z "$target_shell" ] || [ ! -x "$target_shell" ]; then
+        log_warning "找不到可執行的 zsh，跳過 chsh"
+        return 0
+    fi
+
+    local current_shell
+    current_shell=$(getent passwd "$target_user" 2>/dev/null | cut -d: -f7 || echo "")
+    if [ "$current_shell" = "$target_shell" ]; then
+        log_info "登入 shell 已是 zsh（$target_shell），無需 chsh"
+        return 0
+    fi
+
+    if [ "${NON_INTERACTIVE:-false}" = "true" ] && ! sudo -n true 2>/dev/null; then
+        log_warning "非互動模式且無 NOPASSWD sudo，略過 chsh；請之後手動執行："
+        log_warning "    sudo chsh -s \"$target_shell\" \"$target_user\""
+        return 0
+    fi
+
+    log_info "將登入 shell 設為 zsh（$target_shell）…"
+    if command -v run_as_root >/dev/null 2>&1; then
+        run_as_root chsh -s "$target_shell" "$target_user" \
+            || log_warning "chsh 失敗，請手動：sudo chsh -s $target_shell $target_user"
+    else
+        sudo chsh -s "$target_shell" "$target_user" \
+            || log_warning "chsh 失敗，請手動：sudo chsh -s $target_shell $target_user"
+    fi
+}
+
 # 初始化進度
 init_progress 8
 
@@ -43,27 +76,6 @@ if [ ! -d "$HOME/.oh-my-zsh" ]; then
     else
         log_info "未找到 ~/.zshrc，略過備份"
     fi
-    # 在部分容器 / 非互動環境中，$USER 可能為空，改用 whoami 作為後備
-    target_user="${USER:-$(id -un 2>/dev/null || whoami)}"
-
-    # 若使用者已經是 zsh 了就跳過，避免再呼叫 chsh（可能觸發密碼 prompt）
-    current_shell=$(getent passwd "$target_user" 2>/dev/null | cut -d: -f7 || echo "")
-    target_shell="$(command -v zsh)"
-    if [ "$current_shell" = "$target_shell" ]; then
-        log_info "預設 shell 已是 zsh ($target_shell)，跳過 chsh"
-    elif [ "${NON_INTERACTIVE:-false}" = "true" ] && ! sudo -n true 2>/dev/null; then
-        log_warning "非互動模式且無 NOPASSWD sudo，跳過 chsh；請事後手動執行："
-        log_warning "    sudo chsh -s \"$target_shell\" \"$target_user\""
-    else
-        # 使用 run_as_root 會走 sudo（若需要）；避免 -k 立即清空憑證快取
-        if command -v run_as_root >/dev/null 2>&1; then
-            run_as_root chsh -s "$target_shell" "$target_user" \
-                || log_warning "chsh 失敗，請手動執行 sudo chsh -s $target_shell $target_user"
-        else
-            sudo chsh -s "$target_shell" "$target_user" \
-                || log_warning "chsh 失敗，請手動執行 sudo chsh -s $target_shell $target_user"
-        fi
-    fi
     if [ -f "$SCRIPT_DIR/../utils/secure_download.sh" ]; then
         bash "$SCRIPT_DIR/../utils/secure_download.sh" oh-my-zsh
     elif [ -f "$SCRIPT_DIR/utils/secure_download.sh" ]; then
@@ -89,6 +101,9 @@ if [ ! -d "$HOME/.oh-my-zsh" ]; then
     log_info "可以稍後重跑：bash $SCRIPT_DIR/terminal_setup.sh"
     exit 1
 fi
+
+show_progress "設定登入預設 shell 為 zsh"
+ensure_login_shell_zsh
 
 # 安裝 zsh 插件（idempotent：已存在時 pull，不存在時 clone）
 printf "\033[36m安裝 / 更新 zsh 插件\033[0m\n"
