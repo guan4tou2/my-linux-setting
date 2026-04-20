@@ -158,6 +158,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# 強烈建議不要用 sudo 直接跑整支安裝（會把設定/工具裝到 /root，且 brew 會失敗）
+if [ "${EUID:-$(id -u)}" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "${ALLOW_ROOT:-false}" != "true" ]; then
+    printf "\n${YELLOW}偵測到你用 sudo 以 root 執行。${NC}\n"
+    printf "${YELLOW}- 這會把 ~/.zshrc、uv、nvim 等安裝到 /root${NC}\n"
+    printf "${YELLOW}- 且 Homebrew 套件多半會因 root 而失敗${NC}\n\n"
+    printf "${GREEN}請改用一般使用者執行：${NC}\n"
+    printf "  bash -c \"$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)\"\n\n"
+    printf "${CYAN}若你真的要用 root 跑（例如容器），請加：${NC} ALLOW_ROOT=true\n\n"
+    exit 1
+fi
+
 # Export variables for child scripts
 export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK NON_INTERACTIVE FORCE_REINSTALL ADVANCED_MODE ABORT_ON_FAILURE
 

@@ -777,7 +777,8 @@ install_module() {
         fi
 
         # 2. 安裝 Homebrew 套件（如果可用，跳過已安裝的）
-        if [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1; then
+        # 注意：brew 不建議以 root 執行；若目前是 root，改走 apt_fallback（若有）或略過 brew
+        if [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -ne 0 ]; then
             log_info "檢查 Homebrew 套件..."
             for pkg in $brew_packages; do
                 if check_brew_package_installed "$pkg" 2>/dev/null; then
@@ -792,7 +793,16 @@ install_module() {
                     fi
                 fi
             done
-        elif [ -n "$apt_fallback" ]; then
+        elif [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+            log_warning "目前以 root 執行，略過 brew 套件（brew 不建議 root）。將改用 apt_fallback（若有）"
+            if [ -z "$apt_fallback" ]; then
+                for pkg in $brew_packages; do
+                    module_failures+=("brew:$pkg")
+                done
+            fi
+        fi
+
+        if [ -n "$apt_fallback" ]; then
             # Homebrew 不可用，使用 APT 替代
             log_info "使用 APT 替代套件..."
             for pkg in $apt_fallback; do
