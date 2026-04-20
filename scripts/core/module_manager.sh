@@ -789,7 +789,18 @@ install_module() {
                         installed_count=$((installed_count + 1))
                     else
                         log_warning "Brew 套件安裝失敗: $pkg"
-                        module_failures+=("brew:$pkg")
+                        # 若 brew 失敗且有 apt_fallback，就嘗試用 APT 補救（避免工具缺失）
+                        local _apt_candidate="$pkg"
+                        case "$pkg" in
+                            fd) _apt_candidate="fd-find" ;;
+                            tealdeer) _apt_candidate="tealdeer" ;; # Ubuntu 上通常提供 tldr 指令
+                        esac
+                        if [ -n "${apt_fallback:-}" ] && install_package "$_apt_candidate" 2>/dev/null; then
+                            log_success "$pkg 改用 APT 安裝成功 ($_apt_candidate)"
+                            installed_count=$((installed_count + 1))
+                        else
+                            module_failures+=("brew:$pkg")
+                        fi
                     fi
                 fi
             done
