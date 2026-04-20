@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # Linux Environment Setup - Main Installation Script
-# Version: 2.2.6
+# Version: 2.2.7
 # ==============================================================================
 
 # 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
@@ -30,7 +30,7 @@ LAST_COMMAND=""
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
-Linux Setting Scripts - 自動安裝腳本 v2.2.6
+Linux Setting Scripts - 自動安裝腳本 v2.2.7
 
 用法: ./install.sh [選項]
 
@@ -64,7 +64,7 @@ show_welcome() {
     printf "\n"
     printf "╔════════════════════════════════════════════════════════╗\n"
     printf "║                                                        ║\n"
-    printf "║          Linux Setting Scripts  v2.2.6                 ║\n"
+    printf "║          Linux Setting Scripts  v2.2.7                 ║\n"
     printf "║            自動化開發環境配置工具                      ║\n"
     printf "║                                                        ║\n"
     printf "╠════════════════════════════════════════════════════════╣\n"
@@ -734,9 +734,13 @@ main() {
             fi
 
             local action_selection
+            # whiptail 取消 / ESC 會 return 1；在 set -e 下會讓 $(...) 中止整支腳本，需吞掉非零狀態
             action_selection=$(tui_menu "Linux 環境設定安裝程序" \
                 "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n請選擇操作：" \
-                "選擇模組安裝" "$advanced_label" "查看模組詳情" "退出")
+                "選擇模組安裝" "$advanced_label" "查看模組詳情" "退出" || true)
+            if [ -z "$action_selection" ]; then
+                continue
+            fi
 
             case "$action_selection" in
                 "查看模組詳情")
@@ -766,11 +770,11 @@ main() {
                     ;;
             esac
 
-            # 使用 TUI checklist 選擇模組
+            # 使用 TUI checklist 選擇模組（取消時 tui_checklist 為非零，set -e 下須加 || true）
             local module_selection
             module_selection=$(tui_checklist "Linux 環境設定安裝程序" \
                 "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n請使用空格鍵選擇要安裝的模組，方向鍵移動，Enter 確認：" \
-                "${checklist_items[@]}")
+                "${checklist_items[@]}" || true)
 
             # 如果用戶取消，詢問是否退出
             if [ -z "$module_selection" ]; then

@@ -592,11 +592,11 @@ module_interactive_package_filter() {
     local selected=""
     local rc=1
     if [ "${USE_TUI:-false}" = "true" ] && command -v tui_checklist_with_state >/dev/null 2>&1; then
+        rc=0
         selected=$(tui_checklist_with_state \
             "進階：選擇 [$name] 要安裝的套件" \
             "空白鍵切換、方向鍵移動、Enter 確認；已安裝者預設不勾選" \
-            "${items[@]}")
-        rc=$?
+            "${items[@]}") || rc=$?
     else
         # CLI fallback
         printf "\n\033[36m=== 進階：選擇 [%s] 要安裝的套件 ===\033[0m\n" "$name"
