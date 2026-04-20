@@ -153,6 +153,32 @@ else
     log_debug "lsd already installed, skipping"
 fi
 
+# 安裝 fd（modern find，Ubuntu/Debian 套件名為 fd-find，二進位為 fdfind）
+if ! command -v fd >/dev/null 2>&1 && ! command -v fdfind >/dev/null 2>&1; then
+    log_info "Installing fd (modern find, source: github.com/sharkdp/fd)"
+
+    if ! install_with_homebrew_fallback "fd" "fd"; then
+        log_info "Attempting APT installation (fd-find)..."
+        if command -v install_apt_package >/dev/null 2>&1; then
+            install_apt_package "fd-find" 2>/dev/null \
+                && log_success "fd-find installed via APT" \
+                || log_warning "fd installation failed"
+        else
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y fd-find 2>/dev/null \
+                && log_success "fd-find installed via APT" \
+                || log_warning "fd installation failed"
+        fi
+    fi
+else
+    log_debug "fd already installed, skipping"
+fi
+
+# 在 Debian/Ubuntu 上 fd 以 fdfind 命名，建立 ~/.local/bin/fd 軟連結讓使用者可直接輸入 fd
+if command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd"
+fi
+
 # 安裝 tealdeer (快速 TLDR 客戶端)
 # 優先使用 Homebrew 安裝（避免 cargo 編譯耗時）
 if ! command -v tldr >/dev/null 2>&1; then
@@ -199,12 +225,28 @@ if ! command -v tldr >/dev/null 2>&1; then
                     tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
                 fi
             else
-                log_warning "tealdeer 安裝失敗"
+                log_warning "tealdeer 安裝失敗 (cargo)"
             fi
         else
-            log_warning "找不到 cargo 且 Homebrew 不可用，跳過 tealdeer 安裝"
-            log_info "建議安裝 Homebrew 以獲取更好的支援"
-            log_info "安裝命令: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            log_info "找不到 cargo，稍後嘗試 APT 備援"
+        fi
+    fi
+
+    # 方法 3: 最後備援 — APT（Ubuntu/Debian 上 tealdeer 套件提供 tldr 指令）
+    if ! command -v tldr >/dev/null 2>&1; then
+        log_info "嘗試使用 APT 安裝 tealdeer..."
+        if command -v install_apt_package >/dev/null 2>&1; then
+            install_apt_package "tealdeer" 2>/dev/null \
+                && log_success "tealdeer 安裝成功 (apt)"
+        elif command -v apt-get >/dev/null 2>&1; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tealdeer 2>/dev/null \
+                && log_success "tealdeer 安裝成功 (apt)"
+        fi
+        if command -v tldr >/dev/null 2>&1; then
+            tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
+        else
+            log_warning "tealdeer 所有安裝方式皆失敗 (brew/cargo/apt)"
+            log_info "可手動安裝 Homebrew 或 Rust toolchain 以重新嘗試"
         fi
     fi
 else

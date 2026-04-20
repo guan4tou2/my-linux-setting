@@ -266,21 +266,19 @@ if ! command -v thefuck > /dev/null 2>&1; then
     fi
 fi
 
-# 添加 thefuck alias 到配置文件（無論安裝方式為何）
-if ! grep -q 'eval $(thefuck --alias)' ~/.zshrc; then
-    echo 'eval $(thefuck --alias)' >> ~/.zshrc
-fi
+# 添加 thefuck alias 到配置文件（runtime guard：thefuck 若未安裝不會噴錯）
+# 檢查模式 'thefuck --alias' 同時匹配舊版未守護與新版已守護的寫法，避免重複附加
+safe_append_to_file \
+    'command -v thefuck >/dev/null 2>&1 && eval "$(thefuck --alias)"' \
+    "$HOME/.zshrc" 'thefuck --alias'
 
-# 設定 lsd 別名（若已安裝 lsd）
-if command -v lsd > /dev/null 2>&1; then
-    log_info "設定 lsd 別名 (ls / ll / la)"
-    safe_append_to_file 'alias ls="lsd"' "$HOME/.zshrc" 'alias ls="lsd"'
-    safe_append_to_file 'alias ll="lsd -l"' "$HOME/.zshrc" 'alias ll="lsd -l"'
-    safe_append_to_file 'alias la="lsd -a"' "$HOME/.zshrc" 'alias la="lsd -a"'
-    safe_append_to_file 'alias ls="lsd"' "$HOME/.bashrc" 'alias ls="lsd"'
-    safe_append_to_file 'alias ll="lsd -l"' "$HOME/.bashrc" 'alias ll="lsd -l"'
-    safe_append_to_file 'alias la="lsd -a"' "$HOME/.bashrc" 'alias la="lsd -a"'
-fi
+# 設定 lsd 別名（runtime guard：lsd 缺失時不會讓 ls/ll/la 全部壞掉）
+log_info "設定 lsd 別名 (ls / ll / la，執行期保護)"
+for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
+    safe_append_to_file 'command -v lsd >/dev/null 2>&1 && alias ls="lsd"'    "$rc" 'alias ls="lsd"'
+    safe_append_to_file 'command -v lsd >/dev/null 2>&1 && alias ll="lsd -l"' "$rc" 'alias ll="lsd -l"'
+    safe_append_to_file 'command -v lsd >/dev/null 2>&1 && alias la="lsd -a"' "$rc" 'alias la="lsd -a"'
+done
 
 printf "\033[36m########## 終端機環境設定完成 ##########\n\033[m"
 
