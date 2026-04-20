@@ -172,7 +172,19 @@ secure_download_and_execute() {
     # 執行腳本（把額外參數傳給下載的腳本）
     log_info "執行腳本: $description${script_args[*]:+ (args: ${script_args[*]})}"
     # 使用 ${arr[@]+"${arr[@]}"} 慣用法避免 set -u 下空陣列報錯
-    if bash "$temp_script" ${script_args[@]+"${script_args[@]}"}; then
+    # 某些安裝腳本（例如 Docker）需要 root；用環境變數控制是否以 root 執行
+    local run_rc=0
+    if [ "${SECURE_DOWNLOAD_RUN_AS_ROOT:-0}" = "1" ] && [ "${EUID:-$(id -u)}" -ne 0 ]; then
+        if command -v run_as_root >/dev/null 2>&1; then
+            run_as_root bash "$temp_script" ${script_args[@]+"${script_args[@]}"} || run_rc=$?
+        else
+            sudo bash "$temp_script" ${script_args[@]+"${script_args[@]}"} || run_rc=$?
+        fi
+    else
+        bash "$temp_script" ${script_args[@]+"${script_args[@]}"} || run_rc=$?
+    fi
+
+    if [ "$run_rc" -eq 0 ]; then
         log_success "$description 安裝成功"
         return 0
     else
@@ -183,7 +195,7 @@ secure_download_and_execute() {
 
 # 預定義的安全安裝函數
 install_docker() {
-    SECURE_DOWNLOAD_ALLOW_PIPE=1 secure_download_and_execute \
+    SECURE_DOWNLOAD_ALLOW_PIPE=1 SECURE_DOWNLOAD_RUN_AS_ROOT=1 secure_download_and_execute \
         "https://get.docker.com" \
         "skip" \
         "Docker 安裝腳本"
