@@ -308,7 +308,7 @@ alias nv='nvim'
 alias lzd='lazydocker'
 
 # thefuck 配置
-eval $(thefuck --alias)
+command -v thefuck >/dev/null 2>&1 && eval "$(thefuck --alias)"
 
 # Powerlevel10k 主題
 POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true
