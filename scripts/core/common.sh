@@ -2108,7 +2108,7 @@ check_sudo_access() {
     fi
 
     # 非互動 / 無 tty 環境不允許等密碼，否則會永久卡住
-    if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ] || [ ! -t 1 ]; then
+    if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
         log_error "需要 sudo 權限但當前為非互動環境（無法輸入密碼）"
         log_error "請先在 shell 中執行 'sudo -v'，或設定 NOPASSWD sudo，再重跑此腳本"
         return 1
