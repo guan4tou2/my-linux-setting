@@ -224,23 +224,22 @@ check_module_status() {
         done
     fi
 
-    # 檢查 Homebrew 套件
+    # 檢查 Homebrew 套件（APT fallback 優先）
     local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
     local apt_fallback="${MODULE_APT_FALLBACK[$module_id]:-}"
-    if [ -n "$brew_packages" ]; then
+    if [ -n "$apt_fallback" ]; then
+        # 有定義 APT fallback 時，一律以 APT 套件為主判斷狀態
+        for pkg in $apt_fallback; do
+            total=$((total + 1))
+            if check_package_installed "$pkg" 2>/dev/null; then
+                installed=$((installed + 1))
+            fi
+        done
+    elif [ -n "$brew_packages" ]; then
         if command -v brew >/dev/null 2>&1; then
-            # brew 存在，檢查 brew 套件
             for pkg in $brew_packages; do
                 total=$((total + 1))
                 if check_brew_package_installed "$pkg" 2>/dev/null; then
-                    installed=$((installed + 1))
-                fi
-            done
-        elif [ -n "$apt_fallback" ]; then
-            # brew 不存在但有 apt fallback，檢查 fallback 套件
-            for pkg in $apt_fallback; do
-                total=$((total + 1))
-                if check_package_installed "$pkg" 2>/dev/null; then
                     installed=$((installed + 1))
                 fi
             done
@@ -341,7 +340,16 @@ get_module_detail_status() {
     # Homebrew 套件
     local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
     local apt_fallback="${MODULE_APT_FALLBACK[$module_id]:-}"
-    if [ -n "$brew_packages" ]; then
+    if [ -n "$apt_fallback" ]; then
+        detail+="Homebrew 套件 (APT 優先):\n"
+        for pkg in $apt_fallback; do
+            if check_package_installed "$pkg" 2>/dev/null; then
+                detail+="  ✓ $pkg (apt)\n"
+            else
+                detail+="  ✗ $pkg (apt)\n"
+            fi
+        done
+    elif [ -n "$brew_packages" ]; then
         if command -v brew >/dev/null 2>&1; then
             detail+="Homebrew 套件:\n"
             for pkg in $brew_packages; do
@@ -349,15 +357,6 @@ get_module_detail_status() {
                     detail+="  ✓ $pkg\n"
                 else
                     detail+="  ✗ $pkg\n"
-                fi
-            done
-        elif [ -n "$apt_fallback" ]; then
-            detail+="Homebrew 套件 (使用 APT 替代):\n"
-            for pkg in $apt_fallback; do
-                if check_package_installed "$pkg" 2>/dev/null; then
-                    detail+="  ✓ $pkg (apt)\n"
-                else
-                    detail+="  ✗ $pkg (apt)\n"
                 fi
             done
         else
@@ -776,46 +775,9 @@ install_module() {
             done
         fi
 
-        # 2. 安裝 Homebrew 套件（如果可用，跳過已安裝的）
-        # 注意：brew 不建議以 root 執行；若目前是 root，改走 apt_fallback（若有）或略過 brew
-        if [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -ne 0 ]; then
-            log_info "檢查 Homebrew 套件..."
-            for pkg in $brew_packages; do
-                if check_brew_package_installed "$pkg" 2>/dev/null; then
-                    log_info "✓ $pkg 已安裝 (brew)，跳過"
-                    skipped_count=$((skipped_count + 1))
-                else
-                    if install_brew_package "$pkg"; then
-                        installed_count=$((installed_count + 1))
-                    else
-                        log_warning "Brew 套件安裝失敗: $pkg"
-                        # 若 brew 失敗且有 apt_fallback，就嘗試用 APT 補救（避免工具缺失）
-                        local _apt_candidate="$pkg"
-                        case "$pkg" in
-                            fd) _apt_candidate="fd-find" ;;
-                            tealdeer) _apt_candidate="tealdeer" ;; # Ubuntu 上通常提供 tldr 指令
-                        esac
-                        if [ -n "${apt_fallback:-}" ] && install_package "$_apt_candidate" 2>/dev/null; then
-                            log_success "$pkg 改用 APT 安裝成功 ($_apt_candidate)"
-                            installed_count=$((installed_count + 1))
-                        else
-                            module_failures+=("brew:$pkg")
-                        fi
-                    fi
-                fi
-            done
-        elif [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
-            log_warning "目前以 root 執行，略過 brew 套件（brew 不建議 root）。將改用 apt_fallback（若有）"
-            if [ -z "$apt_fallback" ]; then
-                for pkg in $brew_packages; do
-                    module_failures+=("brew:$pkg")
-                done
-            fi
-        fi
-
+        # 2. 先安裝 APT fallback（APT 優先）
         if [ -n "$apt_fallback" ]; then
-            # Homebrew 不可用，使用 APT 替代
-            log_info "使用 APT 替代套件..."
+            log_info "檢查 APT 替代套件（優先）..."
             for pkg in $apt_fallback; do
                 if check_package_installed "$pkg" 2>/dev/null; then
                     log_info "✓ $pkg 已安裝，跳過"
@@ -831,7 +793,43 @@ install_module() {
             done
         fi
 
-        # 3. 安裝 Python 套件（統一使用 uv tool，跳過已安裝的）
+        # 3. 僅在 APT 未安裝成功時，才嘗試 Homebrew 套件
+        # 注意：brew 不建議以 root 執行；若目前是 root，略過 brew
+        if [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -ne 0 ]; then
+            log_info "檢查 Homebrew 套件（僅補裝 APT 失敗項目）..."
+            for pkg in $brew_packages; do
+                local _apt_candidate="$pkg"
+                case "$pkg" in
+                    fd) _apt_candidate="fd-find" ;;
+                    tealdeer) _apt_candidate="tealdeer" ;;
+                esac
+
+                # 若有對應 APT fallback 且已安裝成功，則不再重複安裝 brew
+                if [ -n "$apt_fallback" ] \
+                   && [[ " $apt_fallback " == *" $_apt_candidate "* ]] \
+                   && check_package_installed "$_apt_candidate" 2>/dev/null; then
+                    log_info "✓ $pkg 已由 APT 安裝 ($_apt_candidate)，跳過 brew"
+                    skipped_count=$((skipped_count + 1))
+                    continue
+                fi
+
+                if check_brew_package_installed "$pkg" 2>/dev/null; then
+                    log_info "✓ $pkg 已安裝 (brew)，跳過"
+                    skipped_count=$((skipped_count + 1))
+                else
+                    if install_brew_package "$pkg"; then
+                        installed_count=$((installed_count + 1))
+                    else
+                        log_warning "Brew 套件安裝失敗: $pkg"
+                        module_failures+=("brew:$pkg")
+                    fi
+                fi
+            done
+        elif [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+            log_warning "目前以 root 執行，略過 brew 套件（brew 不建議 root）"
+        fi
+
+        # 4. 安裝 Python 套件（統一使用 uv tool，跳過已安裝的）
         if [ -n "$pip_packages" ]; then
             log_info "檢查 Python 套件..."
 
