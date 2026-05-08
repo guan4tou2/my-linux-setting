@@ -412,6 +412,10 @@ check_environment() {
         fi
     fi
 
+    if command -v brew >/dev/null 2>&1 && command -v ensure_brew_shell_aliases >/dev/null 2>&1; then
+        ensure_brew_shell_aliases "$(command -v brew)" || true
+    fi
+
     if ! command -v brew >/dev/null 2>&1; then
         log_info "檢測到系統未安裝 Homebrew"
         log_info "Homebrew 可以簡化某些工具的安裝（如 lsd、tealdeer、lazygit 等）"
