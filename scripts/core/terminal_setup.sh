@@ -126,7 +126,8 @@ _clone_or_pull https://github.com/MichaelAquilina/zsh-you-should-use.git        
 
 # 設定 plugins
 if ! grep -q "zsh-autosuggestions zsh-syntax-highlighting zsh-history-substring-search you-should-use" ~/.zshrc; then
-    sed -i 's/^plugins=(.*)/plugins=(git thefuck zsh-autosuggestions zsh-syntax-highlighting zsh-history-substring-search you-should-use)/g' ~/.zshrc
+    # `thefuck` 由下方 command -v 守護 alias 載入，避免未安裝時 oh-my-zsh plugin 在登入時噴警告
+    sed -i 's/^plugins=(.*)/plugins=(git zsh-autosuggestions zsh-syntax-highlighting zsh-history-substring-search you-should-use)/g' ~/.zshrc
 fi
 
 # 設定 PATH
