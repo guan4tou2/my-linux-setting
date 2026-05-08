@@ -52,7 +52,7 @@ script=base_tools.sh
 
 [terminal]
 name=終端設定
-description=zsh, oh-my-zsh, powerlevel10k, starship
+description=zsh, oh-my-zsh, powerlevel10k
 packages=zsh
 script=terminal_setup.sh
 

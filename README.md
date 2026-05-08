@@ -82,7 +82,7 @@ PARALLEL_JOBS=8 ./install.sh
 - **Python 開發環境**：python3, pip, uv, ranger-fm, s-tui
 - **Docker 工具**：docker-ce, docker-compose, lazydocker
 - **基礎工具**：git, curl, wget, lsd, bat, ripgrep, fd-find, fzf
-- **終端機設定**：zsh, oh-my-zsh, powerlevel10k, starship, zsh-autosuggestions, zsh-syntax-highlighting
+- **終端機設定**：zsh, oh-my-zsh, powerlevel10k, zsh-autosuggestions, zsh-syntax-highlighting
 - **開發工具**：neovim (LazyVim), lazygit, nodejs, cargo, lua
 - **監控與安全**：btop, htop, iftop, nethogs, fail2ban
 

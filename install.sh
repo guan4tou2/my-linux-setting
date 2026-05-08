@@ -731,7 +731,7 @@ main() {
                     "python"  "Python開發環境(python3,pip,uv,ranger)"
                     "docker"  "Docker相關工具(docker-ce,lazydocker)"
                     "base"    "基礎工具(git,lsd,bat,ripgrep,fzf)"
-                    "terminal" "終端設定(zsh,oh-my-zsh,p10k,starship)"
+                    "terminal" "終端設定(zsh,oh-my-zsh,p10k)"
                     "dev"     "開發工具(neovim,lazygit,rust,nodejs)"
                     "monitoring" "系統監控工具(btop,htop,fail2ban)"
                 )
@@ -979,7 +979,7 @@ _show_static_module_detail_msg() {
             ;;
         terminal)
             title="模組詳情: 終端設定"
-            body="內容概覽：zsh、Oh My Zsh、Powerlevel10k、Starship 與常用插件。"
+            body="內容概覽：zsh、Oh My Zsh、Powerlevel10k 與常用插件。"
             ;;
         dev)
             title="模組詳情: 開發工具"
@@ -1499,7 +1499,6 @@ install_selected_modules() {
                     terminal)
                         printf "  • zsh + oh-my-zsh\n"
                         printf "  • powerlevel10k 主題\n"
-                        printf "  • starship 提示字元\n"
                         printf "  • 多個 zsh 插件\n"
                         ;;
                     monitoring)

@@ -970,7 +970,7 @@ init_module_manager() {
             [python]="python3, pip, uv, ranger"
             [docker]="docker-ce, lazydocker"
             [base]="git, lsd, bat, ripgrep, fzf"
-            [terminal]="zsh, oh-my-zsh, powerlevel10k, starship"
+            [terminal]="zsh, oh-my-zsh, powerlevel10k"
             [dev]="neovim, lazygit, nodejs, rust"
             [monitoring]="btop, htop, iftop, fail2ban"
         )
