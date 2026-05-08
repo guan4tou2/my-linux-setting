@@ -893,10 +893,15 @@ ensure_brew_shell_aliases() {
         return 1
     fi
 
-    brew_prefix="$(cd "$(dirname "$brew_bin")/.." && pwd)"
+    brew_prefix="$(dirname "$(dirname "$brew_bin")")"
 
     for rcfile in "$HOME/.bashrc" "$HOME/.zshrc"; do
-        if [ -f "$rcfile" ] || [ "$(basename "$rcfile")" = ".zshrc" ]; then
+        # 既有 rc 檔一律更新；若是 zsh 使用者則允許建立 ~/.zshrc 來注入 brew helper。
+        if [ -f "$rcfile" ] || { [ "$(basename "$rcfile")" = ".zshrc" ] && [ "${SHELL##*/}" = "zsh" ]; }; then
+            if [ ! -f "$rcfile" ] && ! touch "$rcfile" 2>/dev/null; then
+                log_warning "無法建立 $rcfile，略過 Homebrew helper 寫入"
+                continue
+            fi
             if ! grep -q "brew-on()" "$rcfile" 2>/dev/null; then
                 cat >> "$rcfile" <<EOF
 
@@ -916,7 +921,7 @@ brew-off() {
     echo "Homebrew 環境已停用"
 }
 # 直接使用 brew 命令的 alias（不影響 PATH）
-alias brew='$brew_bin'
+alias brew="$brew_bin"
 EOF
                 log_info "已添加 Homebrew alias 到 $rcfile"
             fi
@@ -947,7 +952,7 @@ ensure_homebrew_installed() {
             break
         fi
     done
-    if [ -n "$brew_bin" ]; then
+    if [ -n "$brew_bin" ] && [ -x "$brew_bin" ]; then
         eval "$("$brew_bin" shellenv)" 2>/dev/null || export PATH="$(dirname "$brew_bin"):$PATH"
         if command -v brew >/dev/null 2>&1; then
             ensure_brew_shell_aliases "$brew_bin" || true
