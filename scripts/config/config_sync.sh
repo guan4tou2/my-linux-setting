@@ -33,7 +33,7 @@ get_config_files() {
             echo "$HOME/.zshrc $HOME/.bashrc $HOME/.profile $HOME/.aliases"
             ;;
         "theme")
-            echo "$HOME/.p10k.zsh $HOME/.config/starship.toml"
+            echo "$HOME/.p10k.zsh"
             ;;
         "git")
             echo "$HOME/.gitconfig $HOME/.gitignore_global"

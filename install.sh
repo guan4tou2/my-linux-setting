@@ -1431,6 +1431,25 @@ install_selected_modules() {
         install_order=(base dev python monitoring docker terminal)
     fi
 
+    # 無論 modules.conf 定義順序為何，都將 terminal 放到最後執行，
+    # 以便在全部模組完成後再套用 zsh/提示符相關設定。
+    local has_terminal=false
+    for module in "${install_order[@]}"; do
+        if [ "$module" = "terminal" ]; then
+            has_terminal=true
+            break
+        fi
+    done
+    if [ "$has_terminal" = "true" ]; then
+        local reordered_install_order=()
+        for module in "${install_order[@]}"; do
+            [ "$module" = "terminal" ] && continue
+            reordered_install_order+=("$module")
+        done
+        reordered_install_order+=("terminal")
+        install_order=("${reordered_install_order[@]}")
+    fi
+
     # 計算要安裝的模組數量
     local total_modules=0
     local current_module=0

@@ -45,7 +45,7 @@ ensure_login_shell_zsh() {
     fi
 }
 
-# 初始化進度
+# 初始化進度（需與 show_progress 呼叫數同步）
 init_progress 8
 
 # 安裝必要套件
