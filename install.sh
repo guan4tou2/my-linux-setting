@@ -731,7 +731,7 @@ main() {
                     "python"  "Python開發環境(python3,pip,uv,ranger)"
                     "docker"  "Docker相關工具(docker-ce,lazydocker)"
                     "base"    "基礎工具(git,lsd,bat,ripgrep,fzf)"
-                    "terminal" "終端設定(zsh,oh-my-zsh,p10k)"
+                    "terminal" "終端設定(zsh,oh-my-zsh,p10k,starship)"
                     "dev"     "開發工具(neovim,lazygit,rust,nodejs)"
                     "monitoring" "系統監控工具(btop,htop,fail2ban)"
                 )
@@ -979,7 +979,7 @@ _show_static_module_detail_msg() {
             ;;
         terminal)
             title="模組詳情: 終端設定"
-            body="內容概覽：zsh、Oh My Zsh、Powerlevel10k 與常用插件。"
+            body="內容概覽：zsh、Oh My Zsh、Powerlevel10k、Starship 與常用插件。"
             ;;
         dev)
             title="模組詳情: 開發工具"
@@ -1431,6 +1431,22 @@ install_selected_modules() {
         install_order=(base dev python monitoring docker terminal)
     fi
 
+    # 無論 modules.conf 定義順序為何，都將 terminal 放到最後執行，
+    # 以便在全部模組完成後再套用 zsh/提示符相關設定。
+    local reordered_install_order=()
+    local has_terminal=false
+    for module in "${install_order[@]}"; do
+        if [ "$module" = "terminal" ]; then
+            has_terminal=true
+            continue
+        fi
+        reordered_install_order+=("$module")
+    done
+    if [ "$has_terminal" = "true" ]; then
+        reordered_install_order+=("terminal")
+    fi
+    install_order=("${reordered_install_order[@]}")
+
     # 計算要安裝的模組數量
     local total_modules=0
     local current_module=0
@@ -1480,6 +1496,7 @@ install_selected_modules() {
                     terminal)
                         printf "  • zsh + oh-my-zsh\n"
                         printf "  • powerlevel10k 主題\n"
+                        printf "  • starship 提示符\n"
                         printf "  • 多個 zsh 插件\n"
                         ;;
                     monitoring)
