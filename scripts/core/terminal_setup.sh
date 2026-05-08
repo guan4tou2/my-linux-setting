@@ -9,6 +9,7 @@ source "$SCRIPT_DIR/common.sh" || {
 
 # 如果未定義 URL，使用默認值
 P10K_CONFIG_URL="${P10K_CONFIG_URL:-https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh}"
+STARSHIP_TMP_DIR="${STARSHIP_TMP_DIR:-$HOME/.cache/linux-setting/tmp}"
 
 log_info "########## 設定終端機環境 ##########"
 
@@ -57,27 +58,37 @@ ensure_starship_installed() {
         return 0
     fi
 
-    if command -v curl >/dev/null 2>&1; then
-        log_info "系統套件安裝失敗，改用 Starship 官方安裝腳本"
+    log_info "系統套件安裝失敗，改用 Starship 官方安裝腳本"
+    local installer
+    local tmp_root="${TMPDIR:-$STARSHIP_TMP_DIR}"
+    mkdir -p "$tmp_root" 2>/dev/null || true
+    installer="$(mktemp "$tmp_root/starship-install.XXXXXX" 2>/dev/null || true)"
+    if [ -n "$installer" ] \
+       && command -v safe_download >/dev/null 2>&1 \
+       && safe_download "https://starship.rs/install.sh" "$installer" 3 false false; then
+        chmod +x "$installer" 2>/dev/null || true
         if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
-            if curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b "$HOME/.local/bin" >/dev/null 2>&1; then
+            if sh "$installer" -y -b "$HOME/.local/bin" >/dev/null 2>&1; then
+                rm -f "$installer"
                 log_success "Starship 安裝成功（官方安裝腳本）"
                 return 0
             fi
         else
-            if curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b "$HOME/.local/bin"; then
+            if sh "$installer" -y -b "$HOME/.local/bin"; then
+                rm -f "$installer"
                 log_success "Starship 安裝成功（官方安裝腳本）"
                 return 0
             fi
         fi
     fi
+    [ -n "${installer:-}" ] && rm -f "$installer"
 
-    log_warning "Starship 安裝失敗，請稍後手動安裝：https://starship.rs"
+    log_warning "Starship 安裝失敗（不影響整體安裝流程），請稍後手動安裝：https://starship.rs"
     return 0
 }
 
-# 初始化進度
-init_progress 8
+# 初始化進度（需與 show_progress 呼叫數同步）
+init_progress 9
 
 # 安裝必要套件
 show_progress "安裝終端基礎套件"
@@ -139,9 +150,15 @@ ensure_login_shell_zsh
 show_progress "安裝 Starship 提示符"
 ensure_starship_installed
 
-safe_append_to_file \
-    'command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"' \
-    "$HOME/.zshrc" 'starship init zsh'
+zsh_theme_value="$(awk -F= '/^[[:space:]]*ZSH_THEME=/{print $2}' "$HOME/.zshrc" 2>/dev/null | tail -n1 | tr -d '[:space:]' | tr -d '"' | tr -d "'")"
+if [ "$zsh_theme_value" = "powerlevel10k/powerlevel10k" ]; then
+    log_info "偵測到 Powerlevel10k 主題，預設不啟用 Starship init（避免提示符衝突）"
+    log_info "如需改用 Starship，請在 ~/.zshrc 手動加入：eval \"\$(starship init zsh)\""
+else
+    safe_append_to_file \
+        'command -v starship >/dev/null 2>&1 && eval "$(starship init zsh)"' \
+        "$HOME/.zshrc" 'starship init zsh'
+fi
 
 # 安裝 zsh 插件（idempotent：已存在時 pull，不存在時 clone）
 printf "\033[36m安裝 / 更新 zsh 插件\033[0m\n"
@@ -326,7 +343,7 @@ log_success "終端機設定已完成！"
 log_info ""
 log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 log_info "  ${GREEN}✓${NC} Zsh + Oh-My-Zsh + Powerlevel10k 已安裝"
-log_info "  ${GREEN}✓${NC} Starship 已安裝並加入 zsh 初始化"
+log_info "  ${GREEN}✓${NC} Starship 已安裝（可選擇啟用）"
 log_info "  ${GREEN}✓${NC} 插件已配置 (autosuggestions, syntax-highlighting 等)"
 log_info "  ${GREEN}✓${NC} 別名已設定 (lsd, bat 等)"
 log_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
