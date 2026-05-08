@@ -28,17 +28,17 @@ else
 fi
 
 # 安裝 btop（現代系統監控工具）
-# 順序：brew (若可用) -> apt -> snap fallback
+# 順序：apt -> brew fallback -> snap fallback
 # 過去先 snap 會在 minimal server / 沒 snapd 的環境報錯；
-# 現在優先用發行版套件管理器，最後才 fallback 到 snap。
+# 現在優先用發行版套件管理器，最後才 fallback。
 show_progress "安裝 btop"
 if ! check_command btop; then
     log_info "安裝 btop"
-    if command -v install_with_homebrew_fallback >/dev/null 2>&1 \
+    if install_apt_package btop 2>/dev/null; then
+        log_success "btop 已透過 APT 安裝"
+    elif command -v install_with_homebrew_fallback >/dev/null 2>&1 \
        && install_with_homebrew_fallback btop 2>/dev/null; then
         log_success "btop 已透過 Homebrew 安裝"
-    elif install_apt_package btop 2>/dev/null; then
-        log_success "btop 已透過 APT 安裝"
     elif command -v snap >/dev/null 2>&1 && sudo snap install btop 2>/dev/null; then
         log_success "btop 已透過 snap 安裝"
     else

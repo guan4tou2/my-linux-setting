@@ -793,24 +793,33 @@ install_module() {
             done
         fi
 
-        # 3. 僅在 APT 未安裝成功時，才嘗試 Homebrew 套件
+        # 3. 對 brew_packages 先嘗試 APT（Debian 系列），僅在 APT 不可用/失敗時才用 brew
         # 注意：brew 不建議以 root 執行；若目前是 root，略過 brew
         if [ -n "$brew_packages" ] && command -v brew >/dev/null 2>&1 && [ "${EUID:-$(id -u)}" -ne 0 ]; then
-            log_info "檢查 Homebrew 套件（僅補裝 APT 失敗項目）..."
+            log_info "檢查 brew 套件（APT 優先，brew 僅 fallback）..."
             for pkg in $brew_packages; do
                 local _apt_candidate="$pkg"
                 case "$pkg" in
                     fd) _apt_candidate="fd-find" ;;
+                    node) _apt_candidate="nodejs" ;;
                     tealdeer) _apt_candidate="tealdeer" ;;
                 esac
 
-                # 若有對應 APT fallback 且已安裝成功，則不再重複安裝 brew
-                if [ -n "$apt_fallback" ] \
-                   && [[ " $apt_fallback " == *" $_apt_candidate "* ]] \
-                   && check_package_installed "$_apt_candidate" 2>/dev/null; then
-                    log_info "✓ $pkg 已由 APT 安裝 ($_apt_candidate)，跳過 brew"
+                # 若對應的 APT 套件已存在，直接跳過 brew（避免重複安裝）
+                if check_package_installed "$_apt_candidate" 2>/dev/null; then
+                    log_info "✓ $pkg 已由系統套件安裝 ($_apt_candidate)，跳過 brew"
                     skipped_count=$((skipped_count + 1))
                     continue
+                fi
+
+                # Debian 系列先嘗試 APT 安裝
+                if [ "${DISTRO_FAMILY:-unknown}" = "debian" ]; then
+                    if install_apt_package "$_apt_candidate" 2>/dev/null; then
+                        log_success "$pkg 已透過 APT 安裝 ($_apt_candidate)"
+                        installed_count=$((installed_count + 1))
+                        continue
+                    fi
+                    log_info "APT 無法安裝 $_apt_candidate，改用 Homebrew 嘗試"
                 fi
 
                 if check_brew_package_installed "$pkg" 2>/dev/null; then

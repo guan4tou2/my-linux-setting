@@ -37,7 +37,7 @@ set -euo pipefail
 : "${SKIP_PYTHON_CHECK:=false}"
 : "${REMOTE_INSTALL:=false}"
 : "${ENABLE_PARALLEL_INSTALL:=false}"
-: "${PREFER_HOMEBREW:=true}"
+: "${PREFER_HOMEBREW:=false}"
 : "${PREFER_UV:=true}"
 : "${SECURE_DOWNLOAD_ALLOW_PIPE:=0}"
 : "${SKIP_NETWORK_TESTS:=false}"
@@ -866,10 +866,76 @@ update_system() {
 # Homebrew 包管理函數 (Linux)
 # ==============================================================================
 
+# 確保 Homebrew shell helper 已寫入 rc 檔
+ensure_brew_shell_aliases() {
+    local brew_bin="${1:-}"
+    local rcfile=""
+    local brew_prefix=""
+
+    if [ -z "$brew_bin" ] && command -v brew >/dev/null 2>&1; then
+        brew_bin="$(command -v brew)"
+    fi
+
+    if [ -z "$brew_bin" ]; then
+        for candidate in \
+            /home/linuxbrew/.linuxbrew/bin/brew \
+            "$HOME/.linuxbrew/bin/brew" \
+            /opt/homebrew/bin/brew \
+            /usr/local/bin/brew; do
+            if [ -x "$candidate" ]; then
+                brew_bin="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$brew_bin" ] || [ ! -x "$brew_bin" ]; then
+        return 1
+    fi
+
+    brew_prefix="$(dirname "$(dirname "$brew_bin")")"
+
+    for rcfile in "$HOME/.bashrc" "$HOME/.zshrc"; do
+        # 既有 rc 檔一律更新；若是 zsh 使用者則允許建立 ~/.zshrc 來注入 brew helper。
+        if [ -f "$rcfile" ] || { [ "$(basename "$rcfile")" = ".zshrc" ] && [ "${SHELL##*/}" = "zsh" ]; }; then
+            if [ ! -f "$rcfile" ] && ! touch "$rcfile" 2>/dev/null; then
+                log_warning "無法建立 $rcfile，略過 Homebrew helper 寫入"
+                continue
+            fi
+            if ! grep -q "brew-on()" "$rcfile" 2>/dev/null; then
+                cat >> "$rcfile" <<EOF
+
+# ==============================================================================
+# Homebrew 環境切換（預設不啟用，避免 Python 路徑衝突）
+# ==============================================================================
+# 使用 brew-on 啟用 Homebrew 環境
+# 使用 brew-off 停用 Homebrew 環境
+# ==============================================================================
+brew-on() {
+    eval "\$("$brew_bin" shellenv)"
+    echo "Homebrew 環境已啟用"
+}
+brew-off() {
+    export PATH=\$(echo "\$PATH" | sed 's|$brew_prefix/[^:]*:||g')
+    unset HOMEBREW_PREFIX HOMEBREW_CELLAR HOMEBREW_REPOSITORY
+    echo "Homebrew 環境已停用"
+}
+# 直接使用 brew 命令的 alias（不影響 PATH）
+alias brew="$brew_bin"
+EOF
+                log_info "已添加 Homebrew alias 到 $rcfile"
+            fi
+        fi
+    done
+
+    return 0
+}
+
 # 確保 Homebrew 已安裝（Linux 上的 Homebrew/Linuxbrew）
 ensure_homebrew_installed() {
     # 檢查是否已安裝 Homebrew
     if command -v brew >/dev/null 2>&1; then
+        ensure_brew_shell_aliases "$(command -v brew)" || true
         log_success "Homebrew 已安裝: $(brew --version | head -n1)"
         return 0
     fi
@@ -886,9 +952,10 @@ ensure_homebrew_installed() {
             break
         fi
     done
-    if [ -n "$brew_bin" ]; then
+    if [ -n "$brew_bin" ] && [ -x "$brew_bin" ]; then
         eval "$("$brew_bin" shellenv)" 2>/dev/null || export PATH="$(dirname "$brew_bin"):$PATH"
         if command -v brew >/dev/null 2>&1; then
+            ensure_brew_shell_aliases "$brew_bin" || true
             log_success "Homebrew 已安裝 (從 $brew_bin 注入 PATH): $(brew --version | head -n1)"
             return 0
         fi
@@ -925,66 +992,17 @@ ensure_homebrew_installed() {
     if NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
         log_success "Homebrew 安裝成功"
 
-        # 配置 Homebrew 環境變量
         local brew_shellenv=""
-        if [ -d "/home/linuxbrew/.linuxbrew" ]; then
+        if [ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]; then
             brew_shellenv="/home/linuxbrew/.linuxbrew/bin/brew shellenv"
-        elif [ -d "$HOME/.linuxbrew" ]; then
+        elif [ -x "$HOME/.linuxbrew/bin/brew" ]; then
             brew_shellenv="$HOME/.linuxbrew/bin/brew shellenv"
         fi
 
         if [ -n "$brew_shellenv" ]; then
             # 載入到當前會話（僅供安裝時使用）
             eval "$($brew_shellenv)"
-
-            # 添加 alias 到 shell 配置文件（預設不自動載入 Homebrew 環境）
-            # 這樣可以避免 Homebrew Python 與系統 Python 的路徑衝突
-            for rcfile in "$HOME/.bashrc" "$HOME/.zshrc"; do
-                if [ -f "$rcfile" ] || [ "$(basename "$rcfile")" = ".zshrc" ]; then
-                    if ! grep -q "brew-on" "$rcfile"; then
-                        cat >> "$rcfile" << 'BREW_ALIAS'
-
-# ==============================================================================
-# Homebrew 環境切換（預設不啟用，避免 Python 路徑衝突）
-# ==============================================================================
-# 使用 brew-on 啟用 Homebrew 環境
-# 使用 brew-off 停用 Homebrew 環境
-# ==============================================================================
-BREW_ALIAS
-                        if [ -d "/home/linuxbrew/.linuxbrew" ]; then
-                            cat >> "$rcfile" << 'BREW_FUNC'
-brew-on() {
-    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-    echo "Homebrew 環境已啟用"
-}
-brew-off() {
-    export PATH=$(echo "$PATH" | sed 's|/home/linuxbrew/.linuxbrew/[^:]*:||g')
-    unset HOMEBREW_PREFIX HOMEBREW_CELLAR HOMEBREW_REPOSITORY
-    echo "Homebrew 環境已停用"
-}
-# 直接使用 brew 命令的 alias（不影響 PATH）
-alias brew='/home/linuxbrew/.linuxbrew/bin/brew'
-BREW_FUNC
-                        else
-                            cat >> "$rcfile" << BREW_FUNC
-brew-on() {
-    eval "\$($HOME/.linuxbrew/bin/brew shellenv)"
-    echo "Homebrew 環境已啟用"
-}
-brew-off() {
-    export PATH=\$(echo "\$PATH" | sed 's|$HOME/.linuxbrew/[^:]*:||g')
-    unset HOMEBREW_PREFIX HOMEBREW_CELLAR HOMEBREW_REPOSITORY
-    echo "Homebrew 環境已停用"
-}
-# 直接使用 brew 命令的 alias（不影響 PATH）
-alias brew='$HOME/.linuxbrew/bin/brew'
-BREW_FUNC
-                        fi
-                        log_info "已添加 Homebrew alias 到 $rcfile"
-                    fi
-                fi
-            done
-
+            ensure_brew_shell_aliases "$(command -v brew)" || true
             log_success "Homebrew 環境配置完成"
             log_info "已安裝版本：$(brew --version | head -n1)"
             log_info "使用 'brew-on' 啟用 Homebrew 環境，'brew-off' 停用"
@@ -2223,7 +2241,7 @@ func_list="log_error log_info log_success log_warning log_debug init_progress sh
 func_list="$func_list check_command check_package_installed check_python_version check_disk_space check_network check_internet_speed"
 func_list="$func_list check_pip_package_installed check_cargo_package_installed check_npm_package_installed"
 func_list="$func_list install_with_fallback install_with_homebrew_fallback install_package install_apt_package install_apt_packages_parallel install_packages_batch"
-func_list="$func_list install_brew_package install_brew_packages_batch check_brew_package_installed ensure_homebrew_installed update_system"
+func_list="$func_list install_brew_package install_brew_packages_batch check_brew_package_installed ensure_brew_shell_aliases ensure_homebrew_installed update_system"
 func_list="$func_list backup_file safe_append_to_file"
 func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_cache cleanup_cache"
 func_list="$func_list safe_download download_files_parallel get_best_mirror"

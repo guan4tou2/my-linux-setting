@@ -154,7 +154,7 @@ script=mytools_setup.sh
 | 變數 | 說明 | 預設值 |
 |------|------|--------|
 | `MODULES_CONF` | 配置文件路徑 | `config/modules.conf` |
-| `PREFER_HOMEBREW` | 優先使用 Homebrew | `true` |
+| `PREFER_HOMEBREW` | 是否優先使用 Homebrew（建議關閉，APT 優先） | `false` |
 | `ENABLE_PARALLEL_INSTALL` | 啟用並行安裝 | `true` |
 | `TUI_MODE` | TUI 輸出模式 | `quiet` |
 
