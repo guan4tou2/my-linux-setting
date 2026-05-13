@@ -1,5 +1,4 @@
 # Docker Compose 測試環境配置
-version: '3.8'
 
 services:
   # Ubuntu 22.04 測試環境
@@ -85,12 +84,15 @@ services:
       - test-reports:/opt/reports
     working_dir: /opt/linux-setting
     environment:
+      - CI=true
       - REPORT_DIR=/opt/reports
     command: >
-      /bin/bash -c "
-        echo '=== 開始自動測試 ===' &&
-        mkdir -p /opt/reports &&
-        ./tests/run_all_tests.sh > /opt/reports/test_report_$(date +%Y%m%d_%H%M%S).log 2>&1 &&
+      /bin/bash -lc "
+        set -euo pipefail
+        echo '=== 開始自動測試 ==='
+        sudo mkdir -p /opt/reports
+        sudo chown -R testuser:testuser /opt/reports
+        ./tests/run_all_tests.sh 2>&1 | tee /opt/reports/test_report_$(date +%Y%m%d_%H%M%S).log
         echo '=== 測試完成 ==='
       "
     profiles:

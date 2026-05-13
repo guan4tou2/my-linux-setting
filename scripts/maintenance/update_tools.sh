@@ -2,6 +2,7 @@
 
 # 載入共用函數庫
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/common.sh" || {
     echo "錯誤: 無法載入共用函數庫"
     exit 1
@@ -68,14 +69,15 @@ update_pip_packages() {
         VENV_DIR="$HOME/.local/venv/system-tools"
         if [ -d "$VENV_DIR" ]; then
             log_info "更新虛擬環境套件..."
-            "$VENV_DIR/bin/pip" install --upgrade pip || log_warning "虛擬環境 pip 更新失敗"
+            "$VENV_DIR/bin/python" -m ensurepip --upgrade >/dev/null 2>&1 || true
+            "$VENV_DIR/bin/python" -m pip install --upgrade pip || log_warning "虛擬環境 pip 更新失敗"
             
             # 如果有 requirements.txt，使用它來更新
-            if [ -f "$(dirname "$SCRIPT_DIR")/requirements.txt" ]; then
-                "$VENV_DIR/bin/pip" install --upgrade -r "$(dirname "$SCRIPT_DIR")/requirements.txt" || log_warning "虛擬環境套件更新失敗"
+            if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
+                "$VENV_DIR/bin/python" -m pip install --upgrade -r "$PROJECT_ROOT/requirements.txt" || log_warning "虛擬環境套件更新失敗"
             else
                 # 手動更新關鍵套件
-                "$VENV_DIR/bin/pip" install --upgrade thefuck ranger-fm s-tui || log_warning "部分套件更新失敗"
+                "$VENV_DIR/bin/python" -m pip install --upgrade thefuck ranger-fm s-tui || log_warning "部分套件更新失敗"
             fi
             log_success "虛擬環境套件更新完成"
         fi

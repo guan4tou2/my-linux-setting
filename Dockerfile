@@ -41,8 +41,10 @@ RUN apt-get update && \
 RUN useradd -m -s /bin/bash testuser && \
     echo 'testuser ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers && \
     mkdir -p /home/testuser/.local/bin && \
+    mkdir -p /opt/reports && \
     chown -R testuser:testuser /home/testuser && \
-    chown -R testuser:testuser /opt/linux-setting
+    chown -R testuser:testuser /opt/linux-setting && \
+    chown -R testuser:testuser /opt/reports
 
 # 切換到測試用戶
 USER testuser

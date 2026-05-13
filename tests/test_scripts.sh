@@ -310,6 +310,44 @@ test_requirements_setuptools_pin() {
     fi
 }
 
+# 檢查 update_tools.sh 使用 repo root 的 requirements.txt 路徑
+test_update_tools_requirements_path() {
+    log_test "檢查 update_tools.sh 的 requirements 路徑..."
+
+    local update_tools="$SCRIPT_DIR/scripts/maintenance/update_tools.sh"
+    if [ ! -f "$update_tools" ]; then
+        log_fail "找不到 update_tools.sh"
+        return
+    fi
+
+    if search_literal 'PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"' "$update_tools" && \
+       search_literal 'if [ -f "$PROJECT_ROOT/requirements.txt" ]; then' "$update_tools" && \
+       search_literal '"$VENV_DIR/bin/python" -m pip install --upgrade -r "$PROJECT_ROOT/requirements.txt"' "$update_tools"; then
+        log_pass "update_tools.sh 已使用 repo root 的 requirements.txt"
+    else
+        log_fail "update_tools.sh 仍未正確引用 repo root 的 requirements.txt"
+    fi
+}
+
+# 檢查 update_tools.sh 在 uv venv 下有 python -m pip 後備
+test_update_tools_venv_pip_fallback() {
+    log_test "檢查 update_tools.sh 的 venv pip 後備..."
+
+    local update_tools="$SCRIPT_DIR/scripts/maintenance/update_tools.sh"
+    if [ ! -f "$update_tools" ]; then
+        log_fail "找不到 update_tools.sh"
+        return
+    fi
+
+    if search_literal '"$VENV_DIR/bin/python" -m ensurepip --upgrade' "$update_tools" && \
+       search_literal '"$VENV_DIR/bin/python" -m pip install --upgrade pip' "$update_tools" && \
+       search_literal '"$VENV_DIR/bin/python" -m pip install --upgrade thefuck ranger-fm s-tui' "$update_tools"; then
+        log_pass "update_tools.sh 已使用 python -m pip 作為 venv 後備"
+    else
+        log_fail "update_tools.sh 仍依賴固定的 venv pip 路徑"
+    fi
+}
+
 # 檢查 base_tools.sh 套件庫更新失敗時不應中止安裝
 test_base_tools_update_nonfatal() {
     log_test "檢查 base_tools.sh 更新失敗容錯..."
@@ -475,6 +513,77 @@ test_docker_setup_nonfatal_docker_install() {
     fi
 }
 
+# 檢查 Docker 測試映像為報告 volume 預先建立可寫目錄
+test_dockerfile_report_dir_permissions() {
+    log_test "檢查 Docker 測試報告目錄權限..."
+
+    local dockerfile="$SCRIPT_DIR/Dockerfile"
+    if [ ! -f "$dockerfile" ]; then
+        log_fail "找不到 Dockerfile"
+        return
+    fi
+
+    if search_literal 'mkdir -p /opt/reports' "$dockerfile" && \
+       search_literal 'chown -R testuser:testuser /opt/reports' "$dockerfile"; then
+        log_pass "Dockerfile 已為 /opt/reports 提供 testuser 寫入權限"
+    else
+        log_fail "Dockerfile 尚未為 /opt/reports 建立可寫目錄"
+    fi
+}
+
+# 檢查 docker-compose test-runner 先修正 reports volume 權限再寫入報告
+test_docker_compose_report_volume_bootstrap() {
+    log_test "檢查 docker-compose 測試報告 volume 初始化..."
+
+    local compose_file="$SCRIPT_DIR/docker-compose.test.yml"
+    if [ ! -f "$compose_file" ]; then
+        log_fail "找不到 docker-compose.test.yml"
+        return
+    fi
+
+    if search_literal "sudo chown -R testuser:testuser /opt/reports" "$compose_file" && \
+       search_literal "tee /opt/reports/test_report_" "$compose_file"; then
+        log_pass "docker-compose.test.yml 已在寫入報告前處理 volume 權限"
+    else
+        log_fail "docker-compose.test.yml 仍可能因 reports volume 權限導致測試失敗"
+    fi
+}
+
+# 檢查 docker-compose test-runner 會強制執行 Linux-only 測試套件
+test_docker_compose_linux_suite_gate() {
+    log_test "檢查 docker-compose Linux 測試 gate..."
+
+    local compose_file="$SCRIPT_DIR/docker-compose.test.yml"
+    if [ ! -f "$compose_file" ]; then
+        log_fail "找不到 docker-compose.test.yml"
+        return
+    fi
+
+    if search_literal "CI=true" "$compose_file" || \
+       search_literal "FORCE_LINUX_TESTS=true" "$compose_file"; then
+        log_pass "docker-compose.test.yml 已啟用 Linux-only 測試套件"
+    else
+        log_fail "docker-compose.test.yml 仍會跳過 Linux-only 測試套件"
+    fi
+}
+
+# 檢查 docker-compose 設定不再使用過時的 version 欄位
+test_docker_compose_no_obsolete_version_field() {
+    log_test "檢查 docker-compose 過時 version 欄位..."
+
+    local compose_file="$SCRIPT_DIR/docker-compose.test.yml"
+    if [ ! -f "$compose_file" ]; then
+        log_fail "找不到 docker-compose.test.yml"
+        return
+    fi
+
+    if search_text '^version:' "$compose_file"; then
+        log_fail "docker-compose.test.yml 仍包含過時的 version 欄位"
+    else
+        log_pass "docker-compose.test.yml 已移除過時的 version 欄位"
+    fi
+}
+
 # 檢查 common.sh 可被重複 source 而不觸發 readonly 重新宣告
 test_common_idempotent_source_guard() {
     log_test "檢查 common.sh 重複載入保護..."
@@ -585,6 +694,10 @@ run_all_tests() {
     echo
     test_requirements_setuptools_pin
     echo
+    test_update_tools_requirements_path
+    echo
+    test_update_tools_venv_pip_fallback
+    echo
     test_base_tools_update_nonfatal
     echo
     test_base_tools_ipinfo_opt_in
@@ -602,6 +715,14 @@ run_all_tests() {
     test_monitoring_tools_systemd_guard
     echo
     test_docker_setup_nonfatal_docker_install
+    echo
+    test_dockerfile_report_dir_permissions
+    echo
+    test_docker_compose_report_volume_bootstrap
+    echo
+    test_docker_compose_linux_suite_gate
+    echo
+    test_docker_compose_no_obsolete_version_field
     echo
     test_common_idempotent_source_guard
     echo
