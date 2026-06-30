@@ -513,6 +513,34 @@ test_install_tui_log_flow() {
     fi
 }
 
+# 檢查 TUI quiet 模式下，安裝日誌提示與 remote 下載腳本訊息不再直接刷到終端
+test_install_tui_wraps_pre_menu_logs() {
+    log_test "檢查 TUI quiet 會包住安裝日誌與 remote 下載訊息..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    if [ ! -f "$installer" ]; then
+        log_fail "找不到 install.sh"
+        return
+    fi
+
+    if search_literal 'installer_tui_quiet()' "$installer" && \
+       search_literal 'run_logged_command()' "$installer" && \
+       search_literal 'run_remote_script_downloads()' "$installer" && \
+       search_literal 'download_remote_file()' "$installer" && \
+       search_literal 'if installer_tui_quiet; then' "$installer" && \
+       search_literal 'log_success "安裝日誌將保存到：$LOG_FILE"' "$installer" && \
+       search_literal 'run_logged_command install_module "$module"' "$installer" && \
+       search_literal 'run_remote_script_downloads' "$installer" && \
+       ! search_literal 'exec 1> >(tee -a "$LOG_FILE") 2>&1' "$installer" && \
+       ! search_literal 'printf "${CYAN}########## 下載安裝腳本 ##########${NC}\n"' "$installer" && \
+       ! search_literal 'printf "${BLUE}下載 core/$script...${NC}\n"' "$installer" && \
+       ! search_literal 'printf "${BLUE}下載 utils/secure_download.sh...${NC}\n"' "$installer"; then
+        log_pass "TUI quiet 已收斂前置日誌與 remote 下載訊息"
+    else
+        log_fail "TUI quiet 仍可能讓安裝日誌或 remote 下載訊息刷到終端"
+    fi
+}
+
 # 檢查 install.sh --help 有列出 TUI_BACKEND / TUI log 用法
 test_install_help_tui_backend_docs() {
     log_test "檢查 install.sh help 的 TUI 說明..."
@@ -1005,6 +1033,8 @@ run_all_tests() {
     test_install_module_prompt_backend_neutral
     echo
     test_install_tui_log_flow
+    echo
+    test_install_tui_wraps_pre_menu_logs
     echo
     test_install_help_tui_backend_docs
     echo

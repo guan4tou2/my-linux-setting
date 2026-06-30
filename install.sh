@@ -309,6 +309,32 @@ show_install_log_dialog() {
     fi
 }
 
+installer_tui_quiet() {
+    [ "${NON_INTERACTIVE:-false}" != "true" ] || return 1
+    [ "${TUI_MODE:-quiet}" = "quiet" ] || return 1
+    [ "${TUI_LOG_TO_TERMINAL:-auto}" != "true" ] || return 1
+    [ "${USE_TUI:-auto}" != "false" ] || return 1
+}
+
+prepare_initial_tui_backend() {
+    [ -t 0 ] || return 0
+    [ "${INSTALL_MODE:-full}" != "minimal" ] || return 0
+    [ "${NON_INTERACTIVE:-false}" != "true" ] || return 0
+    [ "${USE_TUI:-auto}" != "false" ] || return 0
+
+    if command -v _select_tui_backend >/dev/null 2>&1; then
+        _select_tui_backend >/dev/null 2>&1 || true
+    fi
+}
+
+run_logged_command() {
+    if installer_tui_quiet && [ -n "${LOG_FILE:-}" ]; then
+        "$@" >> "$LOG_FILE" 2>&1
+    else
+        "$@"
+    fi
+}
+
 # 錯誤處理函數
 handle_error() {
     local exit_code=$1
@@ -612,7 +638,7 @@ check_environment() {
 # 備份配置文件
 # 自動保留最新 N 份（預設 10），透過 BACKUP_RETENTION 環境變數調整
 backup_config_files() {
-    printf "${BLUE}備份配置文件...${NC}\n"
+    log_info "備份配置文件..."
     local backup_root="$HOME/.config/linux-setting-backup"
     BACKUP_DIR="$backup_root/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$BACKUP_DIR"
@@ -621,7 +647,7 @@ backup_config_files() {
     for file in ~/.zshrc ~/.p10k.zsh ~/.config/nvim; do
         if [ -e "$file" ]; then
             cp -r "$file" "$BACKUP_DIR/"
-            printf "${GREEN}已備份：$file${NC}\n"
+            log_success "已備份：$file"
         fi
     done
 
@@ -634,7 +660,7 @@ backup_config_files() {
         if [ -n "$old_backups" ]; then
             while IFS= read -r dir; do
                 [ -n "$dir" ] && rm -rf "$backup_root/$dir" \
-                    && printf "${CYAN}已清理舊備份：$dir${NC}\n"
+                    && log_info "已清理舊備份：$dir"
             done <<< "$old_backups"
         fi
     fi
@@ -646,8 +672,93 @@ setup_logging() {
     local log_dir="${LOG_DIR:-$HOME/.local/log/linux-setting}"
     mkdir -p "$log_dir"
     LOG_FILE="$log_dir/install_$(date +%Y%m%d_%H%M%S).log"
-    exec 1> >(tee -a "$LOG_FILE") 2>&1
-    printf "${GREEN}安裝日誌將保存到：$LOG_FILE${NC}\n"
+    export LOG_FILE
+    export ENABLE_LOGGING=true
+    : > "$LOG_FILE"
+
+    if installer_tui_quiet; then
+        log_success "安裝日誌將保存到：$LOG_FILE"
+    else
+        exec > >(tee -a "$LOG_FILE") 2>&1
+        printf "${GREEN}安裝日誌將保存到：$LOG_FILE${NC}\n"
+    fi
+}
+
+remote_download_progress() {
+    local enabled="$1"
+    local percent="$2"
+    local message="$3"
+
+    [ "$enabled" = "true" ] || return 0
+    printf '%s\n' "$percent"
+    printf 'XXX\n%s\nXXX\n' "$message"
+}
+
+download_remote_file() {
+    local label="$1"
+    local url="$2"
+    local output="$3"
+    local mode="${4:-}"
+    local curl_opts=(-fsSL --connect-timeout 15 --max-time "${DOWNLOAD_TIMEOUT:-60}")
+
+    log_info "下載 $label..."
+    curl "${curl_opts[@]}" "$url" -o "$output"
+    if [ -n "$mode" ]; then
+        chmod "$mode" "$output"
+    fi
+    log_success "已下載 $label"
+}
+
+download_remote_scripts() {
+    local show_progress="${1:-false}"
+    local total=10
+    local current=0
+
+    mkdir -p "$SCRIPT_DIR/core" "$SCRIPT_DIR/utils" "$SCRIPT_DIR/maintenance"
+
+    local script=""
+    for script in python_setup.sh docker_setup.sh terminal_setup.sh base_tools.sh dev_tools.sh monitoring_tools.sh; do
+        current=$((current + 1))
+        remote_download_progress "$show_progress" "$((current * 100 / total))" "下載 core/$script..."
+        download_remote_file "core/$script" "$SCRIPTS_URL/core/$script" "$SCRIPT_DIR/core/$script" "+x"
+    done
+
+    current=$((current + 1))
+    remote_download_progress "$show_progress" "$((current * 100 / total))" "下載 utils/secure_download.sh..."
+    download_remote_file "utils/secure_download.sh" "$SCRIPTS_URL/utils/secure_download.sh" "$SCRIPT_DIR/utils/secure_download.sh" "+x"
+
+    current=$((current + 1))
+    remote_download_progress "$show_progress" "$((current * 100 / total))" "下載 maintenance/update_tools.sh..."
+    download_remote_file "maintenance/update_tools.sh" "$SCRIPTS_URL/maintenance/update_tools.sh" "$SCRIPT_DIR/maintenance/update_tools.sh" "+x"
+
+    current=$((current + 1))
+    remote_download_progress "$show_progress" "$((current * 100 / total))" "下載 core/module_manager.sh..."
+    download_remote_file "core/module_manager.sh" "$SCRIPTS_URL/core/module_manager.sh" "$SCRIPT_DIR/core/module_manager.sh" "+x"
+
+    current=$((current + 1))
+    remote_download_progress "$show_progress" "$((current * 100 / total))" "下載 config/modules.conf..."
+    mkdir -p "$SCRIPT_DIR/../config"
+    download_remote_file "config/modules.conf" "$REPO_URL/config/modules.conf" "$SCRIPT_DIR/../config/modules.conf"
+}
+
+run_remote_script_downloads() {
+    log_info "下載安裝腳本..."
+
+    if installer_tui_quiet \
+       && [ "${USE_TUI:-false}" = "true" ] \
+       && [ "${TUI_BACKEND:-}" = "whiptail" ] \
+       && command -v tui_gauge >/dev/null 2>&1; then
+        download_remote_scripts true | tui_gauge "下載安裝腳本" "正在下載必要腳本..." 0
+    else
+        download_remote_scripts false
+        if installer_tui_quiet \
+           && [ "${USE_TUI:-false}" = "true" ] \
+           && command -v tui_msgbox >/dev/null 2>&1; then
+            tui_msgbox "下載安裝腳本" "必要腳本已下載完成。\n\n詳細內容已寫入安裝日誌。" 2>/dev/null || true
+        fi
+    fi
+
+    log_success "安裝腳本下載完成"
 }
 
 # 定義模組陣列
@@ -677,44 +788,13 @@ main() {
     fi
     
     # 初始化
+    prepare_initial_tui_backend
     setup_logging
     check_environment
     backup_config_files
     
     if [ "$REMOTE_INSTALL" = true ]; then
-        printf "${CYAN}########## 下載安裝腳本 ##########${NC}\n"
-
-        # 創建必要的子目錄
-        mkdir -p "$SCRIPT_DIR/core" "$SCRIPT_DIR/utils" "$SCRIPT_DIR/maintenance"
-
-        # 所有 REMOTE 下載統一加 connect/max timeout，避免 GitHub/raw 慢或掛起讓 install 卡住
-        local curl_opts=(-fsSL --connect-timeout 15 --max-time "${DOWNLOAD_TIMEOUT:-60}")
-
-        # 下載核心模組腳本（common.sh 已經在初始化時下載）
-        for script in python_setup.sh docker_setup.sh terminal_setup.sh base_tools.sh dev_tools.sh monitoring_tools.sh; do
-            printf "${BLUE}下載 core/$script...${NC}\n"
-            curl "${curl_opts[@]}" "$SCRIPTS_URL/core/$script" -o "$SCRIPT_DIR/core/$script"
-            chmod +x "$SCRIPT_DIR/core/$script"
-        done
-
-        # 下載工具腳本
-        printf "${BLUE}下載 utils/secure_download.sh...${NC}\n"
-        curl "${curl_opts[@]}" "$SCRIPTS_URL/utils/secure_download.sh" -o "$SCRIPT_DIR/utils/secure_download.sh"
-        chmod +x "$SCRIPT_DIR/utils/secure_download.sh"
-
-        # 下載維護腳本
-        printf "${BLUE}下載 maintenance/update_tools.sh...${NC}\n"
-        curl "${curl_opts[@]}" "$SCRIPTS_URL/maintenance/update_tools.sh" -o "$SCRIPT_DIR/maintenance/update_tools.sh"
-        chmod +x "$SCRIPT_DIR/maintenance/update_tools.sh"
-
-        # 模組管理器與設定（先前 bootstrap 僅載入 common.sh；缺少此檔會導致進階模式 / 模組詳情無效）
-        printf "${BLUE}下載 core/module_manager.sh...${NC}\n"
-        curl "${curl_opts[@]}" "$SCRIPTS_URL/core/module_manager.sh" -o "$SCRIPT_DIR/core/module_manager.sh"
-        chmod +x "$SCRIPT_DIR/core/module_manager.sh"
-
-        printf "${BLUE}下載 config/modules.conf...${NC}\n"
-        mkdir -p "$SCRIPT_DIR/../config"
-        curl "${curl_opts[@]}" "$REPO_URL/config/modules.conf" -o "$SCRIPT_DIR/../config/modules.conf"
+        run_remote_script_downloads
     fi
 
     # 遠端流程下載完成後補載入 module_manager（啟用進階模式、模組詳情、動態 checklist）
@@ -1332,16 +1412,16 @@ execute_script() {
     local script=$1
     local module_name=$2
     if [ -f "$SCRIPT_DIR/$script" ]; then
-        printf "${CYAN}########## 開始安裝 $module_name ##########${NC}\n"
-        if bash "$SCRIPT_DIR/$script"; then
+        log_info "開始安裝 $module_name"
+        if run_logged_command bash "$SCRIPT_DIR/$script"; then
             installed_modules="$installed_modules $module_name"
-            printf "${GREEN}$module_name 安裝完成${NC}\n"
+            log_success "$module_name 安裝完成"
         else
-            printf "${RED}$module_name 安裝失敗${NC}\n"
+            log_error "$module_name 安裝失敗" || true
             return 1
         fi
     else
-        printf "${RED}錯誤：找不到腳本 $SCRIPT_DIR/$script${NC}\n"
+        log_error "找不到腳本 $SCRIPT_DIR/$script" || true
         return 1
     fi
 }
@@ -1606,29 +1686,29 @@ install_selected_modules() {
         return 0
     fi
 
-    printf "${CYAN}開始安裝以下模組：$selected_modules${NC}\n"
-    printf "${BLUE}總共 $total_modules 個模組${NC}\n\n"
+    log_info "開始安裝以下模組：$selected_modules"
+    log_info "總共 $total_modules 個模組"
 
     # 進階模式：在開始安裝前，逐模組讓使用者再選具體要裝的套件
     if [ "${ADVANCED_MODE:-false}" = "true" ] \
        && [ "$USE_MODULE_MANAGER" = "true" ] \
        && command -v module_interactive_package_filter >/dev/null 2>&1 \
        && [ "${NON_INTERACTIVE:-false}" != "true" ]; then
-        printf "${CYAN}━━━ 進階模式：逐模組選擇套件 ━━━${NC}\n"
+        log_info "進階模式：逐模組選擇套件"
         for module in "${install_order[@]}"; do
             case " $selected_modules " in
                 *" $module "*) ;;
                 *) continue ;;
             esac
             module_interactive_package_filter "$module" || {
-                printf "${YELLOW}使用者取消模組 $module，將從清單移除${NC}\n"
+                log_warning "使用者取消模組 $module，將從清單移除"
                 selected_modules=$(echo " $selected_modules " | sed "s/ $module / /g" | xargs)
                 total_modules=$((total_modules - 1))
             }
         done
-        printf "${CYAN}━━━ 進階選擇完成 ━━━${NC}\n\n"
+        log_info "進階選擇完成"
         if [ -z "$selected_modules" ] || [ "$total_modules" -le 0 ]; then
-            printf "${YELLOW}所有模組都被取消，結束安裝${NC}\n"
+            log_warning "所有模組都被取消，結束安裝"
             return 0
         fi
     fi
@@ -1647,9 +1727,7 @@ install_selected_modules() {
         esac
 
         current_module=$((current_module + 1))
-        printf "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
-        printf "${GREEN}進度: [$current_module/$total_modules]${NC} 安裝模組: ${BLUE}$module${NC}\n"
-        printf "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
+        log_info "進度 [$current_module/$total_modules] 安裝模組: $module"
 
         # 模組層級「已安裝偵測」：印出訊息；實際「跳過套件但仍跑 script / post_install」
         # 的邏輯由 module_manager.sh::install_module 處理。
@@ -1659,8 +1737,8 @@ install_selected_modules() {
            && command -v check_module_status >/dev/null 2>&1; then
             module_status=$(check_module_status "$module" 2>/dev/null || echo "not_installed")
             if [ "$module_status" = "installed" ]; then
-                printf "${GREEN}✓ 模組 ${BLUE}$module${GREEN} 套件已全部安裝，將跳過套件階段並執行設定腳本${NC}\n"
-                printf "${CYAN}  （如需強制重裝套件，請加 --force 或設定 FORCE_REINSTALL=true）${NC}\n\n"
+                log_success "模組 $module 套件已全部安裝，將跳過套件階段並執行設定腳本"
+                log_info "如需強制重裝套件，請加 --force 或設定 FORCE_REINSTALL=true"
             fi
         fi
 
@@ -1675,28 +1753,35 @@ install_selected_modules() {
             local mod="$1"
             # 安全初始化（兼容 set -u）
             FAILED_MODULES=(${FAILED_MODULES[@]+"${FAILED_MODULES[@]}"} "$mod")
-            printf "${RED}✗ 模組 $mod 安裝失敗${NC}\n"
+            log_error "模組 $mod 安裝失敗" || true
 
             if [ "${ABORT_ON_FAILURE:-false}" = "true" ]; then
-                printf "${RED}--abort-on-failure 已啟用，中止安裝${NC}\n"
+                log_error "--abort-on-failure 已啟用，中止安裝" || true
                 return 1
             fi
 
             if [ -t 0 ] && [ "${NON_INTERACTIVE:-false}" != "true" ]; then
-                printf "${YELLOW}是否繼續安裝其餘模組？${NC} [Y/n]: "
-                local ans
-                read -r ans
-                case "${ans,,}" in
-                    n|no) printf "${YELLOW}使用者選擇中止${NC}\n"; return 1 ;;
-                esac
+                if [ "${USE_TUI:-false}" = "true" ] && command -v tui_yesno >/dev/null 2>&1; then
+                    if ! tui_yesno "模組安裝失敗" "模組 $mod 安裝失敗。\n\n是否繼續安裝其餘模組？" "yes"; then
+                        log_warning "使用者選擇中止"
+                        return 1
+                    fi
+                else
+                    printf "${YELLOW}是否繼續安裝其餘模組？${NC} [Y/n]: "
+                    local ans
+                    read -r ans
+                    case "${ans,,}" in
+                        n|no) log_warning "使用者選擇中止"; return 1 ;;
+                    esac
+                fi
             fi
-            printf "${YELLOW}繼續安裝下一個模組（失敗模組會在最後報告）${NC}\n"
+            log_warning "繼續安裝下一個模組（失敗模組會在最後報告）"
             return 0
         }
 
         if [ "$USE_MODULE_MANAGER" = "true" ] && command -v install_module >/dev/null 2>&1; then
             LAST_COMMAND="install_module \"$module\""
-            install_module "$module" || {
+            run_logged_command install_module "$module" || {
                 _handle_module_failure "$module" || return 1
                 continue
             }
