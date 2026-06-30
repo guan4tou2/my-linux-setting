@@ -149,6 +149,29 @@ test_argument_parsing() {
     fi
 }
 
+# 檢查顯示版本與共用版本常數同步
+test_script_version_bumped() {
+    log_test "檢查腳本版本已更新..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    if [ ! -f "$installer" ] || [ ! -f "$common" ]; then
+        log_fail "找不到 install.sh 或 common.sh"
+        return
+    fi
+
+    if search_literal 'Version: 2.2.9' "$installer" && \
+       search_literal '自動安裝腳本 v2.2.9' "$installer" && \
+       search_literal 'Linux Setting Scripts  v2.2.9' "$installer" && \
+       search_literal 'readonly SCRIPT_VERSION="2.2.9"' "$common" && \
+       ! search_literal '2.2.8' "$installer" && \
+       ! search_literal 'SCRIPT_VERSION="2.2.8"' "$common"; then
+        log_pass "版本已更新為 2.2.9"
+    else
+        log_fail "版本仍未完整更新為 2.2.9"
+    fi
+}
+
 # 檢查 install.sh 是否初始化 SKIP_PYTHON_CHECK
 test_skip_python_check_default() {
     log_test "檢查 SKIP_PYTHON_CHECK 預設值..."
@@ -378,6 +401,28 @@ test_common_tui_quiet_status_logs_are_log_only() {
     fi
 
     rm -f "$tmp_log"
+}
+
+# 檢查 remote bootstrap 階段不再直接輸出 INFO/SUCCESS，避免 common.sh 載入前污染 TUI
+test_install_remote_bootstrap_status_quiet() {
+    log_test "檢查 remote bootstrap 狀態輸出可被 quiet 模式收斂..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    if [ ! -f "$installer" ]; then
+        log_fail "找不到 install.sh"
+        return
+    fi
+
+    if search_literal 'bootstrap_status()' "$installer" && \
+       search_literal 'bootstrap_status "INFO" "Downloading common library from remote source..."' "$installer" && \
+       search_literal 'bootstrap_status "SUCCESS" "Common library loaded"' "$installer" && \
+       search_literal '[ "$level" != "ERROR" ] && [ "${TUI_MODE:-quiet}" = "quiet" ]' "$installer" && \
+       ! search_literal 'echo -e "\033[0;36mINFO: Downloading common library from remote source...\033[0m"' "$installer" && \
+       ! search_literal 'echo -e "\033[0;32mSUCCESS: Common library loaded\033[0m"' "$installer"; then
+        log_pass "remote bootstrap 狀態輸出已支援 quiet 收斂"
+    else
+        log_fail "remote bootstrap 仍可能直接輸出 INFO/SUCCESS"
+    fi
 }
 
 # 檢查 fzf checklist 允許 Enter 直接選擇目前項目，而不是啟動時預選全部
@@ -927,6 +972,8 @@ run_all_tests() {
     echo
     test_argument_parsing
     echo
+    test_script_version_bumped
+    echo
     test_skip_python_check_default
     echo
     test_module_manager_install_path
@@ -950,6 +997,8 @@ run_all_tests() {
     test_common_tui_log_viewer
     echo
     test_common_tui_quiet_status_logs_are_log_only
+    echo
+    test_install_remote_bootstrap_status_quiet
     echo
     test_common_fzf_checklist_enter_selects_current_item
     echo

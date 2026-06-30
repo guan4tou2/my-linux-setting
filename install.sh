@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # Linux Environment Setup - Main Installation Script
-# Version: 2.2.8
+# Version: 2.2.9
 # ==============================================================================
 
 # 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
@@ -30,7 +30,7 @@ LAST_COMMAND=""
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
-Linux Setting Scripts - 自動安裝腳本 v2.2.8
+Linux Setting Scripts - 自動安裝腳本 v2.2.9
 
 用法: ./install.sh [選項]
 
@@ -72,7 +72,7 @@ show_welcome() {
     printf "\n"
     printf "╔════════════════════════════════════════════════════════╗\n"
     printf "║                                                        ║\n"
-    printf "║          Linux Setting Scripts  v2.2.8                 ║\n"
+    printf "║          Linux Setting Scripts  v2.2.9                 ║\n"
     printf "║            自動化開發環境配置工具                      ║\n"
     printf "║                                                        ║\n"
     printf "╠════════════════════════════════════════════════════════╣\n"
@@ -217,6 +217,22 @@ else
 fi
 REMOTE_INSTALL=false
 
+bootstrap_status() {
+    local level="$1"
+    local message="$2"
+
+    if [ "$level" != "ERROR" ] && [ "${TUI_MODE:-quiet}" = "quiet" ] && [ "${TUI_LOG_TO_TERMINAL:-auto}" != "true" ]; then
+        return 0
+    fi
+
+    case "$level" in
+        INFO) printf "\033[0;36mINFO: %s\033[0m\n" "$message" ;;
+        SUCCESS) printf "\033[0;32mSUCCESS: %s\033[0m\n" "$message" ;;
+        ERROR) printf "\033[0;31mERROR: %s\033[0m\n" "$message" >&2 ;;
+        *) printf "%s: %s\n" "$level" "$message" ;;
+    esac
+}
+
 # Try local common.sh first
 if [ -f "$SCRIPT_DIR/core/common.sh" ]; then
     source "$SCRIPT_DIR/core/common.sh"
@@ -229,7 +245,7 @@ else
     SCRIPT_DIR="$TEMP_DIR/scripts"
     mkdir -p "$SCRIPT_DIR/core"
 
-    echo -e "\033[0;36mINFO: Downloading common library from remote source...\033[0m"
+    bootstrap_status "INFO" "Downloading common library from remote source..."
 
     # Download common.sh (without using safe_download since it's not loaded yet)
     COMMON_URL="$SCRIPTS_URL/core/common.sh"
@@ -240,14 +256,14 @@ else
         if [ -s "$COMMON_OUTPUT" ] && head -1 "$COMMON_OUTPUT" | grep -q "^#!/"; then
             source "$COMMON_OUTPUT"
             REMOTE_INSTALL=true
-            echo -e "\033[0;32mSUCCESS: Common library loaded\033[0m"
+            bootstrap_status "SUCCESS" "Common library loaded"
         else
-            echo -e "\033[0;31mERROR: Downloaded file appears invalid\033[0m"
+            bootstrap_status "ERROR" "Downloaded file appears invalid"
             rm -rf "$TEMP_DIR"
             exit 1
         fi
     else
-        echo -e "\033[0;31mERROR: Failed to download common library\033[0m"
+        bootstrap_status "ERROR" "Failed to download common library"
         rm -rf "$TEMP_DIR"
         exit 1
     fi
