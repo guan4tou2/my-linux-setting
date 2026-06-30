@@ -51,6 +51,7 @@ declare -A MODULE_PKG_OVERRIDE_NPM
 declare -A MODULE_PKG_OVERRIDE_APT_FALLBACK
 declare -A MODULE_RUN_SCRIPT
 declare -A MODULE_HAS_OVERRIDE
+declare -A MODULE_PKG_STATUS_CACHE
 
 # ==============================================================================
 # 配置文件定位
@@ -206,19 +207,66 @@ module_exists() {
 # 模組狀態檢查
 # ==============================================================================
 
+_module_pkg_status_cache_clear() {
+    MODULE_PKG_STATUS_CACHE=()
+}
+
+_module_pkg_is_installed() {
+    local kind="$1"
+    local pkg="$2"
+    local cache_key="${kind}:${pkg}"
+
+    if [ -n "${MODULE_PKG_STATUS_CACHE[$cache_key]+x}" ]; then
+        [ "${MODULE_PKG_STATUS_CACHE["$cache_key"]}" = "1" ]
+        return
+    fi
+
+    local installed=1
+    case "$kind" in
+        apt|apt_fallback)
+            check_package_installed "$pkg" >/dev/null 2>&1 && installed=0
+            ;;
+        brew)
+            check_brew_package_installed "$pkg" >/dev/null 2>&1 && installed=0
+            ;;
+        pip)
+            check_pip_package_installed "$pkg" >/dev/null 2>&1 && installed=0
+            ;;
+        cargo)
+            check_cargo_package_installed "$pkg" >/dev/null 2>&1 && installed=0
+            ;;
+        npm)
+            check_npm_package_installed "$pkg" >/dev/null 2>&1 && installed=0
+            ;;
+    esac
+
+    if [ "$installed" -eq 0 ]; then
+        MODULE_PKG_STATUS_CACHE["$cache_key"]="1"
+        return 0
+    fi
+
+    MODULE_PKG_STATUS_CACHE["$cache_key"]="0"
+    return 1
+}
+
 # 檢查模組安裝狀態
 # 返回: "installed" | "partial" | "not_installed"
 check_module_status() {
     local module_id="$1"
+    local reuse_status_cache="${2:-false}"
     local total=0
     local installed=0
+
+    if [ "$reuse_status_cache" != "true" ]; then
+        _module_pkg_status_cache_clear
+    fi
 
     # 檢查 APT/系統套件
     local packages="${MODULE_PACKAGES[$module_id]:-}"
     if [ -n "$packages" ]; then
         for pkg in $packages; do
             total=$((total + 1))
-            if check_package_installed "$pkg" 2>/dev/null; then
+            if _module_pkg_is_installed apt "$pkg"; then
                 installed=$((installed + 1))
             fi
         done
@@ -231,7 +279,7 @@ check_module_status() {
         # 有定義 APT fallback 時，一律以 APT 套件為主判斷狀態
         for pkg in $apt_fallback; do
             total=$((total + 1))
-            if check_package_installed "$pkg" 2>/dev/null; then
+            if _module_pkg_is_installed apt_fallback "$pkg"; then
                 installed=$((installed + 1))
             fi
         done
@@ -239,7 +287,7 @@ check_module_status() {
         if command -v brew >/dev/null 2>&1; then
             for pkg in $brew_packages; do
                 total=$((total + 1))
-                if check_brew_package_installed "$pkg" 2>/dev/null; then
+                if _module_pkg_is_installed brew "$pkg"; then
                     installed=$((installed + 1))
                 fi
             done
@@ -257,7 +305,7 @@ check_module_status() {
     if [ -n "$pip_packages" ]; then
         for pkg in $pip_packages; do
             total=$((total + 1))
-            if check_pip_package_installed "$pkg" 2>/dev/null; then
+            if _module_pkg_is_installed pip "$pkg"; then
                 installed=$((installed + 1))
             fi
         done
@@ -268,7 +316,7 @@ check_module_status() {
     if [ -n "$cargo_packages" ] && command -v cargo >/dev/null 2>&1; then
         for pkg in $cargo_packages; do
             total=$((total + 1))
-            if check_cargo_package_installed "$pkg" 2>/dev/null; then
+            if _module_pkg_is_installed cargo "$pkg"; then
                 installed=$((installed + 1))
             fi
         done
@@ -279,7 +327,7 @@ check_module_status() {
     if [ -n "$npm_packages" ] && command -v npm >/dev/null 2>&1; then
         for pkg in $npm_packages; do
             total=$((total + 1))
-            if check_npm_package_installed "$pkg" 2>/dev/null; then
+            if _module_pkg_is_installed npm "$pkg"; then
                 installed=$((installed + 1))
             fi
         done
@@ -311,7 +359,8 @@ get_module_detail_status() {
     local name="${MODULE_NAMES[$module_id]:-$module_id}"
     local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
     local status
-    status=$(check_module_status "$module_id")
+    _module_pkg_status_cache_clear
+    status=$(check_module_status "$module_id" true)
 
     # 狀態標記
     case "$status" in
@@ -328,7 +377,7 @@ get_module_detail_status() {
     if [ -n "$packages" ]; then
         detail+="系統套件:\n"
         for pkg in $packages; do
-            if check_package_installed "$pkg" 2>/dev/null; then
+            if _module_pkg_is_installed apt "$pkg"; then
                 detail+="  ✓ $pkg\n"
             else
                 detail+="  ✗ $pkg\n"
@@ -343,7 +392,7 @@ get_module_detail_status() {
     if [ -n "$apt_fallback" ]; then
         detail+="Homebrew 套件 (APT 優先):\n"
         for pkg in $apt_fallback; do
-            if check_package_installed "$pkg" 2>/dev/null; then
+            if _module_pkg_is_installed apt_fallback "$pkg"; then
                 detail+="  ✓ $pkg (apt)\n"
             else
                 detail+="  ✗ $pkg (apt)\n"
@@ -353,7 +402,7 @@ get_module_detail_status() {
         if command -v brew >/dev/null 2>&1; then
             detail+="Homebrew 套件:\n"
             for pkg in $brew_packages; do
-                if check_brew_package_installed "$pkg" 2>/dev/null; then
+                if _module_pkg_is_installed brew "$pkg"; then
                     detail+="  ✓ $pkg\n"
                 else
                     detail+="  ✗ $pkg\n"
@@ -373,7 +422,7 @@ get_module_detail_status() {
     if [ -n "$pip_packages" ]; then
         detail+="Python 套件 (uv tool):\n"
         for pkg in $pip_packages; do
-            if check_pip_package_installed "$pkg" 2>/dev/null; then
+            if _module_pkg_is_installed pip "$pkg"; then
                 detail+="  ✓ $pkg\n"
             else
                 detail+="  ✗ $pkg\n"
@@ -387,7 +436,7 @@ get_module_detail_status() {
     if [ -n "$cargo_packages" ]; then
         detail+="Rust 套件 (cargo):\n"
         for pkg in $cargo_packages; do
-            if command -v cargo >/dev/null 2>&1 && check_cargo_package_installed "$pkg" 2>/dev/null; then
+            if command -v cargo >/dev/null 2>&1 && _module_pkg_is_installed cargo "$pkg"; then
                 detail+="  ✓ $pkg\n"
             else
                 detail+="  ✗ $pkg\n"
@@ -401,7 +450,7 @@ get_module_detail_status() {
     if [ -n "$npm_packages" ]; then
         detail+="Node.js 套件 (npm):\n"
         for pkg in $npm_packages; do
-            if command -v npm >/dev/null 2>&1 && check_npm_package_installed "$pkg" 2>/dev/null; then
+            if command -v npm >/dev/null 2>&1 && _module_pkg_is_installed npm "$pkg"; then
                 detail+="  ✓ $pkg\n"
             else
                 detail+="  ✗ $pkg\n"
@@ -516,18 +565,16 @@ generate_module_details() {
 _module_pkg_default_state() {
     local kind="$1" pkg="$2"
     case "$kind" in
-        apt|apt_fallback) check_package_installed "$pkg" 2>/dev/null && echo "OFF" || echo "ON" ;;
-        brew)             check_brew_package_installed "$pkg" 2>/dev/null && echo "OFF" || echo "ON" ;;
-        pip)              check_pip_package_installed "$pkg" 2>/dev/null && echo "OFF" || echo "ON" ;;
-        cargo)            check_cargo_package_installed "$pkg" 2>/dev/null && echo "OFF" || echo "ON" ;;
-        npm)              check_npm_package_installed "$pkg" 2>/dev/null && echo "OFF" || echo "ON" ;;
+        apt|apt_fallback|brew|pip|cargo|npm)
+            _module_pkg_is_installed "$kind" "$pkg" && echo "OFF" || echo "ON"
+            ;;
         *)                echo "ON" ;;
     esac
 }
 
 _module_pkg_status_label() {
     local kind="$1" pkg="$2"
-    if [ "$(_module_pkg_default_state "$kind" "$pkg")" = "OFF" ]; then
+    if _module_pkg_is_installed "$kind" "$pkg"; then
         echo "已安裝"
     else
         echo "未安裝"
@@ -540,6 +587,8 @@ _module_pkg_status_label() {
 module_interactive_package_filter() {
     local module_id="$1"
     local name="${MODULE_NAMES[$module_id]:-$module_id}"
+
+    _module_pkg_status_cache_clear
 
     local apt_pkgs="${MODULE_PACKAGES[$module_id]:-}"
     local brew_pkgs="${MODULE_BREW_PACKAGES[$module_id]:-}"
@@ -590,7 +639,9 @@ module_interactive_package_filter() {
     # 嘗試 TUI 模式
     local selected=""
     local rc=1
-    if [ "${USE_TUI:-false}" = "true" ] && command -v tui_checklist_with_state >/dev/null 2>&1; then
+    if [ "${USE_TUI:-false}" = "true" ] \
+       && command -v tui_checklist_with_state >/dev/null 2>&1 \
+       && { ! command -v _tui_backend_supports_state_checklist >/dev/null 2>&1 || _tui_backend_supports_state_checklist; }; then
         rc=0
         selected=$(tui_checklist_with_state \
             "進階：選擇 [$name] 要安裝的套件" \

@@ -46,6 +46,10 @@ Linux Setting Scripts - 自動安裝腳本 v2.2.8
   -h, --help                      顯示此幫助訊息
   --config <file>                 指定配置文件路徑
 
+環境變數:
+  TUI_BACKEND=auto|gum|fzf|whiptail  指定互動選單後端（預設 auto）
+  TUI_MODE=quiet|normal              控制安裝輸出詳細程度
+
 範例:
   ./install.sh                    # 標準安裝（互動式選單）
   ./install.sh --minimal          # 最小安裝
@@ -53,6 +57,8 @@ Linux Setting Scripts - 自動安裝腳本 v2.2.8
   ./install.sh --dry-run          # 預覽將要安裝的內容
   ./install.sh --update           # 更新模式
   ./install.sh --verbose          # 詳細模式
+  TUI_BACKEND=fzf ./install.sh     # 使用 fzf 互動選單
+  TUI_BACKEND=gum ./install.sh     # 使用 gum 互動選單
 
 更多資訊請參閱 README.md
 EOF
@@ -1132,6 +1138,10 @@ show_module_details() {
     if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
         local index=1
         for module_id in "${MODULE_LIST[@]}"; do
+            if command -v _module_pkg_status_cache_clear >/dev/null 2>&1; then
+                _module_pkg_status_cache_clear
+            fi
+
             local name="${MODULE_NAMES[$module_id]:-$module_id}"
             local packages="${MODULE_PACKAGES[$module_id]:-}"
             local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
@@ -1144,7 +1154,7 @@ show_module_details() {
             local status_text="未安裝"
             if command -v check_module_status >/dev/null 2>&1; then
                 local status
-                status=$(check_module_status "$module_id" 2>/dev/null)
+                status=$(check_module_status "$module_id" true 2>/dev/null)
                 case "$status" in
                     installed)
                         status_icon="✓"
@@ -1177,7 +1187,7 @@ show_module_details() {
                 for pkg in $packages; do
                     [ "$first" = true ] || printf ", " || true
                     first=false
-                    if check_package_installed "$pkg" 2>/dev/null; then
+                    if _module_pkg_is_installed apt "$pkg"; then
                         printf "${GREEN}%s${NC}" "$pkg"
                     else
                         printf "${RED}%s${NC}" "$pkg"
@@ -1192,7 +1202,7 @@ show_module_details() {
                 for pkg in $brew_packages; do
                     [ "$first" = true ] || printf ", " || true
                     first=false
-                    if command -v brew >/dev/null 2>&1 && check_brew_package_installed "$pkg" 2>/dev/null; then
+                    if command -v brew >/dev/null 2>&1 && _module_pkg_is_installed brew "$pkg"; then
                         printf "${GREEN}%s${NC}" "$pkg"
                     else
                         printf "${RED}%s${NC}" "$pkg"
@@ -1207,7 +1217,7 @@ show_module_details() {
                 for pkg in $pip_packages; do
                     [ "$first" = true ] || printf ", " || true
                     first=false
-                    if check_pip_package_installed "$pkg" 2>/dev/null; then
+                    if _module_pkg_is_installed pip "$pkg"; then
                         printf "${GREEN}%s${NC}" "$pkg"
                     else
                         printf "${RED}%s${NC}" "$pkg"
@@ -1222,7 +1232,7 @@ show_module_details() {
                 for pkg in $cargo_packages; do
                     [ "$first" = true ] || printf ", " || true
                     first=false
-                    if command -v cargo >/dev/null 2>&1 && check_cargo_package_installed "$pkg" 2>/dev/null; then
+                    if command -v cargo >/dev/null 2>&1 && _module_pkg_is_installed cargo "$pkg"; then
                         printf "${GREEN}%s${NC}" "$pkg"
                     else
                         printf "${RED}%s${NC}" "$pkg"
@@ -1237,7 +1247,7 @@ show_module_details() {
                 for pkg in $npm_packages; do
                     [ "$first" = true ] || printf ", " || true
                     first=false
-                    if command -v npm >/dev/null 2>&1 && check_npm_package_installed "$pkg" 2>/dev/null; then
+                    if command -v npm >/dev/null 2>&1 && _module_pkg_is_installed npm "$pkg"; then
                         printf "${GREEN}%s${NC}" "$pkg"
                     else
                         printf "${RED}%s${NC}" "$pkg"

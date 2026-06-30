@@ -1822,27 +1822,98 @@ install_arch_specific_package() {
 
 # 全局變數：控制是否使用 TUI
 USE_TUI="${USE_TUI:-auto}"  # auto/true/false
+TUI_BACKEND="${TUI_BACKEND:-auto}"  # auto/gum/fzf/whiptail
 
-# 檢測並確保 whiptail 可用
+_set_tui_backend() {
+    export USE_TUI="true"
+    export TUI_BACKEND="$1"
+}
+
+_select_tui_backend() {
+    case "${TUI_BACKEND:-auto}" in
+        gum)
+            command -v gum >/dev/null 2>&1 && _set_tui_backend "gum" && return 0
+            return 1
+            ;;
+        fzf)
+            command -v fzf >/dev/null 2>&1 && _set_tui_backend "fzf" && return 0
+            return 1
+            ;;
+        whiptail)
+            command -v whiptail >/dev/null 2>&1 && _set_tui_backend "whiptail" && return 0
+            return 1
+            ;;
+        auto|"")
+            if command -v gum >/dev/null 2>&1; then
+                _set_tui_backend "gum"
+                return 0
+            fi
+            if command -v fzf >/dev/null 2>&1; then
+                _set_tui_backend "fzf"
+                return 0
+            fi
+            if command -v whiptail >/dev/null 2>&1; then
+                TUI_BACKEND="whiptail"
+                _set_tui_backend "whiptail"
+                return 0
+            fi
+            return 1
+            ;;
+        *)
+            log_warning "未知 TUI_BACKEND=${TUI_BACKEND}，改用自動偵測"
+            TUI_BACKEND="auto"
+            _select_tui_backend
+            ;;
+    esac
+}
+
+_tui_backend_supports_state_checklist() {
+    [ "${TUI_BACKEND:-whiptail}" = "whiptail" ]
+}
+
+_tui_emit_tags_from_tsv() {
+    local line
+    local out=""
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        out="$out ${line%%	*}"
+    done
+    echo "${out# }"
+}
+
+_log_tui_backend_hint() {
+    [ "${TUI_BACKEND_HINT_SHOWN:-false}" = "true" ] && return 0
+    export TUI_BACKEND_HINT_SHOWN="true"
+
+    if ! command -v fzf >/dev/null 2>&1 && ! command -v gum >/dev/null 2>&1; then
+        log_info "提示：安裝 fzf 或 gum 可使用更順手的互動選單；可用 TUI_BACKEND=fzf ./install.sh 或 TUI_BACKEND=gum ./install.sh 指定"
+    fi
+}
+
+# 檢測並確保 TUI backend 可用
 ensure_tui_available() {
     # 如果明確禁用 TUI，直接返回失敗
     if [ "$USE_TUI" = "false" ]; then
         return 1
     fi
 
-    # 檢查 whiptail 是否可用
-    if command -v whiptail >/dev/null 2>&1; then
-        export USE_TUI="true"
+    local requested_backend="${TUI_BACKEND:-auto}"
+    if _select_tui_backend; then
+        log_debug "啟用 TUI backend: $TUI_BACKEND"
+        if [ "$requested_backend" = "auto" ] && [ "$TUI_BACKEND" = "whiptail" ]; then
+            _log_tui_backend_hint
+        fi
         return 0
     fi
 
-    # 嘗試安裝 whiptail（通常在 newt 包中）
+    # 嘗試安裝 whiptail（通常在 newt 包中）作為保守 fallback
     log_info "檢測到 whiptail 未安裝，嘗試安裝..."
-    if [ "$DISTRO_FAMILY" = "debian" ]; then
+    if [ "${TUI_BACKEND:-auto}" != "gum" ] && [ "${TUI_BACKEND:-auto}" != "fzf" ] && [ "$DISTRO_FAMILY" = "debian" ]; then
         if install_package "whiptail" 2>/dev/null || install_package "newt" 2>/dev/null; then
             if command -v whiptail >/dev/null 2>&1; then
                 log_success "whiptail 安裝成功，啟用 TUI 模式"
-                export USE_TUI="true"
+                TUI_BACKEND="whiptail"
+                _set_tui_backend "whiptail"
                 return 0
             fi
         fi
@@ -1851,12 +1922,14 @@ ensure_tui_available() {
     # 如果是 auto 模式且安裝失敗，降級到命令行
     if [ "$USE_TUI" = "auto" ]; then
         log_info "TUI 不可用，使用命令行模式"
+        _log_tui_backend_hint
         export USE_TUI="false"
         return 1
     fi
 
     # 明確要求 TUI 但不可用
     log_warning "TUI 模式不可用，降級到命令行模式"
+    _log_tui_backend_hint
     export USE_TUI="false"
     return 1
 }
@@ -1879,6 +1952,35 @@ tui_checklist() {
     if [ $((n % 2)) -ne 0 ]; then
         log_error "tui_checklist: 參數須為偶數（tag 與描述須成對），目前 $n 個"
         return 1
+    fi
+
+    if [ "${TUI_BACKEND:-whiptail}" = "gum" ]; then
+        local gum_items=()
+        local gi=0
+        while [ "$gi" -lt "$n" ]; do
+            gum_items+=("${items[$gi]}	${items[$((gi + 1))]}")
+            gi=$((gi + 2))
+        done
+        local gum_result
+        printf "%s\n%s\n" "$title" "$prompt" >&2
+        gum_result=$(printf '%s\n' "${gum_items[@]}" | gum choose --no-limit) || return 1
+        _tui_emit_tags_from_tsv <<< "$gum_result"
+        return 0
+    fi
+
+    if [ "${TUI_BACKEND:-whiptail}" = "fzf" ]; then
+        local fzf_input=""
+        local fi=0
+        while [ "$fi" -lt "$n" ]; do
+            fzf_input="${fzf_input}${items[$fi]}	${items[$((fi + 1))]}"$'\n'
+            fi=$((fi + 2))
+        done
+        local fzf_result
+        fzf_result=$(printf '%s' "$fzf_input" | fzf --multi --bind start:select-all \
+            --delimiter=$'\t' --with-nth=2.. \
+            --height=80% --border --prompt="$title> " --header="$prompt") || return 1
+        _tui_emit_tags_from_tsv <<< "$fzf_result"
+        return 0
     fi
 
     # 構建 whiptail checklist 參數：每列 tag / item / status
@@ -1942,6 +2044,10 @@ tui_checklist_with_state() {
         return 1
     fi
 
+    if ! _tui_backend_supports_state_checklist; then
+        return 1
+    fi
+
     local height=$((item_count + 10))
     [ $height -gt 25 ] && height=25 || true
     local list_height=$item_count
@@ -1981,6 +2087,22 @@ tui_menu() {
         index=$((index + 1))
     done
 
+    if [ "${TUI_BACKEND:-whiptail}" = "gum" ]; then
+        local gum_result
+        printf "%s\n" "$prompt" >&2
+        gum_result=$(gum choose "${items[@]}") || return 1
+        [ -n "$gum_result" ] && echo "$gum_result" && return 0
+        return 1
+    fi
+
+    if [ "${TUI_BACKEND:-whiptail}" = "fzf" ]; then
+        local fzf_result
+        fzf_result=$(printf '%s\n' "${items[@]}" | fzf --height=80% --border \
+            --prompt="$title> " --header="$prompt") || return 1
+        [ -n "$fzf_result" ] && echo "$fzf_result" && return 0
+        return 1
+    fi
+
     # 計算窗口大小
     local height=$((${#items[@]} + 10))
     [ $height -gt 25 ] && height=25 || true
@@ -2019,6 +2141,26 @@ tui_yesno() {
     local defaultno=""
     [ "$default" = "no" ] && defaultno="--defaultno" || true
 
+    if [ "${TUI_BACKEND:-whiptail}" = "gum" ]; then
+        if [ "$default" = "yes" ]; then
+            gum confirm "$prompt" --default=true
+        else
+            gum confirm "$prompt" --default=false
+        fi
+        return $?
+    fi
+
+    if [ "${TUI_BACKEND:-whiptail}" = "fzf" ]; then
+        local fzf_result
+        if [ "$default" = "yes" ]; then
+            fzf_result=$(printf "Yes\nNo\n" | fzf --height=40% --border --prompt="$title> " --header="$prompt") || return 1
+        else
+            fzf_result=$(printf "No\nYes\n" | fzf --height=40% --border --prompt="$title> " --header="$prompt") || return 1
+        fi
+        [ "$fzf_result" = "Yes" ]
+        return $?
+    fi
+
     # 顯示 yesno 對話框
     if whiptail --title "$title" $defaultno --yesno "$prompt" $height $width 3>&1 1>&2 2>&3; then
         return 0  # Yes
@@ -2046,6 +2188,20 @@ tui_msgbox() {
     local height=$((lines + 7))
     [ "$height" -lt 12 ] && height=12
     [ "$height" -gt 28 ] && height=28
+
+    if [ "${TUI_BACKEND:-whiptail}" = "gum" ]; then
+        printf '%b\n' "$message" | gum pager
+        return $?
+    fi
+
+    if [ "${TUI_BACKEND:-whiptail}" = "fzf" ]; then
+        if [ -t 0 ]; then
+            printf '%b\n' "$message" | fzf --height=80% --border --prompt="$title> " --header="Enter 返回"
+        else
+            printf '%b\n' "$message"
+        fi
+        return 0
+    fi
 
     whiptail --title "$title" --msgbox "$message" $height $width 3>&1 1>&2 2>&3
 }
@@ -2079,6 +2235,11 @@ tui_inputbox() {
 
     local height=10
     local width=60
+
+    if [ "${TUI_BACKEND:-whiptail}" = "gum" ]; then
+        gum input --placeholder "$prompt" --value "$default"
+        return $?
+    fi
 
     local result
     result=$(whiptail --title "$title" --inputbox "$prompt" $height $width "$default" 3>&1 1>&2 2>&3)

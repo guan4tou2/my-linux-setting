@@ -124,6 +124,7 @@ pre_check() {
     # 檢查測試文件是否存在
     local test_files=(
         "$TESTS_DIR/test_scripts.sh"
+        "$TESTS_DIR/test_module_manager_status.sh"
         "$TESTS_DIR/test_dependencies.sh"
         "$TESTS_DIR/test_functionality.sh"
     )
@@ -191,6 +192,7 @@ run_all_test_suites() {
     
     # 1. 腳本語法和基礎測試
     run_test_suite "$TESTS_DIR/test_scripts.sh" "腳本語法測試"
+    run_test_suite "$TESTS_DIR/test_module_manager_status.sh" "模組狀態快取測試"
 
     if should_run_linux_only_suites; then
         # 2. 系統依賴測試（Linux CI only）

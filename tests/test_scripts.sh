@@ -257,6 +257,104 @@ test_module_manager_strict_safe_access() {
     fi
 }
 
+# 檢查模組詳情的套件狀態查詢有快取，避免 Kali 顯示全部套件時重複查詢造成卡住
+test_module_manager_package_status_cache() {
+    log_test "檢查 module_manager.sh 套件狀態快取..."
+
+    local module_manager="$SCRIPT_DIR/scripts/core/module_manager.sh"
+    if [ ! -f "$module_manager" ]; then
+        log_fail "找不到 module_manager.sh"
+        return
+    fi
+
+    if search_literal 'declare -A MODULE_PKG_STATUS_CACHE' "$module_manager" && \
+       search_literal '_module_pkg_is_installed()' "$module_manager" && \
+       search_literal 'MODULE_PKG_STATUS_CACHE["$cache_key"]' "$module_manager"; then
+        log_pass "module_manager.sh 已快取套件狀態查詢"
+    else
+        log_fail "module_manager.sh 缺少套件狀態快取"
+    fi
+}
+
+# 檢查 common.sh 支援更好用的 TUI backend，並保留 whiptail fallback
+test_common_tui_backends() {
+    log_test "檢查 common.sh 的 gum/fzf TUI backend..."
+
+    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    if [ ! -f "$common" ]; then
+        log_fail "找不到 common.sh"
+        return
+    fi
+
+    if search_literal 'TUI_BACKEND="${TUI_BACKEND:-auto}"' "$common" && \
+       search_literal '_select_tui_backend()' "$common" && \
+       search_literal 'command -v gum' "$common" && \
+       search_literal 'command -v fzf' "$common" && \
+       search_literal 'TUI_BACKEND="whiptail"' "$common"; then
+        log_pass "common.sh 已支援 gum/fzf 並保留 whiptail fallback"
+    else
+        log_fail "common.sh 缺少 gum/fzf TUI backend"
+    fi
+}
+
+# 檢查 common.sh 在回落到 whiptail/CLI 時提示可選的 TUI 工具
+test_common_tui_backend_hint() {
+    log_test "檢查 common.sh 的 TUI backend 提示..."
+
+    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    if [ ! -f "$common" ]; then
+        log_fail "找不到 common.sh"
+        return
+    fi
+
+    if search_literal '_log_tui_backend_hint()' "$common" && \
+       search_literal 'TUI_BACKEND=fzf' "$common" && \
+       search_literal 'TUI_BACKEND=gum' "$common"; then
+        log_pass "common.sh 已提供 TUI backend 提示"
+    else
+        log_fail "common.sh 缺少 TUI backend 提示"
+    fi
+}
+
+# 檢查 install.sh --help 有列出 TUI_BACKEND 用法
+test_install_help_tui_backend_docs() {
+    log_test "檢查 install.sh help 的 TUI_BACKEND 說明..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    if [ ! -f "$installer" ]; then
+        log_fail "找不到 install.sh"
+        return
+    fi
+
+    if search_literal 'TUI_BACKEND=auto|gum|fzf|whiptail' "$installer" && \
+       search_literal 'TUI_BACKEND=fzf ./install.sh' "$installer" && \
+       search_literal 'TUI_BACKEND=gum ./install.sh' "$installer"; then
+        log_pass "install.sh help 已說明 TUI_BACKEND"
+    else
+        log_fail "install.sh help 缺少 TUI_BACKEND 說明"
+    fi
+}
+
+# 檢查 README 有記錄 TUI backend 與安裝提示
+test_readme_tui_backend_docs() {
+    log_test "檢查 README 的 TUI_BACKEND 說明..."
+
+    local readme="$SCRIPT_DIR/README.md"
+    if [ ! -f "$readme" ]; then
+        log_fail "找不到 README.md"
+        return
+    fi
+
+    if search_literal 'TUI_BACKEND=fzf ./install.sh' "$readme" && \
+       search_literal 'TUI_BACKEND=gum ./install.sh' "$readme" && \
+       search_literal 'sudo apt install -y fzf' "$readme" && \
+       search_literal 'brew install gum' "$readme"; then
+        log_pass "README 已說明 TUI_BACKEND 與可選工具安裝"
+    else
+        log_fail "README 缺少 TUI_BACKEND 說明"
+    fi
+}
+
 # 檢查 python_setup.sh 在 uv venv 下不依賴固定 pip 路徑
 test_python_setup_uv_venv_bootstrap() {
     log_test "檢查 python_setup.sh 的 uv venv 啟動流程..."
@@ -687,6 +785,16 @@ run_all_tests() {
     test_preview_config_strict_defaults
     echo
     test_module_manager_strict_safe_access
+    echo
+    test_module_manager_package_status_cache
+    echo
+    test_common_tui_backends
+    echo
+    test_common_tui_backend_hint
+    echo
+    test_install_help_tui_backend_docs
+    echo
+    test_readme_tui_backend_docs
     echo
     test_python_setup_uv_venv_bootstrap
     echo

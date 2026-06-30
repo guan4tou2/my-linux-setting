@@ -140,6 +140,31 @@ docker-compose -f docker-compose.test.yml up ubuntu-test    # 多系統測試
 TUI_MODE=normal ./install.sh --verbose
 ```
 
+### 互動選單後端
+
+透過 `TUI_BACKEND` 指定互動選單工具：
+
+- `auto`（預設）：優先使用 `gum`，其次 `fzf`，最後 `whiptail`
+- `gum`：較現代的 shell TUI，適合選單、確認、輸入
+- `fzf`：適合大量項目搜尋與多選
+- `whiptail`：傳統 fallback，系統相容性較高
+
+```bash
+TUI_BACKEND=fzf ./install.sh
+TUI_BACKEND=gum ./install.sh
+TUI_BACKEND=whiptail ./install.sh
+```
+
+可選工具安裝：
+
+```bash
+# Kali / Debian / Ubuntu
+sudo apt install -y fzf
+
+# 若已有 Homebrew / Linuxbrew
+brew install gum
+```
+
 ---
 
 ## 📁 重要檔案位置
