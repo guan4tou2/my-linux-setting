@@ -2001,9 +2001,10 @@ tui_checklist() {
             fi=$((fi + 2))
         done
         local fzf_result
-        local fzf_header="${prompt}"$'\n'"Enter 選擇目前項目；Tab 多選；Esc 取消"
+        local fzf_header="${prompt}"$'\n'"Space 勾選/取消；Tab 多選；Enter 確認；Esc 取消"
         fzf_result=$(printf '%s' "$fzf_input" | fzf --multi \
             --delimiter=$'\t' --with-nth=2.. \
+            --bind=space:toggle --marker="✓ " \
             --height=80% --border --prompt="$title> " --header="$fzf_header") || return 1
         _tui_emit_tags_from_tsv <<< "$fzf_result"
         return 0

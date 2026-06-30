@@ -425,9 +425,9 @@ test_install_remote_bootstrap_status_quiet() {
     fi
 }
 
-# 檢查 fzf checklist 允許 Enter 直接選擇目前項目，而不是啟動時預選全部
+# 檢查 fzf checklist 允許 Space 勾選，Enter 確認，而不是啟動時預選全部
 test_common_fzf_checklist_enter_selects_current_item() {
-    log_test "檢查 fzf checklist 的 Enter 選擇行為..."
+    log_test "檢查 fzf checklist 的 Space 勾選與 Enter 確認行為..."
 
     local common="$SCRIPT_DIR/scripts/core/common.sh"
     if [ ! -f "$common" ]; then
@@ -465,11 +465,13 @@ FAKE_FZF
     if [ "$exit_code" -eq 0 ] && \
        [ "$result" = "module_two" ] && \
        [[ "$fzf_args" == *"--multi"* ]] && \
-       [[ "$fzf_args" == *"Enter 選擇目前項目；Tab 多選；Esc 取消"* ]] && \
+       [[ "$fzf_args" == *"--bind=space:toggle"* ]] && \
+       [[ "$fzf_args" == *"--marker=✓ "* ]] && \
+       [[ "$fzf_args" == *"Space 勾選/取消；Tab 多選；Enter 確認；Esc 取消"* ]] && \
        [[ "$fzf_args" != *"start:select-all"* ]]; then
-        log_pass "fzf checklist 可用 Enter 選目前項目"
+        log_pass "fzf checklist 可用 Space 勾選並用 Enter 確認"
     else
-        log_fail "fzf checklist 仍可能預選全部，導致 Enter 無法直覺選擇目前項目"
+        log_fail "fzf checklist 仍缺少 Space 勾選或 Enter 確認行為"
     fi
 }
 
