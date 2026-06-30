@@ -773,6 +773,175 @@ if [[ "$SCRIPT_DIR" == /tmp/* ]]; then
 fi
 REMOTE_INSTALL=${REMOTE_INSTALL:-false}
 
+choose_install_mode_tui() {
+    local selection
+    selection=$(tui_menu "安裝模式" \
+        "選擇這次要使用的安裝方式：" \
+        "標準安裝" "最小安裝" "進階安裝" "退出" || true)
+
+    case "$selection" in
+        "標準安裝")
+            INSTALL_MODE="full"
+            ADVANCED_MODE=false
+            return 0
+            ;;
+        "最小安裝")
+            INSTALL_MODE="minimal"
+            ADVANCED_MODE=false
+            return 0
+            ;;
+        "進階安裝")
+            INSTALL_MODE="full"
+            ADVANCED_MODE=true
+            return 0
+            ;;
+        "退出"|"")
+            return 1
+            ;;
+    esac
+
+    return 1
+}
+
+build_module_checklist_items() {
+    checklist_items=()
+    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
+        local module_id
+        for module_id in "${MODULE_LIST[@]}"; do
+            local name="${MODULE_NAMES[$module_id]:-$module_id}"
+            local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
+            local status_mark=""
+
+            if command -v check_module_status >/dev/null 2>&1; then
+                local status
+                status=$(check_module_status "$module_id" 2>/dev/null)
+                case "$status" in
+                    installed)     status_mark="[✓] " ;;
+                    partial)       status_mark="[◐] " ;;
+                    not_installed) status_mark="[ ] " ;;
+                esac
+            fi
+
+            checklist_items+=("$module_id" "${status_mark}${name} (${desc})")
+        done
+    else
+        checklist_items=(
+            "python"  "Python開發環境(python3,pip,uv,ranger)"
+            "docker"  "Docker相關工具(docker-ce,lazydocker)"
+            "base"    "基礎工具(git,lsd,bat,ripgrep,fzf)"
+            "terminal" "終端設定(zsh,oh-my-zsh,p10k)"
+            "dev"     "開發工具(neovim,lazygit,rust,nodejs)"
+            "monitoring" "系統監控工具(btop,htop,fail2ban)"
+        )
+    fi
+}
+
+parse_module_selection() {
+    local module_selection="$1"
+    selected_modules=""
+    local _seen=" "
+    local item
+
+    for item in $module_selection; do
+        item=$(echo "$item" | tr -d '"')
+        [ -z "$item" ] && continue
+        case "$_seen" in
+            *" $item "*) continue ;;
+        esac
+        _seen+=" $item "
+        selected_modules="$selected_modules $item"
+    done
+
+    selected_modules=$(echo "$selected_modules" | xargs)
+    [ -n "$selected_modules" ]
+}
+
+select_modules_tui() {
+    if [ "$INSTALL_MODE" = "minimal" ]; then
+        selected_modules="$MINIMAL_MODULES"
+        tui_msgbox "模組選擇" "最小安裝將安裝：\n\n$selected_modules" 2>/dev/null || true
+        return 0
+    fi
+
+    local checklist_items=()
+    build_module_checklist_items
+
+    local mode_hint="標準安裝"
+    if [ "${ADVANCED_MODE:-false}" = "true" ]; then
+        mode_hint="進階安裝：安裝前會逐模組細選套件"
+    fi
+
+    local module_selection
+    module_selection=$(tui_checklist "模組選擇" \
+        "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n$mode_hint\n\n請勾選要安裝的模組，完成後確認：" \
+        "${checklist_items[@]}" || true)
+
+    [ -n "$module_selection" ] || return 1
+    parse_module_selection "$module_selection"
+}
+
+confirm_install_summary_tui() {
+    local mode_label="標準安裝"
+    if [ "$INSTALL_MODE" = "minimal" ]; then
+        mode_label="最小安裝"
+    elif [ "${ADVANCED_MODE:-false}" = "true" ]; then
+        mode_label="進階安裝"
+    fi
+
+    local summary
+    summary="模式：$mode_label\n\n模組：\n$selected_modules\n\n預估時間：10-15 分鐘\n預估空間：500MB-1GB\n\n日誌：${LOG_FILE:-未設定}\n\n確認後會開始安裝。"
+    tui_yesno "確認安裝摘要" "$summary" "yes"
+}
+
+show_install_result_tui() {
+    local install_rc="$1"
+    local title="安裝完成"
+    local message="安裝流程已完成。\n\n日誌：${LOG_FILE:-未設定}"
+
+    if [ "$install_rc" -ne 0 ]; then
+        title="安裝結束但有錯誤"
+        message="安裝流程已結束，但部分步驟失敗。\n\n請查看日誌確認失敗原因。\n\n日誌：${LOG_FILE:-未設定}"
+    fi
+
+    local action
+    while :; do
+        action=$(tui_menu "$title" "$message" "查看安裝日誌" "重新選擇" "退出" || true)
+        case "$action" in
+            "查看安裝日誌")
+                show_install_log_dialog
+                ;;
+            "重新選擇")
+                return 2
+                ;;
+            "退出"|"")
+                return 0
+                ;;
+        esac
+    done
+}
+
+run_guided_tui_flow() {
+    while :; do
+        selected_modules=""
+
+        choose_install_mode_tui || return 0
+        select_modules_tui || return 0
+        confirm_install_summary_tui || return 0
+
+        local install_rc=0
+        if run_install_with_tui; then
+            install_rc=0
+        else
+            install_rc=$?
+        fi
+
+        show_install_result_tui "$install_rc"
+        local result_action=$?
+        [ "$result_action" -eq 2 ] && continue
+        return "$install_rc"
+    done
+}
+
 # 主要安裝函數
 main() {
     # 檢查更新模式
@@ -830,194 +999,67 @@ main() {
         return 0
     fi
     
-    # 進入主循環
-    while true; do
-        # 如果啟用 TUI，使用 checklist 進行模組選擇
-        if [ "$USE_TUI" = "true" ] && command -v tui_checklist >/dev/null 2>&1; then
-            # 動態生成 TUI checklist 項目（包含安裝狀態）
-            local checklist_items=()
-            if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-                for module_id in "${MODULE_LIST[@]}"; do
-                    local name="${MODULE_NAMES[$module_id]:-$module_id}"
-                    local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
-                    local status_mark=""
+    if [ "$USE_TUI" = "true" ] && command -v tui_checklist >/dev/null 2>&1; then
+        run_guided_tui_flow
+        cleanup
+        return $?
+    fi
 
-                    # 獲取安裝狀態標記
-                    if command -v check_module_status >/dev/null 2>&1; then
-                        local status
-                        status=$(check_module_status "$module_id" 2>/dev/null)
-                        case "$status" in
-                            installed)     status_mark="[✓] " ;;
-                            partial)       status_mark="[◐] " ;;
-                            not_installed) status_mark="[ ] " ;;
-                        esac
-                    fi
-
-                    # tag 僅用 module_id（無空白）；描述放第二欄，避免 whiptail 回傳被 shell 拆壞
-                    checklist_items+=("$module_id" "${status_mark}${name} (${desc})")
+    # 命令行模式：使用原有的菜單邏輯
+    while :; do
+        show_menu
+        read -r input
+        case $input in
+            [0-9]*)
+                for num in $input; do
+                    add_module "$num"
                 done
-            else
-                # 備用靜態選項（tag + 顯示文字成對）
-                checklist_items=(
-                    "python"  "Python開發環境(python3,pip,uv,ranger)"
-                    "docker"  "Docker相關工具(docker-ce,lazydocker)"
-                    "base"    "基礎工具(git,lsd,bat,ripgrep,fzf)"
-                    "terminal" "終端設定(zsh,oh-my-zsh,p10k)"
-                    "dev"     "開發工具(neovim,lazygit,rust,nodejs)"
-                    "monitoring" "系統監控工具(btop,htop,fail2ban)"
-                )
-            fi
-
-            # 主選單：增加「進階模式」可在此 toggle，並在標題列顯示目前狀態
-            local advanced_label
-            if [ "${ADVANCED_MODE:-false}" = "true" ]; then
-                advanced_label="進階模式: ON  (逐套件選擇 - 點此關閉)"
-            else
-                advanced_label="進階模式: OFF (預設一鍵全裝 - 點此開啟以逐套件挑選)"
-            fi
-
-            local action_selection
-            # whiptail 取消 / ESC 會 return 1；在 set -e 下會讓 $(...) 中止整支腳本，需吞掉非零狀態
-            action_selection=$(tui_menu "Linux 環境設定安裝程序" \
-                "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n請選擇操作：" \
-                "選擇模組安裝" "$advanced_label" "查看模組詳情" "查看安裝日誌" "退出" || true)
-            if [ -z "$action_selection" ]; then
-                continue
-            fi
-
-            case "$action_selection" in
-                "查看模組詳情")
-                    show_detail_selection_menu
-                    continue
-                    ;;
-                "查看安裝日誌")
-                    show_install_log_dialog
-                    continue
-                    ;;
-                "退出")
-                    cleanup
-                    printf "${CYAN}退出安裝程序${NC}\n"
-                    exit 0
-                    ;;
-                "進階模式"*)
-                    # 切換進階模式並回到主選單
-                    if [ "${ADVANCED_MODE:-false}" = "true" ]; then
-                        ADVANCED_MODE=false
-                        tui_msgbox "進階模式" "已關閉進階模式。\n安裝時會直接安裝模組內所有套件。" 2>/dev/null \
-                            || printf "${CYAN}進階模式已關閉${NC}\n"
-                    else
-                        ADVANCED_MODE=true
-                        tui_msgbox "進階模式" "已開啟進階模式。\n按下「選擇模組安裝」並確認後，每個模組會跳出一個套件 checklist，可逐一勾選 / 取消。" 2>/dev/null \
-                            || printf "${YELLOW}進階模式已開啟${NC}\n"
-                    fi
-                    continue
-                    ;;
-                "選擇模組安裝"|*)
-                    # 繼續進行模組選擇
-                    ;;
-            esac
-
-            # 使用 TUI checklist 選擇模組（取消時 tui_checklist 為非零，set -e 下須加 || true）
-            local module_selection
-            module_selection=$(tui_checklist "Linux 環境設定安裝程序" \
-                "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n請選擇要安裝的模組，依目前選單提示選取後確認：" \
-                "${checklist_items[@]}" || true)
-
-            # 如果用戶取消，詢問是否退出
-            if [ -z "$module_selection" ]; then
-                if tui_yesno "確認退出" "確定要退出安裝程序嗎？" "no"; then
-                    cleanup
-                    printf "${CYAN}退出安裝程序${NC}\n"
-                    exit 0
-                else
-                    continue
-                fi
-            fi
-
-            # 解析選擇的模組（whiptail 回傳為選中 tag，空白分隔；tag 為純 module_id）
-            selected_modules=""
-            local _seen=" "
-            for item in $module_selection; do
-                item=$(echo "$item" | tr -d '"')
-                [ -z "$item" ] && continue
-                case "$_seen" in
-                    *" $item "*) continue ;;
-                esac
-                _seen+=" $item "
-                selected_modules="$selected_modules $item"
-            done
-
-            # 顯示選擇的模組
-            printf "\n${GREEN}已選擇的模組：$selected_modules${NC}\n\n"
-
-            # 確認安裝（順便顯示進階模式狀態）
-            local _adv_hint=""
-            if [ "${ADVANCED_MODE:-false}" = "true" ]; then
-                _adv_hint="\n\n[進階模式: ON] 將逐模組跳出套件 checklist 讓你細選"
-            fi
-            if tui_yesno "確認安裝" "確定要安裝以下模組嗎？\n\n$selected_modules\n\n預估時間：10-15分鐘\n預估空間：500MB-1GB${_adv_hint}" "yes"; then
-                run_install_with_tui
-            else
+                ;;
+            i|I)
+                install_selected_modules
+                ;;
+            c|C)
                 selected_modules=""
-                printf "${CYAN}已取消安裝${NC}\n"
-                continue
-            fi
-        else
-            # 命令行模式：使用原有的菜單邏輯
-            show_menu
-            read -r input
-            case $input in
-                [0-9]*)
-                    for num in $input; do
-                        add_module "$num"
-                    done
-                    ;;
-                i|I)
-                    install_selected_modules
-                    ;;
-                c|C)
-                    selected_modules=""
-                    printf "${CYAN}已清除所有選擇${NC}\n"
-                    ;;
-                d|D)
-                    # 查看詳情：提供選擇單個模組或全部查看
-                    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-                        printf "\n${CYAN}查看模組詳情${NC}\n"
-                        printf "輸入模組編號查看單一模組，或按 Enter 查看全部: "
-                        read -r detail_num
-                        if [ -n "$detail_num" ] && [ "$detail_num" -ge 1 ] 2>/dev/null && [ "$detail_num" -le ${#MODULE_LIST[@]} ] 2>/dev/null; then
-                            local module_id="${MODULE_LIST[$((detail_num - 1))]}"
-                            show_module_detail_dialog "$module_id"
-                        else
-                            show_module_details
-                        fi
+                printf "${CYAN}已清除所有選擇${NC}\n"
+                ;;
+            d|D)
+                # 查看詳情：提供選擇單個模組或全部查看
+                if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
+                    printf "\n${CYAN}查看模組詳情${NC}\n"
+                    printf "輸入模組編號查看單一模組，或按 Enter 查看全部: "
+                    read -r detail_num
+                    if [ -n "$detail_num" ] && [ "$detail_num" -ge 1 ] 2>/dev/null && [ "$detail_num" -le ${#MODULE_LIST[@]} ] 2>/dev/null; then
+                        local module_id="${MODULE_LIST[$((detail_num - 1))]}"
+                        show_module_detail_dialog "$module_id"
                     else
                         show_module_details
                     fi
-                    ;;
-                a|A)
-                    # 切換進階模式
-                    if [ "${ADVANCED_MODE:-false}" = "true" ]; then
-                        ADVANCED_MODE=false
-                        printf "${CYAN}進階模式已關閉${NC}\n"
-                    else
-                        ADVANCED_MODE=true
-                        printf "${YELLOW}進階模式已開啟${NC}（按 [i] 開始安裝時，會逐模組讓你挑套件）\n"
-                    fi
-                    ;;
-                q|Q|0)
-                    cleanup
-                    printf "${CYAN}退出安裝程序${NC}\n"
-                    exit 0
-                    ;;
-                "")
-                    # 空輸入，繼續顯示選單
-                    ;;
-                *)
-                    printf "${RED}無效的輸入，請重試${NC}\n"
-                    ;;
-            esac
-        fi
+                else
+                    show_module_details
+                fi
+                ;;
+            a|A)
+                # 切換進階模式
+                if [ "${ADVANCED_MODE:-false}" = "true" ]; then
+                    ADVANCED_MODE=false
+                    printf "${CYAN}進階模式已關閉${NC}\n"
+                else
+                    ADVANCED_MODE=true
+                    printf "${YELLOW}進階模式已開啟${NC}（按 [i] 開始安裝時，會逐模組讓你挑套件）\n"
+                fi
+                ;;
+            q|Q|0)
+                cleanup
+                printf "${CYAN}退出安裝程序${NC}\n"
+                exit 0
+                ;;
+            "")
+                # 空輸入，繼續顯示選單
+                ;;
+            *)
+                printf "${RED}無效的輸入，請重試${NC}\n"
+                ;;
+        esac
     done
 }
 

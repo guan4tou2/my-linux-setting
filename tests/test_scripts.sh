@@ -486,7 +486,7 @@ test_install_module_prompt_backend_neutral() {
     fi
 
     if ! search_literal '請使用空格鍵選擇要安裝的模組' "$installer" && \
-       search_literal '請選擇要安裝的模組，依目前選單提示選取後確認：' "$installer"; then
+       search_literal '請勾選要安裝的模組，完成後確認：' "$installer"; then
         log_pass "install.sh 模組選擇提示未綁定單一 TUI backend"
     else
         log_fail "install.sh 模組選擇提示仍綁定 whiptail 空格鍵操作"
@@ -512,6 +512,35 @@ test_install_tui_log_flow() {
         log_pass "install.sh 已將安裝狀態與日誌入口包進 TUI"
     else
         log_fail "install.sh 缺少 TUI 安裝狀態或日誌入口"
+    fi
+}
+
+# 檢查 TUI 主流程改為導覽式：模式 → 模組 → 摘要 → 安裝 → 結果
+test_install_guided_tui_flow() {
+    log_test "檢查 install.sh 使用導覽式 TUI 安裝流程..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    if [ ! -f "$installer" ]; then
+        log_fail "找不到 install.sh"
+        return
+    fi
+
+    if search_literal 'run_guided_tui_flow()' "$installer" && \
+       search_literal 'choose_install_mode_tui()' "$installer" && \
+       search_literal 'select_modules_tui()' "$installer" && \
+       search_literal 'confirm_install_summary_tui()' "$installer" && \
+       search_literal 'show_install_result_tui()' "$installer" && \
+       search_literal 'run_guided_tui_flow' "$installer" && \
+       search_literal 'choose_install_mode_tui || return 0' "$installer" && \
+       search_literal 'select_modules_tui || return 0' "$installer" && \
+       search_literal 'confirm_install_summary_tui || return 0' "$installer" && \
+       search_literal 'run_install_with_tui' "$installer" && \
+       search_literal 'show_install_result_tui "$install_rc"' "$installer" && \
+       ! search_literal 'while true; do' "$installer" && \
+       ! search_literal '"選擇模組安裝" "$advanced_label" "查看模組詳情" "查看安裝日誌" "退出"' "$installer"; then
+        log_pass "install.sh 已使用導覽式 TUI 安裝流程"
+    else
+        log_fail "install.sh 仍是主選單優先，尚未改為導覽式流程"
     fi
 }
 
@@ -1035,6 +1064,8 @@ run_all_tests() {
     test_install_module_prompt_backend_neutral
     echo
     test_install_tui_log_flow
+    echo
+    test_install_guided_tui_flow
     echo
     test_install_tui_wraps_pre_menu_logs
     echo
