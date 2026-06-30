@@ -1976,9 +1976,10 @@ tui_checklist() {
             fi=$((fi + 2))
         done
         local fzf_result
-        fzf_result=$(printf '%s' "$fzf_input" | fzf --multi --bind start:select-all \
+        local fzf_header="${prompt}"$'\n'"Enter 選擇目前項目；Tab 多選；Esc 取消"
+        fzf_result=$(printf '%s' "$fzf_input" | fzf --multi \
             --delimiter=$'\t' --with-nth=2.. \
-            --height=80% --border --prompt="$title> " --header="$prompt") || return 1
+            --height=80% --border --prompt="$title> " --header="$fzf_header") || return 1
         _tui_emit_tags_from_tsv <<< "$fzf_result"
         return 0
     fi
@@ -2206,6 +2207,53 @@ tui_msgbox() {
     whiptail --title "$title" --msgbox "$message" $height $width 3>&1 1>&2 2>&3
 }
 
+# TUI 日誌檢視器（顯示最後 N 行，預設 300 行）
+tui_log_viewer() {
+    local title="$1"
+    local log_file="$2"
+    local tail_lines="${3:-300}"
+
+    if [ "$USE_TUI" != "true" ]; then
+        return 1
+    fi
+
+    if [ -z "$log_file" ] || [ ! -f "$log_file" ]; then
+        tui_msgbox "$title" "找不到日誌文件：${log_file:-未設定}" 2>/dev/null || true
+        return 1
+    fi
+
+    local view_file="$log_file"
+    local tmp_file=""
+    if [ "$tail_lines" != "all" ] && [ "$tail_lines" -gt 0 ] 2>/dev/null; then
+        tmp_file="$(mktemp "${TMPDIR:-/tmp}/linux-setting-log.XXXXXX")" || return 1
+        if tail -n "$tail_lines" "$log_file" > "$tmp_file" 2>/dev/null; then
+            view_file="$tmp_file"
+        else
+            rm -f "$tmp_file"
+            tmp_file=""
+        fi
+    fi
+
+    local rc=0
+    if [ "${TUI_BACKEND:-whiptail}" = "gum" ]; then
+        gum pager < "$view_file" || rc=$?
+    elif [ "${TUI_BACKEND:-whiptail}" = "fzf" ]; then
+        if [ -t 0 ]; then
+            fzf --height=80% --border --no-sort \
+                --prompt="$title> " \
+                --header="輸入可搜尋；Enter 選取一行；Esc 返回" \
+                < "$view_file" >/dev/null || rc=$?
+        else
+            cat "$view_file"
+        fi
+    else
+        whiptail --title "$title" --textbox "$view_file" 25 100 3>&1 1>&2 2>&3 || rc=$?
+    fi
+
+    [ -n "$tmp_file" ] && rm -f "$tmp_file"
+    return $rc
+}
+
 # TUI 進度條（需要配合管道使用）
 tui_gauge() {
     local title="$1"
@@ -2408,7 +2456,7 @@ func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_ca
 func_list="$func_list safe_download download_files_parallel get_best_mirror"
 func_list="$func_list optimize_apt_performance cleanup_apt_system select_fastest_apt_mirror"
 func_list="$func_list version_greater_equal check_architecture_compatibility install_arch_specific_package"
-func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_gauge tui_inputbox"
+func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_log_viewer tui_gauge tui_inputbox"
 func_list="$func_list cleanup_temp_files get_elapsed_time check_sudo_access init_common_env detect_and_inject_tool_paths"
 func_list="$func_list is_non_interactive safe_read ensure_npm_user_prefix"
 

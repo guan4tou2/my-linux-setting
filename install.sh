@@ -49,6 +49,7 @@ Linux Setting Scripts - 自動安裝腳本 v2.2.8
 環境變數:
   TUI_BACKEND=auto|gum|fzf|whiptail  指定互動選單後端（預設 auto）
   TUI_MODE=quiet|normal              控制安裝輸出詳細程度
+  TUI_LOG_LINES=300                  TUI 查看安裝日誌時顯示的尾端行數
 
 範例:
   ./install.sh                    # 標準安裝（互動式選單）
@@ -59,6 +60,7 @@ Linux Setting Scripts - 自動安裝腳本 v2.2.8
   ./install.sh --verbose          # 詳細模式
   TUI_BACKEND=fzf ./install.sh     # 使用 fzf 互動選單
   TUI_BACKEND=gum ./install.sh     # 使用 gum 互動選單
+  TUI_LOG_LINES=500 ./install.sh   # TUI 中顯示最近 500 行日誌
 
 更多資訊請參閱 README.md
 EOF
@@ -270,6 +272,27 @@ else
     log_info "模組管理器不可用，使用內建配置"
 fi
 
+show_install_log_dialog() {
+    local tail_lines="${1:-${TUI_LOG_LINES:-300}}"
+
+    if [ -z "${LOG_FILE:-}" ] || [ ! -f "${LOG_FILE:-}" ]; then
+        if [ "${USE_TUI:-false}" = "true" ] && command -v tui_msgbox >/dev/null 2>&1; then
+            tui_msgbox "安裝日誌" "目前尚未建立日誌文件。" 2>/dev/null || true
+        else
+            printf "${YELLOW}目前尚未建立日誌文件${NC}\n"
+        fi
+        return 0
+    fi
+
+    if [ "${USE_TUI:-false}" = "true" ] && command -v tui_log_viewer >/dev/null 2>&1; then
+        tui_log_viewer "安裝日誌" "$LOG_FILE" "$tail_lines" 2>/dev/null || true
+    else
+        printf "\n${CYAN}########## 最新安裝日誌 ##########${NC}\n"
+        tail -n "$tail_lines" "$LOG_FILE" 2>/dev/null || true
+        printf "${CYAN}########## 日誌結束 ##########${NC}\n"
+    fi
+}
+
 # 錯誤處理函數
 handle_error() {
     local exit_code=$1
@@ -304,22 +327,24 @@ handle_error() {
 
     # 詢問是否查看日誌
     if [ -t 0 ]; then
-        printf "\n"
-        printf "${CYAN}[l]${NC} 查看日誌  ${CYAN}[r]${NC} 重試  ${CYAN}[q]${NC} 退出: "
-        read -r -n 1 choice
-        printf "\n"
-        case $choice in
-            l|L)
-                if [ -f "${LOG_FILE:-}" ]; then
-                    tail -100 "$LOG_FILE" | less
-                else
-                    printf "${YELLOW}找不到日誌文件${NC}\n"
-                fi
-                ;;
-            r|R)
-                printf "${CYAN}請重新執行安裝腳本${NC}\n"
-                ;;
-        esac
+        if [ "${USE_TUI:-false}" = "true" ] && command -v tui_yesno >/dev/null 2>&1; then
+            if tui_yesno "安裝失敗" "安裝流程已中止。\n\n是否在 TUI 中查看最新安裝日誌？" "yes"; then
+                show_install_log_dialog 300
+            fi
+        else
+            printf "\n"
+            printf "${CYAN}[l]${NC} 查看日誌  ${CYAN}[r]${NC} 重試  ${CYAN}[q]${NC} 退出: "
+            read -r -n 1 choice
+            printf "\n"
+            case $choice in
+                l|L)
+                    show_install_log_dialog 300
+                    ;;
+                r|R)
+                    printf "${CYAN}請重新執行安裝腳本${NC}\n"
+                    ;;
+            esac
+        fi
     fi
 
     printf "\n${BLUE}需要幫助？${NC}\n"
@@ -759,7 +784,7 @@ main() {
             # whiptail 取消 / ESC 會 return 1；在 set -e 下會讓 $(...) 中止整支腳本，需吞掉非零狀態
             action_selection=$(tui_menu "Linux 環境設定安裝程序" \
                 "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n請選擇操作：" \
-                "選擇模組安裝" "$advanced_label" "查看模組詳情" "退出" || true)
+                "選擇模組安裝" "$advanced_label" "查看模組詳情" "查看安裝日誌" "退出" || true)
             if [ -z "$action_selection" ]; then
                 continue
             fi
@@ -767,6 +792,10 @@ main() {
             case "$action_selection" in
                 "查看模組詳情")
                     show_detail_selection_menu
+                    continue
+                    ;;
+                "查看安裝日誌")
+                    show_install_log_dialog
                     continue
                     ;;
                 "退出")
@@ -795,7 +824,7 @@ main() {
             # 使用 TUI checklist 選擇模組（取消時 tui_checklist 為非零，set -e 下須加 || true）
             local module_selection
             module_selection=$(tui_checklist "Linux 環境設定安裝程序" \
-                "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n請使用空格鍵選擇要安裝的模組，方向鍵移動，Enter 確認：" \
+                "[✓]=已安裝 [◐]=部分安裝 [ ]=未安裝\n\n請選擇要安裝的模組，依目前選單提示選取後確認：" \
                 "${checklist_items[@]}" || true)
 
             # 如果用戶取消，詢問是否退出
@@ -831,7 +860,7 @@ main() {
                 _adv_hint="\n\n[進階模式: ON] 將逐模組跳出套件 checklist 讓你細選"
             fi
             if tui_yesno "確認安裝" "確定要安裝以下模組嗎？\n\n$selected_modules\n\n預估時間：10-15分鐘\n預估空間：500MB-1GB${_adv_hint}" "yes"; then
-                install_selected_modules
+                run_install_with_tui
             else
                 selected_modules=""
                 printf "${CYAN}已取消安裝${NC}\n"
@@ -1429,6 +1458,30 @@ show_installation_report() {
             printf "${GREEN}請重新開啟終端機以套用所有更改${NC}\n"
         fi
     fi
+}
+
+run_install_with_tui() {
+    if [ "${USE_TUI:-false}" = "true" ] && command -v tui_msgbox >/dev/null 2>&1; then
+        tui_msgbox "開始安裝" "即將安裝以下模組：\n\n$selected_modules\n\n完整輸出會同步保存到：\n${LOG_FILE:-未設定}\n\n安裝完成或失敗後，可在 TUI 中查看日誌。" 2>/dev/null || true
+    fi
+
+    local install_rc=0
+    if install_selected_modules; then
+        install_rc=0
+    else
+        install_rc=$?
+    fi
+
+    if [ "${USE_TUI:-false}" = "true" ] \
+       && [ -n "${LOG_FILE:-}" ] \
+       && [ -f "${LOG_FILE:-}" ] \
+       && command -v tui_yesno >/dev/null 2>&1; then
+        if tui_yesno "查看安裝日誌" "安裝流程已結束。\n\n是否在 TUI 中查看最新安裝日誌？" "no"; then
+            show_install_log_dialog
+        fi
+    fi
+
+    return "$install_rc"
 }
 
 # 安裝選中的模組

@@ -316,9 +316,118 @@ test_common_tui_backend_hint() {
     fi
 }
 
-# 檢查 install.sh --help 有列出 TUI_BACKEND 用法
+# 檢查 common.sh 提供 TUI 日誌檢視器，讓安裝日誌留在 TUI 流程中查看
+test_common_tui_log_viewer() {
+    log_test "檢查 common.sh 的 TUI log viewer..."
+
+    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    if [ ! -f "$common" ]; then
+        log_fail "找不到 common.sh"
+        return
+    fi
+
+    if search_literal 'tui_log_viewer()' "$common" && \
+       search_literal 'gum pager < "$view_file"' "$common" && \
+       search_literal 'fzf --height=80% --border --no-sort' "$common" && \
+       search_literal 'whiptail --title "$title" --textbox "$view_file"' "$common" && \
+       search_literal 'func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_log_viewer tui_gauge tui_inputbox"' "$common"; then
+        log_pass "common.sh 已提供跨 backend 的 TUI log viewer"
+    else
+        log_fail "common.sh 缺少跨 backend 的 TUI log viewer"
+    fi
+}
+
+# 檢查 fzf checklist 允許 Enter 直接選擇目前項目，而不是啟動時預選全部
+test_common_fzf_checklist_enter_selects_current_item() {
+    log_test "檢查 fzf checklist 的 Enter 選擇行為..."
+
+    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    if [ ! -f "$common" ]; then
+        log_fail "找不到 common.sh"
+        return
+    fi
+
+    local tmp_dir
+    tmp_dir="$(mktemp -d)"
+    local fake_fzf="$tmp_dir/fzf"
+    local args_file="$tmp_dir/fzf_args"
+
+    cat > "$fake_fzf" <<'FAKE_FZF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" > "${FAKE_FZF_ARGS_FILE:?}"
+cat >/dev/null
+printf 'module_two\tModule Two\n'
+FAKE_FZF
+    chmod +x "$fake_fzf"
+
+    local result
+    result=$(
+        PATH="$tmp_dir:$PATH" \
+        FAKE_FZF_ARGS_FILE="$args_file" \
+        USE_TUI=true \
+        TUI_BACKEND=fzf \
+        bash -c 'source "$1"; tui_checklist "Title" "Prompt" "module_one" "Module One" "module_two" "Module Two"' _ "$common"
+    )
+    local exit_code=$?
+    local fzf_args
+    fzf_args="$(cat "$args_file" 2>/dev/null || true)"
+
+    rm -rf "$tmp_dir"
+
+    if [ "$exit_code" -eq 0 ] && \
+       [ "$result" = "module_two" ] && \
+       [[ "$fzf_args" == *"--multi"* ]] && \
+       [[ "$fzf_args" == *"Enter 選擇目前項目；Tab 多選；Esc 取消"* ]] && \
+       [[ "$fzf_args" != *"start:select-all"* ]]; then
+        log_pass "fzf checklist 可用 Enter 選目前項目"
+    else
+        log_fail "fzf checklist 仍可能預選全部，導致 Enter 無法直覺選擇目前項目"
+    fi
+}
+
+# 檢查 install.sh 的模組選擇提示不要綁死 whiptail 的空格鍵操作
+test_install_module_prompt_backend_neutral() {
+    log_test "檢查 install.sh 模組選擇提示為 backend-neutral..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    if [ ! -f "$installer" ]; then
+        log_fail "找不到 install.sh"
+        return
+    fi
+
+    if ! search_literal '請使用空格鍵選擇要安裝的模組' "$installer" && \
+       search_literal '請選擇要安裝的模組，依目前選單提示選取後確認：' "$installer"; then
+        log_pass "install.sh 模組選擇提示未綁定單一 TUI backend"
+    else
+        log_fail "install.sh 模組選擇提示仍綁定 whiptail 空格鍵操作"
+    fi
+}
+
+# 檢查 TUI 安裝流程有包裝安裝狀態與日誌入口
+test_install_tui_log_flow() {
+    log_test "檢查 install.sh 的 TUI 安裝與日誌流程..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    if [ ! -f "$installer" ]; then
+        log_fail "找不到 install.sh"
+        return
+    fi
+
+    if search_literal 'show_install_log_dialog()' "$installer" && \
+       search_literal 'run_install_with_tui()' "$installer" && \
+       search_literal '"查看安裝日誌"' "$installer" && \
+       search_literal 'show_install_log_dialog' "$installer" && \
+       search_literal 'run_install_with_tui' "$installer" && \
+       search_literal 'tui_log_viewer "安裝日誌" "$LOG_FILE"' "$installer"; then
+        log_pass "install.sh 已將安裝狀態與日誌入口包進 TUI"
+    else
+        log_fail "install.sh 缺少 TUI 安裝狀態或日誌入口"
+    fi
+}
+
+# 檢查 install.sh --help 有列出 TUI_BACKEND / TUI log 用法
 test_install_help_tui_backend_docs() {
-    log_test "檢查 install.sh help 的 TUI_BACKEND 說明..."
+    log_test "檢查 install.sh help 的 TUI 說明..."
 
     local installer="$SCRIPT_DIR/install.sh"
     if [ ! -f "$installer" ]; then
@@ -327,17 +436,18 @@ test_install_help_tui_backend_docs() {
     fi
 
     if search_literal 'TUI_BACKEND=auto|gum|fzf|whiptail' "$installer" && \
+       search_literal 'TUI_LOG_LINES=300' "$installer" && \
        search_literal 'TUI_BACKEND=fzf ./install.sh' "$installer" && \
        search_literal 'TUI_BACKEND=gum ./install.sh' "$installer"; then
-        log_pass "install.sh help 已說明 TUI_BACKEND"
+        log_pass "install.sh help 已說明 TUI 設定"
     else
-        log_fail "install.sh help 缺少 TUI_BACKEND 說明"
+        log_fail "install.sh help 缺少 TUI 設定說明"
     fi
 }
 
-# 檢查 README 有記錄 TUI backend 與安裝提示
+# 檢查 README 有記錄 TUI backend、日誌與安裝提示
 test_readme_tui_backend_docs() {
-    log_test "檢查 README 的 TUI_BACKEND 說明..."
+    log_test "檢查 README 的 TUI 說明..."
 
     local readme="$SCRIPT_DIR/README.md"
     if [ ! -f "$readme" ]; then
@@ -347,11 +457,13 @@ test_readme_tui_backend_docs() {
 
     if search_literal 'TUI_BACKEND=fzf ./install.sh' "$readme" && \
        search_literal 'TUI_BACKEND=gum ./install.sh' "$readme" && \
+       search_literal 'TUI_LOG_LINES=500 ./install.sh' "$readme" && \
+       search_literal '查看安裝日誌' "$readme" && \
        search_literal 'sudo apt install -y fzf' "$readme" && \
        search_literal 'brew install gum' "$readme"; then
-        log_pass "README 已說明 TUI_BACKEND 與可選工具安裝"
+        log_pass "README 已說明 TUI backend、日誌與可選工具安裝"
     else
-        log_fail "README 缺少 TUI_BACKEND 說明"
+        log_fail "README 缺少 TUI backend 或日誌說明"
     fi
 }
 
@@ -791,6 +903,14 @@ run_all_tests() {
     test_common_tui_backends
     echo
     test_common_tui_backend_hint
+    echo
+    test_common_tui_log_viewer
+    echo
+    test_common_fzf_checklist_enter_selects_current_item
+    echo
+    test_install_module_prompt_backend_neutral
+    echo
+    test_install_tui_log_flow
     echo
     test_install_help_tui_backend_docs
     echo

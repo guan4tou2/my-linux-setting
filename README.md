@@ -135,9 +135,12 @@ docker-compose -f docker-compose.test.yml up ubuntu-test    # 多系統測試
 
 - `quiet`（預設）：只顯示關鍵步驟
 - `normal`：顯示完整安裝輸出
+- TUI 主選單提供「查看安裝日誌」，安裝完成或失敗後也可在 TUI 中查看最近的日誌內容
+- `TUI_LOG_LINES` 可控制 TUI 日誌檢視器顯示的尾端行數（預設 300）
 
 ```bash
 TUI_MODE=normal ./install.sh --verbose
+TUI_LOG_LINES=500 ./install.sh
 ```
 
 ### 互動選單後端
