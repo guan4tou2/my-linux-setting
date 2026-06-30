@@ -201,6 +201,23 @@ log_entry() {
     esac
 }
 
+_log_should_print_status_to_terminal() {
+    case "${TUI_LOG_TO_TERMINAL:-auto}" in
+        true) return 0 ;;
+        false) return 1 ;;
+    esac
+
+    if [ "${NON_INTERACTIVE:-false}" = "true" ]; then
+        return 0
+    fi
+
+    if [ "${TUI_MODE:-quiet}" = "quiet" ] && [ "${USE_TUI:-auto}" != "false" ]; then
+        return 1
+    fi
+
+    return 0
+}
+
 log_error() {
     local message="$1"
     # 總是輸出到終端（錯誤訊息）
@@ -212,24 +229,30 @@ log_error() {
 
 log_info() {
     local message="$1"
-    # 總是輸出到終端
-    printf "${CYAN}INFO: %s${NC}\n" "$message"
+    # TUI quiet 模式下只寫入日誌，避免狀態訊息刷在 TUI 背後
+    if _log_should_print_status_to_terminal; then
+        printf "${CYAN}INFO: %s${NC}\n" "$message"
+    fi
     # 如果啟用日誌，同時寫入日誌文件
     [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "INFO" "$message" || true
 }
 
 log_success() {
     local message="$1"
-    # 總是輸出到終端
-    printf "${GREEN}SUCCESS: %s${NC}\n" "$message"
+    # TUI quiet 模式下只寫入日誌，避免狀態訊息刷在 TUI 背後
+    if _log_should_print_status_to_terminal; then
+        printf "${GREEN}SUCCESS: %s${NC}\n" "$message"
+    fi
     # 如果啟用日誌，同時寫入日誌文件
     [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "SUCCESS" "$message" || true
 }
 
 log_warning() {
     local message="$1"
-    # 總是輸出到終端
-    printf "${YELLOW}WARNING: %s${NC}\n" "$message"
+    # TUI quiet 模式下只寫入日誌，避免狀態訊息刷在 TUI 背後
+    if _log_should_print_status_to_terminal; then
+        printf "${YELLOW}WARNING: %s${NC}\n" "$message"
+    fi
     # 如果啟用日誌，同時寫入日誌文件
     [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "WARNING" "$message" || true
 }
@@ -238,8 +261,10 @@ log_debug() {
     local message="$1"
     # DEBUG 模式未啟用時直接返回
     [ "${DEBUG:-false}" != "true" ] && return 0 || true
-    # 輸出到終端
-    printf "${BLUE}DEBUG: %s${NC}\n" "$message"
+    # TUI quiet 模式下只寫入日誌，避免狀態訊息刷在 TUI 背後
+    if _log_should_print_status_to_terminal; then
+        printf "${BLUE}DEBUG: %s${NC}\n" "$message"
+    fi
     # 如果啟用日誌，同時寫入日誌文件
     [ "${ENABLE_LOGGING:-false}" = "true" ] && log_entry "DEBUG" "$message" || true
 }
@@ -2446,7 +2471,7 @@ init_common_env() {
 # ==============================================================================
 
 # 安全導出所有函數供子 shell 使用
-func_list="log_error log_info log_success log_warning log_debug init_progress show_progress run_as_root"
+func_list="_log_should_print_status_to_terminal log_error log_info log_success log_warning log_debug init_progress show_progress run_as_root"
 func_list="$func_list check_command check_package_installed check_python_version check_disk_space check_network check_internet_speed"
 func_list="$func_list check_pip_package_installed check_cargo_package_installed check_npm_package_installed"
 func_list="$func_list install_with_fallback install_with_homebrew_fallback install_package install_apt_package install_apt_packages_parallel install_packages_batch"

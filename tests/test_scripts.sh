@@ -337,6 +337,49 @@ test_common_tui_log_viewer() {
     fi
 }
 
+# 檢查 TUI quiet 模式下狀態 log 不直接刷到終端，而是收進日誌
+test_common_tui_quiet_status_logs_are_log_only() {
+    log_test "檢查 TUI quiet 模式下狀態 log 只寫入日誌..."
+
+    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    if [ ! -f "$common" ]; then
+        log_fail "找不到 common.sh"
+        return
+    fi
+
+    local tmp_log
+    tmp_log="$(mktemp)"
+    local tui_output
+    tui_output=$(
+        USE_TUI=true \
+        TUI_MODE=quiet \
+        ENABLE_LOGGING=true \
+        LOG_FILE="$tmp_log" \
+        bash -c 'source "$1"; log_info "hidden info"; log_success "hidden success"; log_warning "hidden warning"' _ "$common" 2>&1
+    )
+
+    local cli_output
+    cli_output=$(
+        USE_TUI=false \
+        TUI_MODE=quiet \
+        ENABLE_LOGGING=false \
+        bash -c 'source "$1"; log_info "shown info"; log_success "shown success"' _ "$common" 2>&1
+    )
+
+    if [ -z "$tui_output" ] && \
+       search_literal 'hidden info' "$tmp_log" && \
+       search_literal 'hidden success' "$tmp_log" && \
+       search_literal 'hidden warning' "$tmp_log" && \
+       [[ "$cli_output" == *"INFO: shown info"* ]] && \
+       [[ "$cli_output" == *"SUCCESS: shown success"* ]]; then
+        log_pass "TUI quiet 狀態 log 已收進日誌且 CLI 輸出維持可見"
+    else
+        log_fail "TUI quiet 狀態 log 仍會刷到終端或未寫入日誌"
+    fi
+
+    rm -f "$tmp_log"
+}
+
 # 檢查 fzf checklist 允許 Enter 直接選擇目前項目，而不是啟動時預選全部
 test_common_fzf_checklist_enter_selects_current_item() {
     log_test "檢查 fzf checklist 的 Enter 選擇行為..."
@@ -905,6 +948,8 @@ run_all_tests() {
     test_common_tui_backend_hint
     echo
     test_common_tui_log_viewer
+    echo
+    test_common_tui_quiet_status_logs_are_log_only
     echo
     test_common_fzf_checklist_enter_selects_current_item
     echo
