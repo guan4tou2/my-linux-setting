@@ -2840,6 +2840,38 @@ init_common_env() {
     log_info "共用環境初始化完成（並行任務: $PARALLEL_JOBS）"
 }
 
+# 取得 GitHub 最新發行版，優先使用網頁轉址以避免 API 配額限制。
+github_latest_release_tag() {
+    local repo="$1" url tag payload
+    if url=$(curl -fsSLI --connect-timeout 10 --max-time 30 -o /dev/null \
+        -w '%{url_effective}' "https://github.com/$repo/releases/latest" 2>/dev/null); then
+        tag="${url##*/}"
+        if [[ "$url" == */releases/tag/* ]] && [ -n "$tag" ] && [ "$tag" != latest ]; then
+            printf '%s\n' "$tag"
+            return 0
+        fi
+    fi
+    if payload=$(curl -fsSL --connect-timeout 10 --max-time 30 \
+        "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null); then
+        tag=$(printf '%s\n' "$payload" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p') || return 1
+        if [ -n "$tag" ] && [ "$tag" != latest ]; then
+            printf '%s\n' "$tag"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+linux_release_arch() {
+    local arch
+    arch=$(uname -m) || return 1
+    case "$arch" in
+        x86_64|amd64) printf '%s\n' x86_64 ;;
+        aarch64|arm64) printf '%s\n' aarch64 ;;
+        *) printf '%s\n' "$arch" ;;
+    esac
+}
+
 # ==============================================================================
 # 導出所有函數
 # ==============================================================================
@@ -2851,6 +2883,7 @@ func_list="$func_list check_pip_package_installed check_cargo_package_installed 
 func_list="$func_list install_with_fallback install_with_homebrew_fallback install_package install_apt_package install_apt_packages_parallel install_packages_batch"
 func_list="$func_list install_brew_package install_brew_packages_batch check_brew_package_installed ensure_brew_shell_aliases ensure_homebrew_installed update_system"
 func_list="$func_list ensure_package_index_fresh _pkg_index_needs_update _file_mtime _log_file_writable _pkg_run _root_exec _root_exec_apt _pkg_root_exec"
+func_list="$func_list github_latest_release_tag linux_release_arch"
 func_list="$func_list backup_file safe_append_to_file"
 func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_cache cleanup_cache"
 func_list="$func_list safe_download download_files_parallel get_best_mirror"

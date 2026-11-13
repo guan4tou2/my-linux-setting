@@ -42,7 +42,7 @@ elif [ "$DISTRO_FAMILY" = "debian" ]; then
 fi
 
 # 基礎套件（根據發行版系列調整）
-# 這些是核心工具，lsd 和 tealdeer 會透過 cargo 單獨處理
+# 這些是核心工具，lsd 和 tealdeer 會另外處理
 case "$DISTRO_FAMILY" in
     debian)
         # Debian/Ubuntu/Kali
@@ -128,29 +128,49 @@ else
 fi
 
 # 安裝 lsd（next-gen ls）
-# 使用統一的 Homebrew fallback 模式
 if ! command -v lsd >/dev/null 2>&1; then
-    log_info "Installing lsd (next-gen ls command, source: github.com/lsd-rs/lsd)"
-
+    log_info "安裝 lsd（來源: github.com/lsd-rs/lsd）"
     if ! install_with_homebrew_fallback "lsd"; then
-        log_info "Attempting APT installation..."
         if command -v install_apt_package >/dev/null 2>&1; then
-            if install_apt_package "lsd" 2>/dev/null; then
-                log_success "lsd installed via APT"
-            else
-                log_warning "lsd installation failed"
-                log_info "Install Homebrew for better support: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-            fi
+            install_apt_package "lsd" 2>/dev/null || log_warning "lsd APT 安裝失敗"
         else
-            if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y lsd 2>/dev/null; then
-                log_success "lsd installed via APT"
-            else
-                log_warning "lsd installation failed"
-            fi
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y lsd 2>/dev/null \
+                || log_warning "lsd APT 安裝失敗"
         fi
     fi
+    if ! command -v lsd >/dev/null 2>&1; then
+        lsd_arch=$(linux_release_arch) || lsd_arch=""
+        case "$lsd_arch" in
+            x86_64|aarch64)
+                lsd_tmp_dir=""
+                if lsd_tag=$(github_latest_release_tag lsd-rs/lsd) && \
+                   lsd_tmp_dir="$(mktemp -d)" && \
+                   curl -fsSL --connect-timeout 15 --max-time 120 \
+                       -o "$lsd_tmp_dir/lsd.tar.gz" \
+                       "https://github.com/lsd-rs/lsd/releases/download/$lsd_tag/lsd-$lsd_tag-$lsd_arch-unknown-linux-musl.tar.gz" && \
+                   tar -xzf "$lsd_tmp_dir/lsd.tar.gz" -C "$lsd_tmp_dir" && \
+                   mkdir -p "$HOME/.local/bin" && \
+                   install -m 0755 "$lsd_tmp_dir/lsd-$lsd_tag-$lsd_arch-unknown-linux-musl/lsd" "$HOME/.local/bin/lsd"; then
+                    export PATH="$HOME/.local/bin:$PATH"
+                    log_success "lsd 安裝成功 (GitHub)"
+                else
+                    log_warning "lsd GitHub 備援安裝失敗，將繼續其他安裝方式"
+                fi
+                if [ -n "$lsd_tmp_dir" ]; then
+                    rm -rf "$lsd_tmp_dir" || log_warning "無法清除 lsd 暫存目錄"
+                fi
+                ;;
+            *) log_warning "lsd GitHub 備援不支援架構: $lsd_arch" ;;
+        esac
+    fi
+    if ! command -v lsd >/dev/null 2>&1 && command -v cargo >/dev/null 2>&1; then
+        cargo install lsd || log_warning "lsd cargo 安裝失敗"
+    fi
+    if ! command -v lsd >/dev/null 2>&1; then
+        log_warning "lsd 所有安裝方式皆失敗"
+    fi
 else
-    log_debug "lsd already installed, skipping"
+    log_debug "lsd 已安裝，跳過"
 fi
 
 # 安裝 fd（modern find，Ubuntu/Debian 套件名為 fd-find，二進位為 fdfind）
@@ -179,75 +199,70 @@ if command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1; then
     ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd"
 fi
 
-# 安裝 tealdeer (快速 TLDR 客戶端)
-# 優先使用 Homebrew 安裝（避免 cargo 編譯耗時）
+# 安裝 tealdeer（先使用預編譯套件，最後才用 cargo 編譯）
 if ! command -v tldr >/dev/null 2>&1; then
-    log_info "安裝 tealdeer (快速 TLDR 客戶端，來源: github.com/dbrgn/tealdeer)"
-
-    # 方法 1: 優先使用 Homebrew 安裝（快速且無需編譯）
+    log_info "安裝 tealdeer（快速 TLDR 客戶端，來源: github.com/tealdeer-rs/tealdeer）"
     if command -v brew >/dev/null 2>&1; then
         if command -v install_brew_package >/dev/null 2>&1; then
-            if install_brew_package "tealdeer"; then
-                log_success "tealdeer 安裝成功 (brew)"
-                # 初始化 tldr 緩存
-                if command -v tldr >/dev/null 2>&1; then
-                    tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
-                fi
-            else
-                log_warning "Homebrew 安裝失敗，嘗試使用 cargo..."
-                BREW_FAILED=1
-            fi
+            install_brew_package "tealdeer" || log_warning "tealdeer Homebrew 安裝失敗"
         else
-            if brew install tealdeer >/dev/null 2>&1; then
-                log_success "tealdeer 安裝成功 (brew)"
-                # 初始化 tldr 緩存
-                if command -v tldr >/dev/null 2>&1; then
-                    tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
-                fi
-            else
-                log_warning "Homebrew 安裝失敗，嘗試使用 cargo..."
-                BREW_FAILED=1
-            fi
-        fi
-    else
-        log_info "Homebrew 未安裝，嘗試使用 cargo..."
-        BREW_FAILED=1
-    fi
-
-    # 方法 2: 如果 Homebrew 失敗或不可用，嘗試使用 cargo
-    if [ "${BREW_FAILED:-0}" = "1" ]; then
-        if command -v cargo >/dev/null 2>&1; then
-            log_info "偵測到 cargo，開始安裝 tealdeer..."
-            if cargo install tealdeer 2>&1; then
-                log_success "tealdeer 安裝成功 (cargo)"
-                # 初始化 tldr 緩存
-                if command -v tldr >/dev/null 2>&1; then
-                    tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
-                fi
-            else
-                log_warning "tealdeer 安裝失敗 (cargo)"
-            fi
-        else
-            log_info "找不到 cargo，稍後嘗試 APT 備援"
+            brew install tealdeer >/dev/null 2>&1 || log_warning "tealdeer Homebrew 安裝失敗"
         fi
     fi
-
-    # 方法 3: 最後備援 — APT（Ubuntu/Debian 上 tealdeer 套件提供 tldr 指令）
     if ! command -v tldr >/dev/null 2>&1; then
-        log_info "嘗試使用 APT 安裝 tealdeer..."
         if command -v install_apt_package >/dev/null 2>&1; then
-            install_apt_package "tealdeer" 2>/dev/null \
-                && log_success "tealdeer 安裝成功 (apt)"
+            install_apt_package "tealdeer" 2>/dev/null || log_warning "tealdeer APT 安裝失敗"
         elif command -v apt-get >/dev/null 2>&1; then
             sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tealdeer 2>/dev/null \
-                && log_success "tealdeer 安裝成功 (apt)"
+                || log_warning "tealdeer APT 安裝失敗"
         fi
-        if command -v tldr >/dev/null 2>&1; then
-            tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
-        else
-            log_warning "tealdeer 所有安裝方式皆失敗 (brew/cargo/apt)"
-            log_info "可手動安裝 Homebrew 或 Rust toolchain 以重新嘗試"
-        fi
+    fi
+    if ! command -v tldr >/dev/null 2>&1; then
+        tealdeer_arch=$(linux_release_arch) || tealdeer_arch=""
+        case "$tealdeer_arch" in
+            x86_64|aarch64)
+                tealdeer_tmp_dir=""
+                if tealdeer_tmp_dir="$(mktemp -d)" && \
+                   curl -fsSL --connect-timeout 15 --max-time 120 \
+                       -o "$tealdeer_tmp_dir/tldr" \
+                       "https://github.com/tealdeer-rs/tealdeer/releases/latest/download/tealdeer-linux-$tealdeer_arch-musl" && \
+                   curl -fsSL --connect-timeout 15 --max-time 120 \
+                       -o "$tealdeer_tmp_dir/tldr.sha256" \
+                       "https://github.com/tealdeer-rs/tealdeer/releases/latest/download/tealdeer-linux-$tealdeer_arch-musl.sha256"; then
+                    tealdeer_expected=$(awk 'NR == 1 {print $1}' "$tealdeer_tmp_dir/tldr.sha256") || tealdeer_expected=""
+                    tealdeer_actual=""
+                    if command -v sha256sum >/dev/null 2>&1; then
+                        tealdeer_actual=$(sha256sum "$tealdeer_tmp_dir/tldr") || tealdeer_actual=""
+                    elif command -v shasum >/dev/null 2>&1; then
+                        tealdeer_actual=$(shasum -a 256 "$tealdeer_tmp_dir/tldr") || tealdeer_actual=""
+                    fi
+                    tealdeer_actual="${tealdeer_actual%% *}"
+                    if [[ "$tealdeer_expected" =~ ^[[:xdigit:]]{64}$ ]] && \
+                       [ "$tealdeer_actual" = "$tealdeer_expected" ] && \
+                       mkdir -p "$HOME/.local/bin" && \
+                       install -m 0755 "$tealdeer_tmp_dir/tldr" "$HOME/.local/bin/tldr"; then
+                        export PATH="$HOME/.local/bin:$PATH"
+                        log_success "tealdeer 安裝成功 (GitHub)"
+                    else
+                        log_warning "tealdeer 雜湊不符、無法驗證或安裝失敗，略過 GitHub 執行檔"
+                    fi
+                else
+                    log_warning "tealdeer GitHub 備援下載失敗"
+                fi
+                if [ -n "$tealdeer_tmp_dir" ]; then
+                    rm -rf "$tealdeer_tmp_dir" || log_warning "無法清除 tealdeer 暫存目錄"
+                fi
+                ;;
+            *) log_warning "tealdeer GitHub 備援不支援架構: $tealdeer_arch" ;;
+        esac
+    fi
+    if ! command -v tldr >/dev/null 2>&1 && command -v cargo >/dev/null 2>&1; then
+        cargo install tealdeer || log_warning "tealdeer cargo 安裝失敗"
+    fi
+    if command -v tldr >/dev/null 2>&1; then
+        tldr --update 2>/dev/null || log_warning "tealdeer 緩存更新失敗，首次使用時會自動下載"
+    else
+        log_warning "tealdeer 所有安裝方式皆失敗 (brew/apt/GitHub/cargo)"
     fi
 else
     log_success "tldr 命令已存在，跳過 tealdeer 安裝"

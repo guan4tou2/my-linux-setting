@@ -223,6 +223,36 @@ _module_pkg_status_cache_clear() {
     MODULE_PKG_STATUS_CACHE=()
 }
 
+# 套件名稱與實際提供的指令名稱可能不同。
+_module_pkg_commands() {
+    case "$1" in
+        tealdeer) echo tldr ;;
+        fd-find|fd) echo 'fd fdfind' ;;
+        ripgrep) echo rg ;;
+        bat) echo 'bat batcat' ;;
+        neovim) echo nvim ;;
+        nodejs|node) echo 'node nodejs' ;;
+        lua5.4|lua) echo 'lua lua5.4' ;;
+        lazygit|lsd|luarocks|btop|fzf) echo "$1" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+_module_pkg_command_available() {
+    local cmd dir command_path
+    for cmd in $(_module_pkg_commands "$1"); do
+        if command_path=$(type -P "$cmd") && [ -f "$command_path" ] && [ -x "$command_path" ]; then
+            return 0
+        fi
+        for dir in "$HOME/.local/bin" "$HOME/.cargo/bin" /usr/local/bin; do
+            if [ -f "$dir/$cmd" ] && [ -x "$dir/$cmd" ]; then
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
 _module_pkg_is_installed() {
     local kind="$1"
     local pkg="$2"
@@ -236,7 +266,9 @@ _module_pkg_is_installed() {
     local installed=1
     case "$kind" in
         apt|apt_fallback)
-            check_package_installed "$pkg" >/dev/null 2>&1 && installed=0
+            if check_package_installed "$pkg" >/dev/null 2>&1 || _module_pkg_command_available "$pkg"; then
+                installed=0
+            fi
             ;;
         brew)
             if check_brew_package_installed "$pkg" >/dev/null 2>&1; then
@@ -249,7 +281,9 @@ _module_pkg_is_installed() {
                     fd) apt_candidate="fd-find" ;;
                     node) apt_candidate="nodejs" ;;
                 esac
-                check_package_installed "$apt_candidate" >/dev/null 2>&1 && installed=0
+                if check_package_installed "$apt_candidate" >/dev/null 2>&1 || _module_pkg_command_available "$pkg"; then
+                    installed=0
+                fi
             fi
             ;;
         pip)
@@ -836,7 +870,7 @@ install_module() {
             for pkg in $packages $apt_fallback; do
                 [ -n "${sys_seen[$pkg]:-}" ] && continue
                 sys_seen[$pkg]=1
-                if check_package_installed "$pkg" 2>/dev/null; then
+                if _module_pkg_is_installed apt "$pkg"; then
                     log_info "✓ $pkg 已安裝，跳過"
                     skipped_count=$((skipped_count + 1))
                 else
@@ -889,9 +923,9 @@ install_module() {
                     tealdeer) _apt_candidate="tealdeer" ;;
                 esac
 
-                # 若對應的 APT 套件已存在，直接跳過 brew（避免重複安裝）
-                if check_package_installed "$_apt_candidate" 2>/dev/null; then
-                    log_info "✓ $pkg 已由系統套件安裝 ($_apt_candidate)，跳過 brew"
+                # 若套件或對應指令已存在，直接跳過 brew（避免重複安裝）
+                if _module_pkg_is_installed brew "$pkg"; then
+                    log_info "✓ $pkg 套件或對應指令已安裝，跳過 brew"
                     skipped_count=$((skipped_count + 1))
                     continue
                 fi
@@ -1023,6 +1057,25 @@ install_module() {
         log_info "執行安裝後命令..."
         eval "$post_install" || log_warning "安裝後命令執行失敗"
     fi
+
+    # 設定腳本可能透過 GitHub 或 cargo 補裝套件，重查後再產生失敗摘要。
+    local remaining_failures=() failure failure_pkg kind
+    for failure in ${module_failures[@]+"${module_failures[@]}"}; do
+        case "$failure" in
+            apt:*|brew:*)
+                failure_pkg="${failure#*:}"
+                for kind in apt apt_fallback brew; do
+                    unset 'MODULE_PKG_STATUS_CACHE['"$kind:$failure_pkg"']'
+                done
+                if _module_pkg_command_available "$failure_pkg"; then
+                    log_info "$failure_pkg 已由設定腳本安裝"
+                    continue
+                fi
+                ;;
+        esac
+        remaining_failures+=("$failure")
+    done
+    module_failures=(${remaining_failures[@]+"${remaining_failures[@]}"})
 
     # 若有任何套件安裝失敗，明確回報但不中斷（避免一個 transient 失敗拖垮整段安裝）
     if [ ${#module_failures[@]} -gt 0 ]; then

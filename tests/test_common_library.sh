@@ -154,6 +154,72 @@ test_architecture_compatibility() {
     esac
 }
 
+# 發行版工具測試只使用假的系統指令，不連線也不安裝套件。
+test_linux_release_arch() {
+    local input expected actual
+    for input in x86_64 amd64 aarch64 arm64 armv7l i686 riscv64; do
+        case "$input" in
+            x86_64|amd64) expected=x86_64 ;;
+            aarch64|arm64) expected=aarch64 ;;
+            *) expected="$input" ;;
+        esac
+        actual=$(uname() { printf '%s\n' "$input"; }; linux_release_arch)
+        assert_equals "$expected" "$actual" "linux_release_arch 對應 $input"
+    done
+}
+
+test_github_latest_release_tag() {
+    local mode result rc tmp
+    tmp=$(mktemp -d)
+    for mode in redirect api failed latest empty malformed; do
+        : > "$tmp/calls"
+        rc=0
+        result=$(
+            set -euo pipefail
+            curl() {
+                printf '%s\n' "$*" >> "$tmp/calls"
+                case "$*" in
+                    (*--connect-timeout*--max-time*) ;;
+                    (*) return 99 ;;
+                esac
+                case "$*" in
+                    (*api.github.com*)
+                        case "$mode" in
+                            (failed) printf '不應輸出的錯誤'; return 22 ;;
+                            (malformed) printf '{"message":"not found"}' ;;
+                            (*) printf '{"tag_name" : "v2.0.0"}' ;;
+                        esac
+                        ;;
+                    (*)
+                        case "$mode" in
+                            (redirect) printf 'https://github.com/owner/repo/releases/tag/v1.2.0' ;;
+                            (latest) printf 'https://github.com/owner/repo/releases/latest' ;;
+                            (empty) return 0 ;;
+                            (*) return 22 ;;
+                        esac
+                        ;;
+                esac
+            }
+            github_latest_release_tag owner/repo
+        ) || rc=$?
+        case "$mode" in
+            redirect)
+                assert_equals v1.2.0 "$result" "轉址成功取得 tag"
+                assert_equals 1 "$(wc -l < "$tmp/calls" | tr -d ' ')" "轉址成功不呼叫 API"
+                ;;
+            failed|malformed)
+                assert_equals 1 "$rc" "GitHub $mode 回傳失敗"
+                assert_equals "" "$result" "GitHub $mode 不輸出內容"
+                ;;
+            *)
+                assert_equals v2.0.0 "$result" "轉址 $mode 時由 API 取得 tag"
+                assert_equals 2 "$(wc -l < "$tmp/calls" | tr -d ' ')" "轉址 $mode 會改走 API"
+                ;;
+        esac
+    done
+    rm -rf "$tmp"
+}
+
 # ==============================================================================
 # Tests for String Operations
 # ==============================================================================
@@ -513,6 +579,8 @@ run_all_tests() {
 
     echo "Testing Architecture Detection..."
     test_architecture_compatibility
+    test_linux_release_arch
+    test_github_latest_release_tag
     echo ""
 
     echo "Testing String Operations..."
