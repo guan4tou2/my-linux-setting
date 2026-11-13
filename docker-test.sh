@@ -168,7 +168,7 @@ run_full_installation_test() {
     }
     
     echo '=== 執行健康檢查 ==='
-    ./scripts/health_check.sh || true
+    ./scripts/maintenance/health_check.sh || true
     
     echo '=== 檢查安裝結果 ==='
     ls -la \$HOME/.local/bin/ || echo '本地 bin 目錄不存在'

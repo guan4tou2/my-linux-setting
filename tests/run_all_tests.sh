@@ -278,7 +278,7 @@ provide_recommendations() {
 🚀 下一步：
   1. 運行安裝腳本：./install.sh
   2. 或選擇特定選項：./install.sh --help
-  3. 預覽配置：./scripts/preview_config.sh
+  3. 預覽配置：./scripts/config/preview_config.sh
 
 📚 更多選項：
   - 最小安裝：./install.sh --minimal

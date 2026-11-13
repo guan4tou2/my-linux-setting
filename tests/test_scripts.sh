@@ -149,6 +149,69 @@ test_argument_parsing() {
     fi
 }
 
+# 檢查 install.sh --config 未帶值時印出明確錯誤，而非 set -u 的 unbound variable
+test_install_config_requires_path() {
+    log_test "檢查 install.sh --config 未帶值的錯誤訊息..."
+
+    # 前面的 test_common_library 會把 common.sh 的 set -e 帶進這個 shell，
+    # 預期失敗的指令必須用 || 接住，否則整支測試會在此中止。
+    local out exit_code=0
+    out="$(bash "$SCRIPT_DIR/install.sh" --config 2>&1)" || exit_code=$?
+
+    if [ "$exit_code" -ne 0 ] && \
+       [[ "$out" == *"--config requires a file path"* ]] && \
+       [[ "$out" != *"unbound variable"* ]]; then
+        log_pass "--config 未帶值會回報明確錯誤"
+    else
+        log_fail "--config 未帶值行為不正確 (exit=$exit_code): $out"
+    fi
+}
+
+# 靜態檢查：sudo 防護區塊內不得有未被單引號保護的 $(curl
+test_install_sudo_guard_no_command_substitution() {
+    log_test "靜態檢查 sudo 防護區塊不執行 curl..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    local block bad
+    block="$(awk '/\$\{SUDO_USER:-\}/ && /ALLOW_ROOT/ {f=1} f {print} f && /^fi$/ {exit}' "$installer")"
+    if [ -z "$block" ]; then
+        log_fail "找不到 sudo 防護區塊"
+        return
+    fi
+
+    # 逐行移除單引號字串後，不得再出現 $(curl
+    bad="$(printf '%s\n' "$block" | sed "s/'[^']*'//g" | grep -F '$(curl' || true)"
+    if [ -z "$bad" ] && \
+       ! printf '%s\n' "$block" | grep -qE '\$\{(YELLOW|GREEN|CYAN|NC)\}'; then
+        log_pass "sudo 防護區塊不會執行 curl 且不依賴 common.sh 顏色變數"
+    else
+        log_fail "sudo 防護區塊含未保護的 \$(curl 或使用尚未定義的顏色變數"
+    fi
+}
+
+# 行為測試：sudo 執行 install.sh 時應顯示提示並結束（僅 CI 且免密 sudo 時執行）
+test_install_sudo_guard_behavior() {
+    log_test "檢查 sudo 防護的實際行為..."
+
+    if [ "${CI:-}" != "true" ] || ! command -v sudo >/dev/null 2>&1 || ! sudo -n true >/dev/null 2>&1; then
+        log_warn "略過：需要 CI=true 且 sudo -n 可用"
+        return
+    fi
+
+    # 同上：以 || 接住預期的非 0 結束碼，避免被 set -e 中止
+    local out exit_code=0
+    out="$(env -u ALLOW_ROOT sudo -n env -u ALLOW_ROOT bash "$SCRIPT_DIR/install.sh" --dry-run 2>&1)" || exit_code=$?
+
+    if [ "$exit_code" -ne 0 ] && \
+       [[ "$out" == *"請改用一般使用者執行"* ]] && \
+       [[ "$out" != *"unbound variable"* ]] && \
+       [[ "$out" != *"#!/usr/bin/env bash"* ]]; then
+        log_pass "sudo 防護會顯示提示並以非 0 結束"
+    else
+        log_fail "sudo 防護行為不正確 (exit=$exit_code): $out"
+    fi
+}
+
 # 檢查顯示版本與共用版本常數同步
 test_script_version_bumped() {
     log_test "檢查腳本版本已更新..."
@@ -374,6 +437,7 @@ test_common_tui_quiet_status_logs_are_log_only() {
     tmp_log="$(mktemp)"
     local tui_output
     tui_output=$(
+        NON_INTERACTIVE=false \
         USE_TUI=true \
         TUI_MODE=quiet \
         ENABLE_LOGGING=true \
@@ -383,6 +447,7 @@ test_common_tui_quiet_status_logs_are_log_only() {
 
     local cli_output
     cli_output=$(
+        NON_INTERACTIVE=false \
         USE_TUI=false \
         TUI_MODE=quiet \
         ENABLE_LOGGING=false \
@@ -1030,6 +1095,12 @@ run_all_tests() {
     test_common_library
     echo
     test_argument_parsing
+    echo
+    test_install_config_requires_path
+    echo
+    test_install_sudo_guard_no_command_substitution
+    echo
+    test_install_sudo_guard_behavior
     echo
     test_script_version_bumped
     echo

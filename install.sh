@@ -150,7 +150,7 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         --config)
-            if [ -n "$2" ]; then
+            if [ -n "${2:-}" ]; then
                 export CONFIG_FILE="$2"
                 shift 2
             else
@@ -168,12 +168,17 @@ done
 
 # 強烈建議不要用 sudo 直接跑整支安裝（會把設定/工具裝到 /root，且 brew 會失敗）
 if [ "${EUID:-$(id -u)}" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "${ALLOW_ROOT:-false}" != "true" ]; then
-    printf "\n${YELLOW}偵測到你用 sudo 以 root 執行。${NC}\n"
-    printf "${YELLOW}- 這會把 ~/.zshrc、uv、nvim 等安裝到 /root${NC}\n"
-    printf "${YELLOW}- 且 Homebrew 套件多半會因 root 而失敗${NC}\n\n"
-    printf "${GREEN}請改用一般使用者執行：${NC}\n"
-    printf "  bash -c \"$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)\"\n\n"
-    printf "${CYAN}若你真的要用 root 跑（例如容器），請加：${NC} ALLOW_ROOT=true\n\n"
+    # 此時 common.sh 尚未載入，使用區塊內專用的跳脫碼變數（不可與 common.sh 的 readonly 名稱衝突）
+    _sudo_y=$'\033[0;33m'
+    _sudo_g=$'\033[0;32m'
+    _sudo_c=$'\033[0;36m'
+    _sudo_n=$'\033[0m'
+    printf '\n%s偵測到你用 sudo 以 root 執行。%s\n' "$_sudo_y" "$_sudo_n"
+    printf '%s- 這會把 ~/.zshrc、uv、nvim 等安裝到 /root%s\n' "$_sudo_y" "$_sudo_n"
+    printf '%s- 且 Homebrew 套件多半會因 root 而失敗%s\n\n' "$_sudo_y" "$_sudo_n"
+    printf '%s請改用一般使用者執行：%s\n' "$_sudo_g" "$_sudo_n"
+    printf '%s\n\n' '  bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)"'
+    printf '%s若你真的要用 root 跑（例如容器），請加：%s ALLOW_ROOT=true\n\n' "$_sudo_c" "$_sudo_n"
     exit 1
 fi
 
