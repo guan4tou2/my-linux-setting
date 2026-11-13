@@ -1510,10 +1510,36 @@ test_install_module_checklist_behavior() {
 }
 
 # 導覽結束碼必須反映每個模組，partial 本身仍可成功離開。
+# 非互動與導覽流程共用的結束碼判斷：失敗、未執行、中止 → 1；成功、部分套件失敗、沒有結果 → 0
+test_install_results_exit_code() {
+    log_test "檢查安裝結果對應的結束碼..."
+    local funcs out rc=0
+    funcs="$(extract_install_functions install_results_exit_code)"
+    out="$(LC_ALL=C bash -c '
+        set -euo pipefail; eval "$1"
+        for statuses in "ok ok" "ok partial" "ok failed" "ok not_run" "failed" ""; do
+            INSTALL_ABORTED=false; INSTALL_RESULT_STATUS=($statuses)
+            printf "%s " "$(install_results_exit_code)"
+        done
+        INSTALL_ABORTED=true; INSTALL_RESULT_STATUS=(ok ok)
+        printf "%s " "$(install_results_exit_code)"
+        unset INSTALL_RESULT_STATUS INSTALL_ABORTED
+        printf "%s" "$(install_results_exit_code)"
+    ' _ "$funcs")" || rc=$?
+    local installer="$SCRIPT_DIR/install.sh"
+    if [ "$rc" -eq 0 ] && [ "$out" = "0 0 1 1 1 0 1 0" ] && \
+       search_literal 'exit "$(install_results_exit_code)"' "$installer" && \
+       search_literal 'ni_rc="$(install_results_exit_code)"' "$installer"; then
+        log_pass "失敗、未執行與中止回傳 1；非互動與非 tty 路徑都採用同一判斷"
+    else
+        log_fail "結束碼判斷不正確 (rc=$rc): $out"
+    fi
+}
+
 test_guided_exit_status() {
     log_test "檢查導覽流程結束碼..."
     local funcs out rc=0
-    funcs="$(extract_install_functions run_guided_tui_flow)"
+    funcs="$(extract_install_functions run_guided_tui_flow install_results_exit_code)"
     out="$(LC_ALL=C bash -c '
         set -euo pipefail; eval "$1"
         select_modules_tui() { :; }
@@ -1545,7 +1571,7 @@ test_guided_override_lifecycle() {
         return
     fi
     local funcs rc=0
-    funcs="$(extract_install_functions run_guided_tui_flow install_selected_modules reset_install_results)"
+    funcs="$(extract_install_functions run_guided_tui_flow install_selected_modules reset_install_results install_results_exit_code)"
     LC_ALL=C bash -c '
         set -euo pipefail; source "$2/scripts/core/module_manager.sh"; eval "$1"
         names="MODULE_HAS_OVERRIDE MODULE_PKG_OVERRIDE_APT MODULE_PKG_OVERRIDE_BREW MODULE_PKG_OVERRIDE_APT_FALLBACK MODULE_PKG_OVERRIDE_PIP MODULE_PKG_OVERRIDE_CARGO MODULE_PKG_OVERRIDE_NPM MODULE_RUN_SCRIPT"
@@ -1590,7 +1616,7 @@ test_guided_override_lifecycle() {
 test_guided_cancel_all_results() {
     log_test "檢查全部取消會清除舊結果並返回選擇..."
     local funcs rc=0
-    funcs="$(extract_install_functions run_guided_tui_flow install_selected_modules reset_install_results)"
+    funcs="$(extract_install_functions run_guided_tui_flow install_selected_modules reset_install_results install_results_exit_code)"
     LC_ALL=C bash -c '
         set -euo pipefail; eval "$1"
         RED=""; NC=""; USE_MODULE_MANAGER=true; MODULE_LIST=(base); DRY_RUN=false
@@ -1931,6 +1957,8 @@ run_all_tests() {
     test_install_summary_and_checklist_labels
     echo
     test_install_result_screen_behavior
+    echo
+    test_install_results_exit_code
     echo
     test_guided_exit_status
     test_guided_override_lifecycle

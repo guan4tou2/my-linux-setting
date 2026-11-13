@@ -1260,16 +1260,7 @@ run_guided_tui_flow() {
             print_installation_report_plain
         fi
         # 使用者已看過報告；不再讓 set -e 觸發錯誤畫面，改以結束碼反映結果
-        GUIDED_EXIT_CODE=0
-        if [ "${INSTALL_ABORTED:-false}" = "true" ]; then
-            GUIDED_EXIT_CODE=1
-        fi
-        local status
-        for status in "${INSTALL_RESULT_STATUS[@]}"; do
-            case "$status" in
-                failed|not_run) GUIDED_EXIT_CODE=1 ;;
-            esac
-        done
+        GUIDED_EXIT_CODE="$(install_results_exit_code)"
         return 0
     done
 }
@@ -1413,6 +1404,9 @@ main() {
 
         local ni_rc=0
         install_selected_modules || ni_rc=$?
+        if [ "$ni_rc" -eq 0 ]; then
+            ni_rc="$(install_results_exit_code)"
+        fi
         cleanup
         if [ "$ni_rc" -ne 0 ]; then
             # 報告已說明失敗原因，直接以非 0 結束，不再顯示錯誤畫面
@@ -1967,6 +1961,26 @@ module_result_succeeded() {
         ok|partial) return 0 ;;
     esac
     return 1
+}
+
+# 依安裝結果決定程序結束碼（輸出 0 或 1）：
+# 已中止、或有任何模組失敗／未執行 → 1；全部成功或只有部分套件失敗 → 0。
+# 導覽式 TUI、非互動（--non-interactive）與 stdin 非 tty 三條路徑共用，結束碼才會一致。
+install_results_exit_code() {
+    if [ "${INSTALL_ABORTED:-false}" = "true" ]; then
+        printf '%s' 1
+        return 0
+    fi
+    local status
+    for status in ${INSTALL_RESULT_STATUS[@]+"${INSTALL_RESULT_STATUS[@]}"}; do
+        case "$status" in
+            failed|not_run)
+                printf '%s' 1
+                return 0
+                ;;
+        esac
+    done
+    printf '%s' 0
 }
 
 # 整體結果：success / partial / failed / none
@@ -2917,7 +2931,8 @@ install_selected_modules() {
         if [ "$aborted" = "true" ]; then
             exit 1
         fi
-        exit 0
+        # 有模組失敗或未執行時以非 0 結束，讓 CI 與自動化腳本能察覺
+        exit "$(install_results_exit_code)"
     fi
 
     if [ "$aborted" = "true" ]; then
