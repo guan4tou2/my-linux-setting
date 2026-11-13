@@ -53,6 +53,18 @@ declare -A MODULE_RUN_SCRIPT
 declare -A MODULE_HAS_OVERRIDE
 declare -A MODULE_PKG_STATUS_CACHE
 
+# 清除上一輪進階選擇；重試沿用原選擇時不呼叫。
+reset_module_overrides() {
+    MODULE_HAS_OVERRIDE=()
+    MODULE_PKG_OVERRIDE_APT=()
+    MODULE_PKG_OVERRIDE_BREW=()
+    MODULE_PKG_OVERRIDE_APT_FALLBACK=()
+    MODULE_PKG_OVERRIDE_PIP=()
+    MODULE_PKG_OVERRIDE_CARGO=()
+    MODULE_PKG_OVERRIDE_NPM=()
+    MODULE_RUN_SCRIPT=()
+}
+
 # ==============================================================================
 # 配置文件定位
 # ==============================================================================
@@ -227,7 +239,18 @@ _module_pkg_is_installed() {
             check_package_installed "$pkg" >/dev/null 2>&1 && installed=0
             ;;
         brew)
-            check_brew_package_installed "$pkg" >/dev/null 2>&1 && installed=0
+            if check_brew_package_installed "$pkg" >/dev/null 2>&1; then
+                installed=0
+            else
+                # APT 優先策略下，brew_packages 常由對應的系統套件滿足（見 install_module）；
+                # 這種情況也算已安裝，否則裝完後模組仍會顯示「部分安裝」。
+                local apt_candidate="$pkg"
+                case "$pkg" in
+                    fd) apt_candidate="fd-find" ;;
+                    node) apt_candidate="nodejs" ;;
+                esac
+                check_package_installed "$apt_candidate" >/dev/null 2>&1 && installed=0
+            fi
             ;;
         pip)
             check_pip_package_installed "$pkg" >/dev/null 2>&1 && installed=0
@@ -284,20 +307,14 @@ check_module_status() {
             fi
         done
     elif [ -n "$brew_packages" ]; then
-        if command -v brew >/dev/null 2>&1; then
-            for pkg in $brew_packages; do
-                total=$((total + 1))
-                if _module_pkg_is_installed brew "$pkg"; then
-                    installed=$((installed + 1))
-                fi
-            done
-        else
-            # brew 不存在且無 fallback，將 brew 套件計為未安裝
-            for pkg in $brew_packages; do
-                total=$((total + 1))
-                # 不增加 installed，視為未安裝
-            done
-        fi
+        # 不論系統有沒有 brew 都逐一判斷：_module_pkg_is_installed 會在 brew 查不到時
+        # 改看對應的系統套件（APT 優先策略下，brew_packages 通常就是由 APT 裝上的）
+        for pkg in $brew_packages; do
+            total=$((total + 1))
+            if _module_pkg_is_installed brew "$pkg"; then
+                installed=$((installed + 1))
+            fi
+        done
     fi
 
     # 檢查 Python 套件
@@ -762,8 +779,8 @@ install_module() {
         return 1
     fi
 
-    local name="${MODULE_NAMES[$module_id]}"
-    local packages="${MODULE_PACKAGES[$module_id]}"
+    local name="${MODULE_NAMES[$module_id]:-$module_id}"
+    local packages="${MODULE_PACKAGES[$module_id]:-}"
     local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
     local apt_fallback="${MODULE_APT_FALLBACK[$module_id]:-}"
     local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
@@ -808,40 +825,56 @@ install_module() {
         local skipped_count=0
         local installed_count=0
 
-        # 1. 安裝 APT 套件（跳過已安裝的）
-        if [ -n "$packages" ]; then
-            log_info "檢查系統套件..."
-            for pkg in $packages; do
+        # 1~2. 安裝系統套件（packages 與 apt_fallback，APT 優先；跳過已安裝的）
+        # 先過濾出尚未安裝的套件，再以單次呼叫安裝（Debian 系列為單次 apt-get，
+        # 失敗時才逐一重試以找出是哪些套件失敗），避免逐一呼叫 apt 的額外耗時。
+        if [ -n "$packages" ] || [ -n "$apt_fallback" ]; then
+            log_info "檢查系統套件（含 APT 替代套件）..."
+            local sys_to_install=()
+            local -A sys_seen=()
+            local pkg
+            for pkg in $packages $apt_fallback; do
+                [ -n "${sys_seen[$pkg]:-}" ] && continue
+                sys_seen[$pkg]=1
                 if check_package_installed "$pkg" 2>/dev/null; then
                     log_info "✓ $pkg 已安裝，跳過"
                     skipped_count=$((skipped_count + 1))
                 else
-                    if install_package "$pkg"; then
-                        installed_count=$((installed_count + 1))
-                    else
-                        log_warning "套件安裝失敗: $pkg"
-                        module_failures+=("apt:$pkg")
-                    fi
+                    sys_to_install+=("$pkg")
                 fi
             done
-        fi
 
-        # 2. 先安裝 APT fallback（APT 優先）
-        if [ -n "$apt_fallback" ]; then
-            log_info "檢查 APT 替代套件（優先）..."
-            for pkg in $apt_fallback; do
-                if check_package_installed "$pkg" 2>/dev/null; then
-                    log_info "✓ $pkg 已安裝，跳過"
-                    skipped_count=$((skipped_count + 1))
-                else
-                    if install_package "$pkg"; then
-                        installed_count=$((installed_count + 1))
+            if [ ${#sys_to_install[@]} -gt 0 ]; then
+                # 全新機器的套件索引是空的，第一次安裝系統套件前確保索引可用（每次執行只更新一次）
+                ensure_package_index_fresh || true
+
+                local sys_failed=()
+                if [ "${PKG_MANAGER:-apt}" = "apt" ] && command -v install_apt_packages_parallel >/dev/null 2>&1; then
+                    if install_apt_packages_parallel "${sys_to_install[@]}"; then
+                        installed_count=$((installed_count + ${#sys_to_install[@]}))
                     else
-                        log_warning "套件安裝失敗: $pkg"
-                        module_failures+=("apt:$pkg")
+                        if [ ${#APT_BATCH_FAILED_PACKAGES[@]} -gt 0 ]; then
+                            sys_failed=("${APT_BATCH_FAILED_PACKAGES[@]}")
+                        else
+                            sys_failed=("${sys_to_install[@]}")
+                        fi
+                        installed_count=$((installed_count + ${#sys_to_install[@]} - ${#sys_failed[@]}))
                     fi
+                else
+                    for pkg in "${sys_to_install[@]}"; do
+                        if install_package "$pkg"; then
+                            installed_count=$((installed_count + 1))
+                        else
+                            sys_failed+=("$pkg")
+                        fi
+                    done
                 fi
-            done
+
+                for pkg in ${sys_failed[@]+"${sys_failed[@]}"}; do
+                    log_warning "套件安裝失敗: $pkg"
+                    module_failures+=("apt:$pkg")
+                done
+            fi
         fi
 
         # 3. 對 brew_packages 先嘗試 APT（Debian 系列），僅在 APT 不可用/失敗時才用 brew
@@ -865,6 +898,7 @@ install_module() {
 
                 # Debian 系列先嘗試 APT 安裝
                 if [ "${DISTRO_FAMILY:-unknown}" = "debian" ]; then
+                    ensure_package_index_fresh || true
                     if install_apt_package "$_apt_candidate" 2>/dev/null; then
                         log_success "$pkg 已透過 APT 安裝 ($_apt_candidate)"
                         installed_count=$((installed_count + 1))
