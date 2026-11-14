@@ -36,7 +36,8 @@ if ! check_command docker; then
         for _dp in /usr/bin/docker /usr/local/bin/docker; do
             if [ -x "$_dp" ]; then
                 log_info "偵測到 Docker 於 $_dp，補入 PATH 供本腳本後續檢查"
-                export PATH="$(dirname "$_dp"):$PATH"
+                PATH="$(dirname "$_dp"):$PATH" || true
+                export PATH
                 break
             fi
         done
