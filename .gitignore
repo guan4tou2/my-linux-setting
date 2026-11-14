@@ -71,3 +71,6 @@ htmlcov/
 # 本地配置（如果有的话）
 local_settings.sh
 .env.local
+
+# 工具產生的本機流量紀錄（例如 OpenCode 的 MCP 外掛），可能含對話內容
+mitm_mcp_traffic.db
