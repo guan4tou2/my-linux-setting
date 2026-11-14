@@ -128,6 +128,7 @@ pre_check() {
         "$TESTS_DIR/test_dependencies.sh"
         "$TESTS_DIR/test_functionality.sh"
         "$TESTS_DIR/test_uninstall.sh"
+        "$TESTS_DIR/test_bootstrap.sh"
     )
     
     for file in "${test_files[@]}"; do
@@ -196,6 +197,7 @@ run_all_test_suites() {
     run_test_suite "$TESTS_DIR/test_health_check.sh" "極簡系統健康檢查測試"
     run_test_suite "$TESTS_DIR/test_module_manager_status.sh" "模組狀態快取測試"
     run_test_suite "$TESTS_DIR/test_uninstall.sh" "卸載、回滾與安全加固測試"
+    run_test_suite "$TESTS_DIR/test_bootstrap.sh" "遠端安裝 bootstrap 測試"
 
     if should_run_linux_only_suites; then
         # 2. 系統依賴測試（Linux CI only）

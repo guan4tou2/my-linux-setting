@@ -7,9 +7,6 @@ source "$SCRIPT_DIR/common.sh" || {
     exit 1
 }
 
-# 如果未定義 URL，使用默認值
-P10K_CONFIG_URL="${P10K_CONFIG_URL:-https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh}"
-
 # thefuck 固定在 requirements.txt 釘選的 commit；兩處必須保持一致（測試會比對）
 THEFUCK_PINNED_COMMIT="c7e7e1d884d3bb241ea6448f72a989434c2a35ec"
 THEFUCK_SPEC="git+https://github.com/nvbn/thefuck.git@${THEFUCK_PINNED_COMMIT}"
@@ -205,17 +202,21 @@ else
     fi
 fi
 
-# 2. 下載 .p10k.zsh 配置檔（不存在才下載）
+# 2. 安裝專案內的 .p10k.zsh 配置檔（不存在才複製，不覆蓋使用者既有的設定）
+P10K_CONFIG_SOURCE="$SCRIPT_DIR/../../.p10k.zsh"
 if [ ! -f ~/.p10k.zsh ]; then
-    printf "\033[36m下載 .p10k.zsh 配置\033[0m\n"
-    if wget --timeout=30 --tries=2 -q "$P10K_CONFIG_URL" -O ~/.p10k.zsh.tmp 2>/dev/null \
-            && [ -s ~/.p10k.zsh.tmp ]; then
-        mv ~/.p10k.zsh.tmp ~/.p10k.zsh
-        log_success ".p10k.zsh 已下載"
-        manifest_record path "$HOME/.p10k.zsh"
+    if [ -s "$P10K_CONFIG_SOURCE" ]; then
+        printf "\033[36m安裝 .p10k.zsh 配置\033[0m\n"
+        if cp "$P10K_CONFIG_SOURCE" ~/.p10k.zsh.tmp \
+                && mv ~/.p10k.zsh.tmp ~/.p10k.zsh; then
+            log_success ".p10k.zsh 已安裝"
+            manifest_record path "$HOME/.p10k.zsh"
+        else
+            rm -f ~/.p10k.zsh.tmp
+            log_warning ".p10k.zsh 安裝失敗，將沿用 powerlevel10k 預設並啟用首次設定精靈"
+        fi
     else
-        rm -f ~/.p10k.zsh.tmp
-        log_warning ".p10k.zsh 下載失敗，將沿用 powerlevel10k 預設並啟用首次設定精靈"
+        log_warning "找不到專案內的 .p10k.zsh（$P10K_CONFIG_SOURCE），將沿用 powerlevel10k 預設並啟用首次設定精靈"
     fi
 fi
 

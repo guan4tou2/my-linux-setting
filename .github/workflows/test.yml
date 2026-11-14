@@ -56,6 +56,11 @@ jobs:
           CI: true
         run: bash tests/test_uninstall.sh
 
+      - name: Run remote-install bootstrap tests
+        env:
+          CI: true
+        run: bash tests/test_bootstrap.sh
+
   # ---------------------------------------------------------------------------
   # 2. Functional tests (Linux runner, vanilla ubuntu)
   #    跑 test_dependencies + test_functionality；測試本身對 CI 環境友善

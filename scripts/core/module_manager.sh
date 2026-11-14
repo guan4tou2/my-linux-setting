@@ -22,18 +22,21 @@ fi
 MODULES_CONF="${MODULES_CONF:-}"
 
 # 模組資料存儲（使用關聯陣列）
-declare -A MODULE_NAMES
-declare -A MODULE_DESCRIPTIONS
-declare -A MODULE_PACKAGES
-declare -A MODULE_BREW_PACKAGES
-declare -A MODULE_APT_FALLBACK
-declare -A MODULE_PIP_PACKAGES
-declare -A MODULE_CARGO_PACKAGES
-declare -A MODULE_NPM_PACKAGES
-declare -A MODULE_SCRIPTS
-declare -A MODULE_POST_INSTALL
+# 一律宣告為全域（-g）。這個檔案可能在函式內被 source（例如 install.sh 的
+# load_module_manager），不加 -g 的 declare 會讓這些資料表變成該函式的區域變數，
+# 函式一返回就消失，之後以模組 id 當索引會被當成算術運算而出現 unbound variable。
+declare -gA MODULE_NAMES
+declare -gA MODULE_DESCRIPTIONS
+declare -gA MODULE_PACKAGES
+declare -gA MODULE_BREW_PACKAGES
+declare -gA MODULE_APT_FALLBACK
+declare -gA MODULE_PIP_PACKAGES
+declare -gA MODULE_CARGO_PACKAGES
+declare -gA MODULE_NPM_PACKAGES
+declare -gA MODULE_SCRIPTS
+declare -gA MODULE_POST_INSTALL
 # 設定檔中不合法的套件名稱（以 - 開頭，可能被當成套件管理器的選項）：略過並在安裝時記為失敗
-declare -A MODULE_INVALID_PKGS
+declare -gA MODULE_INVALID_PKGS
 
 # 模組列表（保持順序）
 MODULE_LIST=()
@@ -45,15 +48,15 @@ MODULE_LIST=()
 # 若 override 值為空字串，代表「該類型一個都不裝」
 # 同時保留 MODULE_RUN_SCRIPT 控制 script= 是否要執行
 # ==============================================================================
-declare -A MODULE_PKG_OVERRIDE_APT
-declare -A MODULE_PKG_OVERRIDE_BREW
-declare -A MODULE_PKG_OVERRIDE_PIP
-declare -A MODULE_PKG_OVERRIDE_CARGO
-declare -A MODULE_PKG_OVERRIDE_NPM
-declare -A MODULE_PKG_OVERRIDE_APT_FALLBACK
-declare -A MODULE_RUN_SCRIPT
-declare -A MODULE_HAS_OVERRIDE
-declare -A MODULE_PKG_STATUS_CACHE
+declare -gA MODULE_PKG_OVERRIDE_APT
+declare -gA MODULE_PKG_OVERRIDE_BREW
+declare -gA MODULE_PKG_OVERRIDE_PIP
+declare -gA MODULE_PKG_OVERRIDE_CARGO
+declare -gA MODULE_PKG_OVERRIDE_NPM
+declare -gA MODULE_PKG_OVERRIDE_APT_FALLBACK
+declare -gA MODULE_RUN_SCRIPT
+declare -gA MODULE_HAS_OVERRIDE
+declare -gA MODULE_PKG_STATUS_CACHE
 
 # 清除上一輪進階選擇；重試沿用原選擇時不呼叫。
 reset_module_overrides() {
@@ -112,7 +115,7 @@ _sanitize_pkg_list() {
 parse_modules_conf() {
     local conf_file
     conf_file=$(find_modules_conf) || {
-        log_warning "找不到模組配置文件，使用預設配置"
+        log_error "找不到必要的模組配置文件" || true
         return 1
     }
 
@@ -1132,35 +1135,7 @@ install_module() {
 
 init_module_manager() {
     # 解析配置文件
-    parse_modules_conf || {
-        # 如果找不到配置文件，使用預設模組
-        log_info "使用內建預設模組"
-        MODULE_LIST=(python docker base terminal dev monitoring)
-        MODULE_NAMES=(
-            [python]="Python 開發環境"
-            [docker]="Docker 工具"
-            [base]="基礎工具"
-            [terminal]="終端設定"
-            [dev]="開發工具"
-            [monitoring]="監控工具"
-        )
-        MODULE_DESCRIPTIONS=(
-            [python]="python3, pip, uv, ranger"
-            [docker]="docker-ce, lazydocker"
-            [base]="git, lsd, bat, ripgrep, fzf"
-            [terminal]="zsh, oh-my-zsh, powerlevel10k"
-            [dev]="neovim, lazygit, nodejs, rust"
-            [monitoring]="btop, htop, iftop, fail2ban"
-        )
-        MODULE_SCRIPTS=(
-            [python]="python_setup.sh"
-            [docker]="docker_setup.sh"
-            [base]="base_tools.sh"
-            [terminal]="terminal_setup.sh"
-            [dev]="dev_tools.sh"
-            [monitoring]="monitoring_tools.sh"
-        )
-    }
+    parse_modules_conf
 }
 
 # 導出函數

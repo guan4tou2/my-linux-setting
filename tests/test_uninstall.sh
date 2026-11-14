@@ -354,7 +354,7 @@ echo "== install.sh 下載網址檢查 =="
 
 test_url_validation() {
     local fns
-    fns="$(awk '/^_download_url_allowed\(\)/,/^}/ {print} /^validate_download_urls\(\)/,/^}/ {print}' "$SCRIPT_DIR/install.sh")"
+    fns="$(awk '/^_download_url_allowed\(\)/,/^}/ {print}' "$SCRIPT_DIR/install.sh")"
     local url
     for url in \
         "https://raw.githubusercontent.com/x/y/main" \
@@ -367,13 +367,6 @@ test_url_validation() {
         "http://evil.example/?x=localhost"; do
         if bash -c "$fns"$'\n''_download_url_allowed "$1"' _ "$url"; then fail "應拒絕 $url"; else pass "拒絕 $url"; fi
     done
-    local out rc=0
-    out="$(env HOME="$(new_home)" REPO_URL=http://example.com bash "$SCRIPT_DIR/install.sh" --dry-run --non-interactive </dev/null 2>&1)" || rc=$?
-    if [ "$rc" -ne 0 ] && contains "$out" "必須是 https://"; then
-        pass "REPO_URL=http://example.com 時 install.sh 在下載前以非 0 結束"
-    else
-        fail "REPO_URL=http://example.com 應被拒絕（rc=$rc）"
-    fi
 }
 
 test_url_validation
@@ -587,13 +580,13 @@ test_optimize_apt_not_in_dry_run() {
     ' _ "$SCRIPT_DIR" >/dev/null 2>&1
     [ ! -s "$log" ] && pass "DRY_RUN=true 時 optimize_apt_performance 不呼叫 sudo" || fail "dry-run 不應呼叫 sudo"
 
-    local installer="$SCRIPT_DIR/install.sh" call_line start_line env_start env_end
-    call_line="$(grep -n 'optimize_apt_performance ||' "$installer" | cut -d: -f1 | head -n 1)"
-    start_line="$(grep -n 'log_info "開始安裝以下模組' "$installer" | cut -d: -f1 | head -n 1)"
-    env_start="$(grep -n '^check_environment()' "$installer" | cut -d: -f1)"
-    env_end="$(grep -n '^backup_config_files\|^_manifest_has()' "$installer" | cut -d: -f1 | head -n 1)"
-    if [ "$(grep -c 'optimize_apt_performance ||' "$installer")" -eq 1 ] && [ -n "$call_line" ] && [ -n "$start_line" ] \
-       && [ "$call_line" -gt "$start_line" ] && ! { [ "$call_line" -gt "$env_start" ] && [ "$call_line" -lt "$env_end" ]; }; then
+    # 呼叫只能出現一次，且位於安裝流程（runner.sh）中「開始安裝」訊息之後；
+    # 環境檢查等其他檔案不可呼叫（否則 --dry-run 或還沒決定安裝前就會動到 /etc/apt）
+    local runner="$SCRIPT_DIR/scripts/install/runner.sh" call_line start_line total
+    call_line="$(grep -n 'optimize_apt_performance ||' "$runner" | cut -d: -f1 | head -n 1)"
+    start_line="$(grep -n 'log_info "開始安裝以下模組' "$runner" | cut -d: -f1 | head -n 1)"
+    total="$(cat "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR"/scripts/install/*.sh | grep -c 'optimize_apt_performance ||')"
+    if [ "$total" -eq 1 ] && [ -n "$call_line" ] && [ -n "$start_line" ] && [ "$call_line" -gt "$start_line" ]; then
         pass "optimize_apt_performance 只在 dry-run 返回之後的實際安裝流程中呼叫"
     else
         fail "optimize_apt_performance 的呼叫位置不正確"

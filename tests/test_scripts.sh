@@ -6,6 +6,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TESTS_PASSED=0
 TESTS_FAILED=0
 
+# install.sh 與 common.sh 依職責拆成多個檔案（scripts/install/、scripts/core/common/）。
+# 字面比對與函式擷取以「合併後的原始碼」為對象：測試要驗證的是程式內容，
+# 不是內容放在哪個檔案。需要實際 source 或執行時仍使用真正的路徑。
+SOURCES_TMP="$(mktemp -d)"
+trap 'rm -rf "$SOURCES_TMP"' EXIT
+INSTALLER_SRC="$SOURCES_TMP/install.combined.sh"
+COMMON_SRC="$SOURCES_TMP/common.combined.sh"
+cat "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR"/scripts/install/*.sh > "$INSTALLER_SRC"
+cat "$SCRIPT_DIR/scripts/core/common.sh" "$SCRIPT_DIR"/scripts/core/common/*.sh > "$COMMON_SRC"
+
 # 測試顏色
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -59,7 +69,7 @@ search_literal() {
 test_script_syntax() {
     log_test "測試腳本語法..."
     
-    for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*/*.sh; do
+    for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*/*.sh "$SCRIPT_DIR"/scripts/core/common/*.sh; do
         if [ -f "$script" ]; then
             if bash -n "$script" 2>/dev/null; then
                 log_pass "$(basename "$script") 語法正確"
@@ -75,6 +85,8 @@ test_script_permissions() {
     log_test "測試腳本權限..."
     
     for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*/*.sh; do
+        # scripts/install/ 下是 install.sh 載入的片段，不是可獨立執行的入口，不要求執行權限
+        case "$script" in "$SCRIPT_DIR"/scripts/install/*) continue ;; esac
         if [ -f "$script" ]; then
             if [ -x "$script" ]; then
                 log_pass "$(basename "$script") 具有執行權限"
@@ -121,6 +133,19 @@ test_required_files() {
         "install.sh"
         "requirements.txt"
         "scripts/core/common.sh"
+        "scripts/core/common/logging.sh"
+        "scripts/core/common/system.sh"
+        "scripts/core/common/packages.sh"
+        "scripts/core/common/files.sh"
+        "scripts/core/common/tui.sh"
+        "scripts/install/support.sh"
+        "scripts/install/preflight.sh"
+        "scripts/install/selection.sh"
+        "scripts/install/homebrew.sh"
+        "scripts/install/menu.sh"
+        "scripts/install/report.sh"
+        "scripts/install/progress.sh"
+        "scripts/install/runner.sh"
         "scripts/core/python_setup.sh"
         "scripts/core/terminal_setup.sh"
         "scripts/maintenance/health_check.sh"
@@ -171,7 +196,7 @@ test_install_config_requires_path() {
 test_install_sudo_guard_no_command_substitution() {
     log_test "靜態檢查 sudo 防護區塊不執行 curl..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     local block bad
     block="$(awk '/\$\{SUDO_USER:-\}/ && /ALLOW_ROOT/ {f=1} f {print} f && /^fi$/ {exit}' "$installer")"
     if [ -z "$block" ]; then
@@ -216,8 +241,8 @@ test_install_sudo_guard_behavior() {
 test_script_version_bumped() {
     log_test "檢查腳本版本已更新..."
 
-    local installer="$SCRIPT_DIR/install.sh"
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local installer="$INSTALLER_SRC"
+    local common="$COMMON_SRC"
     if [ ! -f "$installer" ] || [ ! -f "$common" ]; then
         log_fail "找不到 install.sh 或 common.sh"
         return
@@ -235,11 +260,48 @@ test_script_version_bumped() {
     fi
 }
 
+# 模組管理器可能在函式內被 source（install.sh 的 load_module_manager 就是如此）。
+# 若資料表不是以全域宣告，函式返回後就會消失，實際安裝時以模組 id 當索引會出現
+# "unbound variable"。用真正的 common.sh、module_manager.sh 與 modules.conf 驗證，不用替身。
+test_module_manager_survives_function_scope() {
+    log_test "檢查在函式內載入模組管理器後資料表仍然存在..."
+
+    if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+        log_warn "略過：模組管理器需要 bash 4 以上"
+        return
+    fi
+
+    local out rc=0
+    out="$(HOME="$(mktemp -d)" bash -c '
+        set -euo pipefail
+        root="$1"
+        SCRIPT_DIR="$root/scripts"
+        # shellcheck source=/dev/null
+        source "$root/scripts/core/common.sh" >/dev/null 2>&1
+        loader() {
+            # shellcheck source=/dev/null
+            source "$SCRIPT_DIR/core/module_manager.sh"
+            init_module_manager >/dev/null 2>&1
+        }
+        loader
+        first="${MODULE_LIST[0]}"
+        printf "%s|%s|%s" "${#MODULE_LIST[@]}" "$first" "${MODULE_NAMES[$first]:-MISSING}"
+    ' _ "$SCRIPT_DIR" 2>&1)" || rc=$?
+
+    local count="${out%%|*}"
+    if [ "$rc" -eq 0 ] && [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] \
+       && [[ "$out" != *"MISSING"* ]] && [[ "$out" != *"unbound variable"* ]]; then
+        log_pass "函式返回後仍可用模組 id 取得資料（$out）"
+    else
+        log_fail "函式內載入後模組資料遺失 (rc=$rc): ${out:0:200}"
+    fi
+}
+
 # 檢查 install.sh 是否初始化 SKIP_PYTHON_CHECK
 test_skip_python_check_default() {
     log_test "檢查 SKIP_PYTHON_CHECK 預設值..."
 
-    if search_text "SKIP_PYTHON_CHECK=\\\"\\$\\{SKIP_PYTHON_CHECK:-" "$SCRIPT_DIR/install.sh"; then
+    if search_text "SKIP_PYTHON_CHECK=\\\"\\$\\{SKIP_PYTHON_CHECK:-" "$INSTALLER_SRC"; then
         log_pass "SKIP_PYTHON_CHECK 已設定預設值"
     else
         log_fail "SKIP_PYTHON_CHECK 未設定預設值"
@@ -250,11 +312,44 @@ test_skip_python_check_default() {
 test_module_manager_install_path() {
     log_test "檢查模組管理器安裝路徑..."
 
-    if search_text "install_module" "$SCRIPT_DIR/install.sh"; then
+    if search_text "install_module" "$INSTALLER_SRC"; then
         log_pass "install.sh 使用 install_module"
     else
         log_fail "install.sh 未使用 install_module"
     fi
+}
+
+# 只載入暫存替身，不執行安裝流程；驗證必要模組管理器的失敗邊界。
+test_required_module_manager() {
+    log_test "檢查必要模組管理器的載入與失敗處理..."
+    local funcs tmp mode out rc
+    funcs="$(extract_install_functions load_module_manager)"
+    tmp="$(mktemp -d)"
+    mkdir -p "$tmp/core"
+    for mode in missing source_failed init_failed empty ready; do
+        rm -f "$tmp/core/module_manager.sh"
+        case "$mode" in
+            source_failed) printf 'return 1\n' > "$tmp/core/module_manager.sh" ;;
+            init_failed) printf 'init_module_manager() { return 1; }\n' > "$tmp/core/module_manager.sh" ;;
+            empty) printf 'init_module_manager() { MODULE_LIST=(); }\n' > "$tmp/core/module_manager.sh" ;;
+            ready) printf 'init_module_manager() { MODULE_LIST=(base); }\n' > "$tmp/core/module_manager.sh" ;;
+        esac
+        rc=0
+        out="$(bash -c '
+            set -euo pipefail
+            eval "$1"
+            SCRIPT_DIR="$2"
+            log_error() { printf "%s\n" "$1" >&2; return 1; }
+            load_module_manager
+            printf ready
+        ' _ "$funcs" "$tmp" 2>&1)" || rc=$?
+        case "$mode:$rc:$out" in
+            missing:1:*找不到必要的模組管理器*|source_failed:1:*無法載入*|init_failed:1:*初始化失敗*|empty:1:*未載入任何模組*|ready:0:ready)
+                log_pass "模組管理器載入邊界：$mode" ;;
+            *) log_fail "模組管理器載入邊界不正確：$mode rc=$rc $out" ;;
+        esac
+    done
+    rm -rf "$tmp"
 }
 
 # 檢查 run_all_tests.sh 是否只在 Linux CI 跑進階測試
@@ -353,7 +448,7 @@ test_module_manager_package_status_cache() {
         return
     fi
 
-    if search_literal 'declare -A MODULE_PKG_STATUS_CACHE' "$module_manager" && \
+    if search_literal 'declare -gA MODULE_PKG_STATUS_CACHE' "$module_manager" && \
        search_literal '_module_pkg_is_installed()' "$module_manager" && \
        search_literal 'MODULE_PKG_STATUS_CACHE["$cache_key"]' "$module_manager"; then
         log_pass "module_manager.sh 已快取套件狀態查詢"
@@ -366,7 +461,7 @@ test_module_manager_package_status_cache() {
 test_common_tui_backends() {
     log_test "檢查 common.sh 的 gum/fzf TUI backend..."
 
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     if [ ! -f "$common" ]; then
         log_fail "找不到 common.sh"
         return
@@ -387,7 +482,7 @@ test_common_tui_backends() {
 test_common_tui_backend_hint() {
     log_test "檢查 common.sh 的 TUI backend 提示..."
 
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     if [ ! -f "$common" ]; then
         log_fail "找不到 common.sh"
         return
@@ -406,7 +501,7 @@ test_common_tui_backend_hint() {
 test_common_tui_log_viewer() {
     log_test "檢查 common.sh 的 TUI log viewer..."
 
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     if [ ! -f "$common" ]; then
         log_fail "找不到 common.sh"
         return
@@ -416,7 +511,7 @@ test_common_tui_log_viewer() {
        search_literal 'gum pager < "$view_file"' "$common" && \
        search_literal 'fzf --height=80% --border --no-sort' "$common" && \
        search_literal 'whiptail --title "$title" --textbox "$view_file"' "$common" && \
-       search_literal 'func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_log_viewer tui_gauge tui_inputbox"' "$common"; then
+       search_literal 'func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_log_viewer tui_gauge"' "$common"; then
         log_pass "common.sh 已提供跨 backend 的 TUI log viewer"
     else
         log_fail "common.sh 缺少跨 backend 的 TUI log viewer"
@@ -427,7 +522,7 @@ test_common_tui_log_viewer() {
 test_common_tui_quiet_status_logs_are_log_only() {
     log_test "檢查 TUI quiet 模式下狀態 log 只寫入日誌..."
 
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     if [ ! -f "$common" ]; then
         log_fail "找不到 common.sh"
         return
@@ -442,7 +537,7 @@ test_common_tui_quiet_status_logs_are_log_only() {
         TUI_MODE=quiet \
         ENABLE_LOGGING=true \
         LOG_FILE="$tmp_log" \
-        bash -c 'source "$1"; log_info "hidden info"; log_success "hidden success"; log_warning "hidden warning"' _ "$common" 2>&1
+        bash -c 'source "$1"; log_info "hidden info"; log_success "hidden success"; log_warning "hidden warning"' _ "$SCRIPT_DIR/scripts/core/common.sh" 2>&1
     )
 
     local cli_output
@@ -451,7 +546,7 @@ test_common_tui_quiet_status_logs_are_log_only() {
         USE_TUI=false \
         TUI_MODE=quiet \
         ENABLE_LOGGING=false \
-        bash -c 'source "$1"; log_info "shown info"; log_success "shown success"' _ "$common" 2>&1
+        bash -c 'source "$1"; log_info "shown info"; log_success "shown success"' _ "$SCRIPT_DIR/scripts/core/common.sh" 2>&1
     )
 
     if [ -z "$tui_output" ] && \
@@ -468,25 +563,25 @@ test_common_tui_quiet_status_logs_are_log_only() {
     rm -f "$tmp_log"
 }
 
-# 檢查 remote bootstrap 階段不再直接輸出 INFO/SUCCESS，避免 common.sh 載入前污染 TUI
+# 檢查 bootstrap 階段的狀態輸出可被 quiet 模式收斂（common.sh 載入前不可污染 TUI），
+# 且已移除逐檔下載的遠端流程
 test_install_remote_bootstrap_status_quiet() {
-    log_test "檢查 remote bootstrap 狀態輸出可被 quiet 模式收斂..."
+    log_test "檢查 bootstrap 狀態輸出可被 quiet 模式收斂..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
     fi
 
     if search_literal 'bootstrap_status()' "$installer" && \
-       search_literal 'bootstrap_status "INFO" "Downloading common library from remote source..."' "$installer" && \
-       search_literal 'bootstrap_status "SUCCESS" "Common library loaded"' "$installer" && \
+       search_literal 'bootstrap_status "INFO" "下載專案壓縮檔：$url"' "$installer" && \
        search_literal '[ "$level" != "ERROR" ] && [ "${TUI_MODE:-quiet}" = "quiet" ]' "$installer" && \
-       ! search_literal 'echo -e "\033[0;36mINFO: Downloading common library from remote source...\033[0m"' "$installer" && \
-       ! search_literal 'echo -e "\033[0;32mSUCCESS: Common library loaded\033[0m"' "$installer"; then
-        log_pass "remote bootstrap 狀態輸出已支援 quiet 收斂"
+       ! search_literal 'REMOTE_INSTALL' "$installer" && \
+       ! search_literal 'Downloading common library from remote source' "$installer"; then
+        log_pass "bootstrap 狀態輸出已支援 quiet 收斂，且無逐檔下載流程"
     else
-        log_fail "remote bootstrap 仍可能直接輸出 INFO/SUCCESS"
+        log_fail "bootstrap 狀態輸出或遠端流程不符合新設計"
     fi
 }
 
@@ -494,7 +589,7 @@ test_install_remote_bootstrap_status_quiet() {
 test_common_fzf_checklist_enter_selects_current_item() {
     log_test "檢查 fzf checklist 的 Space 勾選與 Enter 確認行為..."
 
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     if [ ! -f "$common" ]; then
         log_fail "找不到 common.sh"
         return
@@ -519,7 +614,7 @@ FAKE_FZF
         FAKE_FZF_ARGS_FILE="$args_file" \
         USE_TUI=true \
         TUI_BACKEND=fzf \
-        bash -c 'source "$1"; tui_checklist "Title" "Prompt" "module_one" "Module One" "module_two" "Module Two"' _ "$common"
+        bash -c 'source "$1"; tui_checklist "Title" "Prompt" "module_one" "Module One" "module_two" "Module Two"' _ "$SCRIPT_DIR/scripts/core/common.sh"
     )
     local exit_code=$?
     local fzf_args
@@ -544,7 +639,7 @@ FAKE_FZF
 test_install_module_prompt_backend_neutral() {
     log_test "檢查 install.sh 模組選擇提示為 backend-neutral..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -566,7 +661,7 @@ test_install_module_prompt_backend_neutral() {
 test_install_tui_log_flow() {
     log_test "檢查 install.sh 的 TUI 安裝與日誌流程..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -593,7 +688,7 @@ test_install_tui_log_flow() {
 test_install_guided_tui_flow() {
     log_test "檢查 install.sh 使用導覽式 TUI 安裝流程..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -619,11 +714,11 @@ test_install_guided_tui_flow() {
     fi
 }
 
-# 檢查 TUI quiet 模式下，安裝日誌提示與 remote 下載腳本訊息不再直接刷到終端
+# 檢查 TUI quiet 模式下，安裝日誌提示不再直接刷到終端，且逐檔下載函式已移除
 test_install_tui_wraps_pre_menu_logs() {
-    log_test "檢查 TUI quiet 會包住安裝日誌與 remote 下載訊息..."
+    log_test "檢查 TUI quiet 會包住安裝日誌，且逐檔下載已移除..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -631,19 +726,15 @@ test_install_tui_wraps_pre_menu_logs() {
 
     if search_literal 'installer_tui_quiet()' "$installer" && \
        search_literal 'run_logged_command()' "$installer" && \
-       search_literal 'run_remote_script_downloads()' "$installer" && \
-       search_literal 'download_remote_file()' "$installer" && \
        search_literal 'if installer_tui_quiet; then' "$installer" && \
        search_literal 'log_success "安裝日誌將保存到：$LOG_FILE"' "$installer" && \
        search_literal 'run_logged_command install_module "$module"' "$installer" && \
-       search_literal 'run_remote_script_downloads' "$installer" && \
-       ! search_literal 'exec 1> >(tee -a "$LOG_FILE") 2>&1' "$installer" && \
-       ! search_literal 'printf "${CYAN}########## 下載安裝腳本 ##########${NC}\n"' "$installer" && \
-       ! search_literal 'printf "${BLUE}下載 core/$script...${NC}\n"' "$installer" && \
-       ! search_literal 'printf "${BLUE}下載 utils/secure_download.sh...${NC}\n"' "$installer"; then
-        log_pass "TUI quiet 已收斂前置日誌與 remote 下載訊息"
+       ! search_literal 'run_remote_script_downloads' "$installer" && \
+       ! search_literal 'download_remote_file' "$installer" && \
+       ! search_literal 'exec 1> >(tee -a "$LOG_FILE") 2>&1' "$installer"; then
+        log_pass "TUI quiet 已收斂前置日誌，逐檔下載流程已移除"
     else
-        log_fail "TUI quiet 仍可能讓安裝日誌或 remote 下載訊息刷到終端"
+        log_fail "TUI quiet 前置日誌或逐檔下載移除狀態不符"
     fi
 }
 
@@ -651,7 +742,7 @@ test_install_tui_wraps_pre_menu_logs() {
 test_install_help_tui_backend_docs() {
     log_test "檢查 install.sh help 的 TUI 說明..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -885,7 +976,7 @@ test_secure_download_variable_namespace() {
 test_common_backup_file_strict_default() {
     log_test "檢查 common.sh backup_file 嚴格模式預設值..."
 
-    local common_sh="$SCRIPT_DIR/scripts/core/common.sh"
+    local common_sh="$COMMON_SRC"
     if [ ! -f "$common_sh" ]; then
         log_fail "找不到 common.sh"
         return
@@ -1047,7 +1138,7 @@ test_docker_compose_no_obsolete_version_field() {
 test_common_idempotent_source_guard() {
     log_test "檢查 common.sh 重複載入保護..."
 
-    local common_sh="$SCRIPT_DIR/scripts/core/common.sh"
+    local common_sh="$COMMON_SRC"
     if [ ! -f "$common_sh" ]; then
         log_fail "找不到 common.sh"
         return
@@ -1065,7 +1156,7 @@ test_common_idempotent_source_guard() {
 test_install_non_interactive_mode() {
     log_test "檢查 install.sh 的 non-interactive 模式..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -1082,7 +1173,7 @@ test_install_non_interactive_mode() {
 
 # 從 install.sh 取出指定的頂層函式定義（不執行主流程），供行為測試在子 shell 中 eval
 extract_install_functions() {
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     local fn
     for fn in "$@"; do
         awk -v fn="$fn" '
@@ -1095,7 +1186,7 @@ extract_install_functions() {
 
 # 從 common.sh 取出指定函式（供子 shell 測試）
 extract_common_functions() {
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     local fn
     for fn in "$@"; do
         awk -v fn="$fn" '
@@ -1298,7 +1389,7 @@ test_install_summary_and_checklist_labels() {
         build_install_summary_text
     ' _ "$funcs")" || true
     if [[ "$plain" == *"• 基礎工具\n"* ]] && [[ "$plain" != *"：安裝"* ]] && \
-       ! search_literal '預估時間：10-15 分鐘' "$SCRIPT_DIR/install.sh"; then
+       ! search_literal '預估時間：10-15 分鐘' "$INSTALLER_SRC"; then
         log_pass "沒有模組管理器時確認摘要只列模組名稱"
     else
         log_fail "沒有模組管理器時確認摘要不正確: $plain"
@@ -1425,26 +1516,22 @@ test_install_module_checklist_behavior() {
 
     local funcs tag_def
     funcs="$(extract_install_functions module_checklist_label build_module_checklist_items parse_module_selection parse_checklist_selection select_modules_tui module_display_names module_display_name)"
-    tag_def="$(grep -E '^ADVANCED_CHECKLIST_(TAG|LABEL)=' "$SCRIPT_DIR/install.sh")"
+    tag_def="$(grep -E '^ADVANCED_CHECKLIST_(TAG|LABEL)=' "$INSTALLER_SRC")"
 
     local rc=0 out
-    # 預設狀態：已安裝 OFF、部分安裝／未安裝 ON；模組管理器不可用時全 ON
+    # 預設狀態：已安裝 OFF、部分安裝／未安裝 ON
     out="$(bash -c '
         eval "$1"; eval "$2"
         declare -A MODULE_NAMES=([base]="基礎工具" [dev]="開發工具" [term]="終端設定")
         declare -A MODULE_DESCRIPTIONS=([base]="git" [dev]="nvim" [term]="zsh")
         MODULE_LIST=(base dev term)
-        USE_MODULE_MANAGER=true
         check_module_status() { case "$1" in base) echo installed ;; dev) echo partial ;; *) echo not_installed ;; esac; }
         checklist_items=(); checklist_states=()
         build_module_checklist_items
         echo "${checklist_states[*]}"; echo "${checklist_items[1]}"
-        USE_MODULE_MANAGER=false
-        build_module_checklist_items
-        echo "${checklist_states[*]}"; echo "${#checklist_items[@]}"
     ' _ "$funcs" "$tag_def")" || rc=$?
     if [ "$rc" -eq 0 ] && \
-       [[ "$out" == "OFF ON ON"$'\n'"基礎工具 — git（已安裝）"$'\n'"ON ON ON ON ON ON"$'\n'"12" ]]; then
+       [[ "$out" == "OFF ON ON"$'\n'"基礎工具 — git（已安裝）" ]]; then
         log_pass "已安裝的模組預設不勾選，其餘預設勾選（標籤仍顯示已安裝）"
     else
         log_fail "勾選預設狀態不正確 (rc=$rc): $out"
@@ -1475,7 +1562,7 @@ test_install_module_checklist_behavior() {
         eval "$1"; eval "$2"
         declare -A MODULE_NAMES=([base]="基礎工具" [dev]="開發工具")
         declare -A MODULE_DESCRIPTIONS=([base]="git" [dev]="nvim")
-        MODULE_LIST=(base dev); USE_MODULE_MANAGER=true; INSTALL_MODE=full
+        MODULE_LIST=(base dev); INSTALL_MODE=full
         check_module_status() { [ "$1" = base ] && echo installed || echo not_installed; }
         _tui_backend_supports_state_checklist() { [ "$STATE_BACKEND" = yes ]; }
         next_result() { local n; n=$(cat "$T/n" 2>/dev/null || echo 0); echo $((n + 1)) > "$T/n"; sed -n "$((n + 1))p" "$T/results"; }
@@ -1535,7 +1622,7 @@ test_install_results_exit_code() {
         unset INSTALL_RESULT_STATUS INSTALL_ABORTED
         printf "%s" "$(install_results_exit_code)"
     ' _ "$funcs")" || rc=$?
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ "$rc" -eq 0 ] && [ "$out" = "0 0 1 1 1 0 1 0" ] && \
        search_literal 'exit "$(install_results_exit_code)"' "$installer" && \
        search_literal 'ni_rc="$(install_results_exit_code)"' "$installer"; then
@@ -1605,11 +1692,11 @@ test_guided_override_lifecycle() {
         # CLI 完成後也清除覆寫；使用無對應模組的清單及 stub，避免任何安裝。
         (
             GUIDED_RESULT_SCREEN=false; selected_modules=unknown
-            USE_MODULE_MANAGER=true; MODULE_LIST=(base); DRY_RUN=false; ADVANCED_MODE=false
+            MODULE_LIST=(base); DRY_RUN=false; ADVANCED_MODE=false
             CYAN=""; NC=""
             installer_tui_quiet() { return 1; }
             prepare_package_index() { :; }; install_homebrew_if_requested() { :; }
-            show_installation_report() { :; }; record_created_configs() { :; }
+            show_installation_report() { :; }; record_created_configs() { :; }; install_uninstaller_copy() { :; }
             seed
             trap "empty; [ -z \"\$selected_modules\" ] || exit 93" EXIT
             install_selected_modules >/dev/null
@@ -1628,7 +1715,7 @@ test_guided_cancel_all_results() {
     funcs="$(extract_install_functions run_guided_tui_flow install_selected_modules reset_install_results install_results_exit_code)"
     LC_ALL=C bash -c '
         set -euo pipefail; eval "$1"
-        RED=""; NC=""; USE_MODULE_MANAGER=true; MODULE_LIST=(base); DRY_RUN=false
+        RED=""; NC=""; MODULE_LIST=(base); DRY_RUN=false
         ADVANCED_MODE=true; NON_INTERACTIVE=false
         log_info() { :; }; log_warning() { :; }
         module_interactive_package_filter() { return 1; }
@@ -1700,11 +1787,10 @@ test_install_package_index_step() {
         declare -A MODULE_PACKAGES=([withscript]="" [noscript]="a b" [allin]="a" [partial]="a zz")
         declare -A MODULE_APT_FALLBACK=() MODULE_BREW_PACKAGES=()
         _module_pkg_is_installed() { [ "$2" = a ] || [ "$2" = b ]; }
-        USE_MODULE_MANAGER=true; FORCE_REINSTALL=false
+        FORCE_REINSTALL=false
         need() { if selected_modules_need_package_index "$1"; then printf "Y"; else printf "N"; fi; }
         need allin; need withscript; need partial; need "allin noscript"
         FORCE_REINSTALL=true; need allin; FORCE_REINSTALL=false
-        USE_MODULE_MANAGER=false; need allin; USE_MODULE_MANAGER=true
         printf "|\n"
 
         # prepare_package_index：以假函式觀察行為
@@ -1725,7 +1811,7 @@ test_install_package_index_step() {
     ' _ "$funcs")" || rc=$?
 
     local expected
-    expected="NYYNYY|"$'\n'"run(更新套件索引);ensure;finish(ok:);"$'\n'"run(更新套件索引);ensure;finish(partial:更新失敗，繼續安裝);"$'\n'"ensure;"$'\n'"ensure;"$'\n'$'\n'"[]"
+    expected="NYYNY|"$'\n'"run(更新套件索引);ensure;finish(ok:);"$'\n'"run(更新套件索引);ensure;finish(partial:更新失敗，繼續安裝);"$'\n'"ensure;"$'\n'"ensure;"$'\n'$'\n'"[]"
     if [ "$rc" -eq 0 ] && [ "$out" = "$expected" ]; then
         log_pass "套件索引更新在第一個模組前以獨立進度行顯示，失敗為警示並繼續，且只在需要時執行"
     else
@@ -1737,7 +1823,7 @@ test_install_package_index_step() {
 test_install_homebrew_offer_conditions() {
     log_test "檢查 Homebrew 詢問時機..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     local env_block
     env_block="$(awk '/^check_environment\(\) \{/{f=1} f{print} f && /^}$/{exit}' "$installer")"
     if [ -z "$env_block" ] || [[ "$env_block" == *"tui_yesno"* ]] || [[ "$env_block" == *"read -r install_brew_answer"* ]]; then
@@ -1803,8 +1889,8 @@ test_install_error_summary() {
        [[ "$apt_out" != *'$LOG_FILE'* ]] && \
        [[ "$dnf_out" == *"sudo dnf makecache"* ]] && \
        [[ "$dnf_out" != *"apt update"* ]] && \
-       ! search_literal '[r]${NC} 重試' "$SCRIPT_DIR/install.sh" && \
-       ! search_literal '請重新執行安裝腳本' "$SCRIPT_DIR/install.sh"; then
+       ! search_literal '[r]${NC} 重試' "$INSTALLER_SRC" && \
+       ! search_literal '請重新執行安裝腳本' "$INSTALLER_SRC"; then
         log_pass "錯誤畫面顯示實際日誌路徑與對應套件管理器的建議"
     else
         log_fail "錯誤畫面內容不正確 (rc=$rc): $apt_out / $dnf_out"
@@ -1875,9 +1961,12 @@ run_all_tests() {
     echo
     test_script_version_bumped
     echo
+    test_module_manager_survives_function_scope
+    echo
     test_skip_python_check_default
     echo
     test_module_manager_install_path
+    test_required_module_manager
     echo
     test_linux_ci_gate_for_extended_suites
     echo
