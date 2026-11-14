@@ -6,6 +6,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TESTS_PASSED=0
 TESTS_FAILED=0
 
+# install.sh 與 common.sh 依職責拆成多個檔案（scripts/install/、scripts/core/common/）。
+# 字面比對與函式擷取以「合併後的原始碼」為對象：測試要驗證的是程式內容，
+# 不是內容放在哪個檔案。需要實際 source 或執行時仍使用真正的路徑。
+SOURCES_TMP="$(mktemp -d)"
+trap 'rm -rf "$SOURCES_TMP"' EXIT
+INSTALLER_SRC="$SOURCES_TMP/install.combined.sh"
+COMMON_SRC="$SOURCES_TMP/common.combined.sh"
+cat "$SCRIPT_DIR/install.sh" "$SCRIPT_DIR"/scripts/install/*.sh > "$INSTALLER_SRC"
+cat "$SCRIPT_DIR/scripts/core/common.sh" "$SCRIPT_DIR"/scripts/core/common/*.sh > "$COMMON_SRC"
+
 # 測試顏色
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -59,7 +69,7 @@ search_literal() {
 test_script_syntax() {
     log_test "測試腳本語法..."
     
-    for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*/*.sh; do
+    for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*/*.sh "$SCRIPT_DIR"/scripts/core/common/*.sh; do
         if [ -f "$script" ]; then
             if bash -n "$script" 2>/dev/null; then
                 log_pass "$(basename "$script") 語法正確"
@@ -75,6 +85,8 @@ test_script_permissions() {
     log_test "測試腳本權限..."
     
     for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*/*.sh; do
+        # scripts/install/ 下是 install.sh 載入的片段，不是可獨立執行的入口（下面另外檢查）
+        case "$script" in "$SCRIPT_DIR"/scripts/install/*) continue ;; esac
         if [ -f "$script" ]; then
             if [ -x "$script" ]; then
                 log_pass "$(basename "$script") 具有執行權限"
@@ -83,6 +95,18 @@ test_script_permissions() {
             fi
         fi
     done
+
+    # 只供載入的片段不應有執行權限：直接執行它們沒有意義，也避免被誤當成入口
+    local part bad=""
+    for part in "$SCRIPT_DIR"/scripts/install/*.sh "$SCRIPT_DIR"/scripts/core/common/*.sh; do
+        [ -f "$part" ] || continue
+        [ ! -x "$part" ] || bad="$bad ${part#"$SCRIPT_DIR"/}"
+    done
+    if [ -z "$bad" ]; then
+        log_pass "載入用片段（scripts/install、scripts/core/common）沒有執行權限"
+    else
+        log_fail "載入用片段不應有執行權限：$bad"
+    fi
 }
 
 # 測試共用函數庫
@@ -121,6 +145,19 @@ test_required_files() {
         "install.sh"
         "requirements.txt"
         "scripts/core/common.sh"
+        "scripts/core/common/logging.sh"
+        "scripts/core/common/system.sh"
+        "scripts/core/common/packages.sh"
+        "scripts/core/common/files.sh"
+        "scripts/core/common/tui.sh"
+        "scripts/install/support.sh"
+        "scripts/install/preflight.sh"
+        "scripts/install/selection.sh"
+        "scripts/install/homebrew.sh"
+        "scripts/install/menu.sh"
+        "scripts/install/report.sh"
+        "scripts/install/progress.sh"
+        "scripts/install/runner.sh"
         "scripts/core/python_setup.sh"
         "scripts/core/terminal_setup.sh"
         "scripts/maintenance/health_check.sh"
@@ -171,7 +208,7 @@ test_install_config_requires_path() {
 test_install_sudo_guard_no_command_substitution() {
     log_test "靜態檢查 sudo 防護區塊不執行 curl..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     local block bad
     block="$(awk '/\$\{SUDO_USER:-\}/ && /ALLOW_ROOT/ {f=1} f {print} f && /^fi$/ {exit}' "$installer")"
     if [ -z "$block" ]; then
@@ -216,8 +253,8 @@ test_install_sudo_guard_behavior() {
 test_script_version_bumped() {
     log_test "檢查腳本版本已更新..."
 
-    local installer="$SCRIPT_DIR/install.sh"
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local installer="$INSTALLER_SRC"
+    local common="$COMMON_SRC"
     if [ ! -f "$installer" ] || [ ! -f "$common" ]; then
         log_fail "找不到 install.sh 或 common.sh"
         return
@@ -276,7 +313,7 @@ test_module_manager_survives_function_scope() {
 test_skip_python_check_default() {
     log_test "檢查 SKIP_PYTHON_CHECK 預設值..."
 
-    if search_text "SKIP_PYTHON_CHECK=\\\"\\$\\{SKIP_PYTHON_CHECK:-" "$SCRIPT_DIR/install.sh"; then
+    if search_text "SKIP_PYTHON_CHECK=\\\"\\$\\{SKIP_PYTHON_CHECK:-" "$INSTALLER_SRC"; then
         log_pass "SKIP_PYTHON_CHECK 已設定預設值"
     else
         log_fail "SKIP_PYTHON_CHECK 未設定預設值"
@@ -287,7 +324,7 @@ test_skip_python_check_default() {
 test_module_manager_install_path() {
     log_test "檢查模組管理器安裝路徑..."
 
-    if search_text "install_module" "$SCRIPT_DIR/install.sh"; then
+    if search_text "install_module" "$INSTALLER_SRC"; then
         log_pass "install.sh 使用 install_module"
     else
         log_fail "install.sh 未使用 install_module"
@@ -436,7 +473,7 @@ test_module_manager_package_status_cache() {
 test_common_tui_backends() {
     log_test "檢查 common.sh 的 gum/fzf TUI backend..."
 
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     if [ ! -f "$common" ]; then
         log_fail "找不到 common.sh"
         return
@@ -457,7 +494,7 @@ test_common_tui_backends() {
 test_common_tui_backend_hint() {
     log_test "檢查 common.sh 的 TUI backend 提示..."
 
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     if [ ! -f "$common" ]; then
         log_fail "找不到 common.sh"
         return
@@ -476,7 +513,7 @@ test_common_tui_backend_hint() {
 test_common_tui_log_viewer() {
     log_test "檢查 common.sh 的 TUI log viewer..."
 
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     if [ ! -f "$common" ]; then
         log_fail "找不到 common.sh"
         return
@@ -497,7 +534,7 @@ test_common_tui_log_viewer() {
 test_common_tui_quiet_status_logs_are_log_only() {
     log_test "檢查 TUI quiet 模式下狀態 log 只寫入日誌..."
 
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     if [ ! -f "$common" ]; then
         log_fail "找不到 common.sh"
         return
@@ -512,7 +549,7 @@ test_common_tui_quiet_status_logs_are_log_only() {
         TUI_MODE=quiet \
         ENABLE_LOGGING=true \
         LOG_FILE="$tmp_log" \
-        bash -c 'source "$1"; log_info "hidden info"; log_success "hidden success"; log_warning "hidden warning"' _ "$common" 2>&1
+        bash -c 'source "$1"; log_info "hidden info"; log_success "hidden success"; log_warning "hidden warning"' _ "$SCRIPT_DIR/scripts/core/common.sh" 2>&1
     )
 
     local cli_output
@@ -521,7 +558,7 @@ test_common_tui_quiet_status_logs_are_log_only() {
         USE_TUI=false \
         TUI_MODE=quiet \
         ENABLE_LOGGING=false \
-        bash -c 'source "$1"; log_info "shown info"; log_success "shown success"' _ "$common" 2>&1
+        bash -c 'source "$1"; log_info "shown info"; log_success "shown success"' _ "$SCRIPT_DIR/scripts/core/common.sh" 2>&1
     )
 
     if [ -z "$tui_output" ] && \
@@ -543,7 +580,7 @@ test_common_tui_quiet_status_logs_are_log_only() {
 test_install_remote_bootstrap_status_quiet() {
     log_test "檢查 bootstrap 狀態輸出可被 quiet 模式收斂..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -564,7 +601,7 @@ test_install_remote_bootstrap_status_quiet() {
 test_common_fzf_checklist_enter_selects_current_item() {
     log_test "檢查 fzf checklist 的 Space 勾選與 Enter 確認行為..."
 
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     if [ ! -f "$common" ]; then
         log_fail "找不到 common.sh"
         return
@@ -589,7 +626,7 @@ FAKE_FZF
         FAKE_FZF_ARGS_FILE="$args_file" \
         USE_TUI=true \
         TUI_BACKEND=fzf \
-        bash -c 'source "$1"; tui_checklist "Title" "Prompt" "module_one" "Module One" "module_two" "Module Two"' _ "$common"
+        bash -c 'source "$1"; tui_checklist "Title" "Prompt" "module_one" "Module One" "module_two" "Module Two"' _ "$SCRIPT_DIR/scripts/core/common.sh"
     )
     local exit_code=$?
     local fzf_args
@@ -614,7 +651,7 @@ FAKE_FZF
 test_install_module_prompt_backend_neutral() {
     log_test "檢查 install.sh 模組選擇提示為 backend-neutral..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -636,7 +673,7 @@ test_install_module_prompt_backend_neutral() {
 test_install_tui_log_flow() {
     log_test "檢查 install.sh 的 TUI 安裝與日誌流程..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -663,7 +700,7 @@ test_install_tui_log_flow() {
 test_install_guided_tui_flow() {
     log_test "檢查 install.sh 使用導覽式 TUI 安裝流程..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -693,7 +730,7 @@ test_install_guided_tui_flow() {
 test_install_tui_wraps_pre_menu_logs() {
     log_test "檢查 TUI quiet 會包住安裝日誌，且逐檔下載已移除..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -717,7 +754,7 @@ test_install_tui_wraps_pre_menu_logs() {
 test_install_help_tui_backend_docs() {
     log_test "檢查 install.sh help 的 TUI 說明..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -951,7 +988,7 @@ test_secure_download_variable_namespace() {
 test_common_backup_file_strict_default() {
     log_test "檢查 common.sh backup_file 嚴格模式預設值..."
 
-    local common_sh="$SCRIPT_DIR/scripts/core/common.sh"
+    local common_sh="$COMMON_SRC"
     if [ ! -f "$common_sh" ]; then
         log_fail "找不到 common.sh"
         return
@@ -1113,7 +1150,7 @@ test_docker_compose_no_obsolete_version_field() {
 test_common_idempotent_source_guard() {
     log_test "檢查 common.sh 重複載入保護..."
 
-    local common_sh="$SCRIPT_DIR/scripts/core/common.sh"
+    local common_sh="$COMMON_SRC"
     if [ ! -f "$common_sh" ]; then
         log_fail "找不到 common.sh"
         return
@@ -1131,7 +1168,7 @@ test_common_idempotent_source_guard() {
 test_install_non_interactive_mode() {
     log_test "檢查 install.sh 的 non-interactive 模式..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ ! -f "$installer" ]; then
         log_fail "找不到 install.sh"
         return
@@ -1148,7 +1185,7 @@ test_install_non_interactive_mode() {
 
 # 從 install.sh 取出指定的頂層函式定義（不執行主流程），供行為測試在子 shell 中 eval
 extract_install_functions() {
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     local fn
     for fn in "$@"; do
         awk -v fn="$fn" '
@@ -1161,7 +1198,7 @@ extract_install_functions() {
 
 # 從 common.sh 取出指定函式（供子 shell 測試）
 extract_common_functions() {
-    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local common="$COMMON_SRC"
     local fn
     for fn in "$@"; do
         awk -v fn="$fn" '
@@ -1364,7 +1401,7 @@ test_install_summary_and_checklist_labels() {
         build_install_summary_text
     ' _ "$funcs")" || true
     if [[ "$plain" == *"• 基礎工具\n"* ]] && [[ "$plain" != *"：安裝"* ]] && \
-       ! search_literal '預估時間：10-15 分鐘' "$SCRIPT_DIR/install.sh"; then
+       ! search_literal '預估時間：10-15 分鐘' "$INSTALLER_SRC"; then
         log_pass "沒有模組管理器時確認摘要只列模組名稱"
     else
         log_fail "沒有模組管理器時確認摘要不正確: $plain"
@@ -1491,7 +1528,7 @@ test_install_module_checklist_behavior() {
 
     local funcs tag_def
     funcs="$(extract_install_functions module_checklist_label build_module_checklist_items parse_module_selection parse_checklist_selection select_modules_tui module_display_names module_display_name)"
-    tag_def="$(grep -E '^ADVANCED_CHECKLIST_(TAG|LABEL)=' "$SCRIPT_DIR/install.sh")"
+    tag_def="$(grep -E '^ADVANCED_CHECKLIST_(TAG|LABEL)=' "$INSTALLER_SRC")"
 
     local rc=0 out
     # 預設狀態：已安裝 OFF、部分安裝／未安裝 ON
@@ -1597,7 +1634,7 @@ test_install_results_exit_code() {
         unset INSTALL_RESULT_STATUS INSTALL_ABORTED
         printf "%s" "$(install_results_exit_code)"
     ' _ "$funcs")" || rc=$?
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     if [ "$rc" -eq 0 ] && [ "$out" = "0 0 1 1 1 0 1 0" ] && \
        search_literal 'exit "$(install_results_exit_code)"' "$installer" && \
        search_literal 'ni_rc="$(install_results_exit_code)"' "$installer"; then
@@ -1798,7 +1835,7 @@ test_install_package_index_step() {
 test_install_homebrew_offer_conditions() {
     log_test "檢查 Homebrew 詢問時機..."
 
-    local installer="$SCRIPT_DIR/install.sh"
+    local installer="$INSTALLER_SRC"
     local env_block
     env_block="$(awk '/^check_environment\(\) \{/{f=1} f{print} f && /^}$/{exit}' "$installer")"
     if [ -z "$env_block" ] || [[ "$env_block" == *"tui_yesno"* ]] || [[ "$env_block" == *"read -r install_brew_answer"* ]]; then
@@ -1864,8 +1901,8 @@ test_install_error_summary() {
        [[ "$apt_out" != *'$LOG_FILE'* ]] && \
        [[ "$dnf_out" == *"sudo dnf makecache"* ]] && \
        [[ "$dnf_out" != *"apt update"* ]] && \
-       ! search_literal '[r]${NC} 重試' "$SCRIPT_DIR/install.sh" && \
-       ! search_literal '請重新執行安裝腳本' "$SCRIPT_DIR/install.sh"; then
+       ! search_literal '[r]${NC} 重試' "$INSTALLER_SRC" && \
+       ! search_literal '請重新執行安裝腳本' "$INSTALLER_SRC"; then
         log_pass "錯誤畫面顯示實際日誌路徑與對應套件管理器的建議"
     else
         log_fail "錯誤畫面內容不正確 (rc=$rc): $apt_out / $dnf_out"
