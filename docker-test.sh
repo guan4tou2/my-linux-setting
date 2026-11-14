@@ -3,7 +3,7 @@
 # Docker 測試環境管理腳本
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="linux-setting-test"
-CONTAINER_NAME="linux-setting-test-container"
+CONTAINER_NAME="${CONTAINER_NAME:-linux-setting-test-container}"
 
 # 顏色定義
 RED='\033[0;31m'

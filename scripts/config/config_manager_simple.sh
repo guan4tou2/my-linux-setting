@@ -98,7 +98,7 @@ set_config() {
     # 更新或添加配置值
     local updated=false
     while IFS= read -r line; do
-        if [[ "$line" =~ ^[[:space:]]*$key[[:space:]]*= ]]; then
+        if [[ "$line" =~ ^[[:space:]]*${key}[[:space:]]*= ]]; then
             echo "$key=$value"
             updated=true
         else

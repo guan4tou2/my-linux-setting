@@ -18,6 +18,9 @@ RUN apt-get update && \
         curl \
         wget \
         bc \
+        tmux \
+        whiptail \
+        shellcheck \
         git \
         sudo \
         python3 \
