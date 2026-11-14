@@ -86,11 +86,8 @@ readonly CACHE_TTL="${CACHE_TTL:-86400}"
 
 # Performance constants
 readonly PARALLEL_JOBS="${PARALLEL_JOBS:-$(command -v nproc >/dev/null 2>&1 && nproc 2>/dev/null || echo 4)}"
-readonly MIN_PACKAGES_FOR_PARALLEL="${MIN_PACKAGES_FOR_PARALLEL:-3}"
 
 # Global variables
-SCRIPT_START_TIME=$(command -v date >/dev/null 2>&1 && date +%s) || true
-readonly SCRIPT_START_TIME
 TOTAL_STEPS=0
 CURRENT_STEP=0
 
@@ -501,21 +498,6 @@ check_network() {
     fi
 }
 
-check_internet_speed() {
-    local url="http://cachefly.cachefly.net/1mb.test"
-    local start_time end_time duration speed
-    
-    start_time=$(date +%s.%N)
-    if curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" | grep -q "200"; then
-        end_time=$(date +%s.%N)
-        # 使用 awk 進行浮點運算
-        duration=$(awk "BEGIN {print $end_time - $start_time}")
-        speed=$(awk "BEGIN {printf \"%.2f\", 1 / $duration}")
-        echo "$speed"
-    else
-        echo "0"
-    fi
-}
 
 # ==============================================================================
 # 並行安裝函數
@@ -591,109 +573,6 @@ install_apt_packages_parallel() {
     return 0
 }
 
-# 並行下載多個文件
-download_files_parallel() {
-    local -A url_file_map
-    while [[ $# -gt 0 ]]; do
-        url_file_map["$1"]="$2"
-        shift 2
-    done
-    
-    local max_jobs="${PARALLEL_JOBS:-3}"
-    local temp_dir
-    temp_dir=$(mktemp -d)
-    local pids=()
-    local failed_downloads=()
-    
-    log_info "並行下載 ${#url_file_map[@]} 個文件"
-    
-    # 下載單個文件的函數
-    download_single_file() {
-        local url="$1"
-        local output="$2"
-        local log_file="$3"
-        
-        {
-            if safe_download "$url" "$output"; then
-                echo "SUCCESS:$url"
-            else
-                echo "FAILED:$url"
-            fi
-        } > "$log_file" 2>&1
-    }
-    
-    # 導出函數供子 shell 使用
-    for func in download_single_file safe_download log_info log_success log_error; do
-        if declare -f "$func" > /dev/null 2>&1; then
-            export -f "${func?}" 2>/dev/null || true
-        fi
-    done
-    
-    # 啟動並行下載任務
-    for url in "${!url_file_map[@]}"; do
-        local output="${url_file_map[$url]}"
-        local log_file
-        log_file="$temp_dir/$(basename "$output").log" || true
-        
-        # 等待任務槽位可用
-        while [ ${#pids[@]} -ge $max_jobs ]; do
-            for i in "${!pids[@]}"; do
-                if ! kill -0 "${pids[i]}" 2>/dev/null; then
-                    unset 'pids[i]'
-                fi
-            done
-            pids=("${pids[@]}") # 重新索引數組
-            sleep 0.1
-        done
-        
-        # 創建輸出目錄
-        mkdir -p "$(dirname "$output")"
-        
-        # 啟動下載任務
-        download_single_file "$url" "$output" "$log_file" &
-        pids+=($!)
-        
-        log_debug "啟動下載任務: $url"
-    done
-    
-    # 等待所有下載完成
-    for pid in "${pids[@]}"; do
-        wait "$pid"
-    done
-    
-    # 收集結果
-    local success_count=0
-    for url in "${!url_file_map[@]}"; do
-        local output="${url_file_map[$url]}"
-        local log_file
-        log_file="$temp_dir/$(basename "$output").log" || true
-        
-        if [ -f "$log_file" ]; then
-            local result
-            result=$(tail -n1 "$log_file" 2>/dev/null)
-            if [[ "$result" == SUCCESS:* ]]; then
-                success_count=$((success_count + 1))
-                log_success "✓ $(basename "$output")"
-            else
-                failed_downloads+=("$url")
-                log_error "✗ $(basename "$output")"
-            fi
-        fi
-    done
-    
-    # 清理臨時文件
-    rm -rf "$temp_dir"
-    
-    log_info "並行下載完成: $success_count/${#url_file_map[@]} 成功"
-    
-    if [ ${#failed_downloads[@]} -gt 0 ]; then
-        log_warning "失敗的下載: ${failed_downloads[*]}"
-        return 1
-    fi
-    
-    return 0
-}
-
 # ==============================================================================
 # Unified Package Installation Functions
 # ==============================================================================
@@ -722,28 +601,6 @@ install_with_homebrew_fallback() {
         log_debug "Homebrew installation failed for $package, will try fallback"
         return 1
     fi
-}
-
-# Unified pattern: Try Homebrew, then call fallback function
-try_homebrew_then() {
-    local package="$1"
-    local binary_name="${2:-$package}"
-    local fallback_function="$3"
-    shift 3
-    # shellcheck disable=SC2124 # 既有介面刻意將所有參數以空白串成單一引數傳給 fallback。
-    local fallback_args="$@"
-
-    if ! install_with_homebrew_fallback "$package" "$binary_name"; then
-        # Homebrew not available or failed, use fallback
-        if [ -n "$fallback_function" ]; then
-            log_info "Using fallback method: $fallback_function"
-            "$fallback_function" "$fallback_args"
-        else
-            log_warning "No fallback method available for $package"
-            return 1
-        fi
-    fi
-    return $?
 }
 
 # Install with multiple fallback methods
@@ -1308,73 +1165,6 @@ install_brew_package() {
     fi
 }
 
-# 批量安裝 Homebrew 包
-install_brew_packages_batch() {
-    local packages=("$@")
-    local failed_packages=()
-
-    # 確保 Homebrew 已安裝
-    if ! command -v brew >/dev/null 2>&1; then
-        log_error "Homebrew 未安裝，無法批量安裝套件"
-        return 1
-    fi
-
-    # 過濾已安裝的包
-    local to_install=()
-    for pkg in "${packages[@]}"; do
-        if check_brew_package_installed "$pkg" 2>/dev/null; then
-            log_info "$pkg 已安裝，跳過 (brew)"
-        else
-            to_install+=("$pkg")
-        fi
-    done
-
-    # 如果沒有需要安裝的包，直接返回
-    if [ ${#to_install[@]} -eq 0 ]; then
-        log_info "所有 Homebrew 包都已安裝"
-        return 0
-    fi
-
-    log_info "批量安裝 ${#to_install[@]} 個 Homebrew 套件"
-
-    # Homebrew 自身支持批量安裝，一次性安裝所有包
-    if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-        if brew install "${to_install[@]}" >/dev/null 2>&1; then
-            log_success "批量安裝成功 (brew)"
-            return 0
-        else
-            # 批量安裝失敗，逐個重試
-            log_warning "批量安裝失敗，嘗試逐個安裝..."
-            for pkg in "${to_install[@]}"; do
-                if ! install_brew_package "$pkg"; then
-                    failed_packages+=("$pkg")
-                fi
-            done
-        fi
-    else
-        if brew install "${to_install[@]}"; then
-            log_success "批量安裝成功 (brew)"
-            return 0
-        else
-            # 批量安裝失敗，逐個重試
-            log_warning "批量安裝失敗，嘗試逐個安裝..."
-            for pkg in "${to_install[@]}"; do
-                if ! install_brew_package "$pkg"; then
-                    failed_packages+=("$pkg")
-                fi
-            done
-        fi
-    fi
-
-    # 報告失敗的包
-    if [ ${#failed_packages[@]} -gt 0 ]; then
-        log_warning "以下 Homebrew 包安裝失敗: ${failed_packages[*]}"
-        return 1
-    fi
-
-    return 0
-}
-
 # 追加一筆安裝記錄到安裝清單（只追加、不重複）。
 # 用法: manifest_record <package|path|file|backup> <值>
 # 任何失敗都安靜略過，絕不影響安裝；--dry-run 不寫入。
@@ -1596,19 +1386,6 @@ save_to_cache() {
     log_debug "保存到快取: $cache_file"
 }
 
-# 清理過期快取
-cleanup_cache() {
-    if [ "$CACHE_ENABLED" != "true" ] || [ ! -d "$CACHE_DIR" ]; then
-        return 0
-    fi
-    
-    log_info "清理過期快取..."
-    
-    find "$CACHE_DIR/downloads" -type f -mtime +1 -exec rm -f {} \; 2>/dev/null
-    find "$CACHE_DIR/metadata" -type f -mtime +1 -exec rm -f {} \; 2>/dev/null
-    
-    log_info "快取清理完成"
-}
 
 # ==============================================================================
 # Security Functions
@@ -1771,118 +1548,8 @@ EOF
     log_success "APT 性能優化配置完成"
 }
 
-# 清理 APT 快取和無用套件
-cleanup_apt_system() {
-    log_info "清理 APT 系統..."
-    
-    # 清理套件快取
-    sudo DEBIAN_FRONTEND=noninteractive apt-get autoclean
 
-    # 移除不需要的套件
-    sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -y
 
-    # 清理孤立套件
-    if check_command deborphan; then
-        local orphaned
-        orphaned=$(deborphan)
-        if [ -n "$orphaned" ]; then
-            echo "$orphaned" | sudo xargs DEBIAN_FRONTEND=noninteractive apt-get remove -y
-            log_info "已清理孤立套件"
-        fi
-    fi
-    
-    log_success "APT 系統清理完成"
-}
-
-# 選擇最快的 APT 鏡像源
-select_fastest_apt_mirror() {
-    local country="${1:-auto}"
-    
-    if ! check_command apt-fast; then
-        log_info "安裝 apt-fast 以提高下載速度..."
-        if [ ! -f "/etc/apt/sources.list.d/apt-fast.list" ]; then
-            sudo add-apt-repository ppa:apt-fast/stable -y
-            sudo DEBIAN_FRONTEND=noninteractive apt-get update
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y apt-fast
-        fi
-    fi
-    
-    log_info "配置最快的鏡像源..."
-    
-    # 根據地區選擇鏡像源
-    case "$country" in
-        "china"|"cn")
-            local mirrors=(
-                "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/"
-                "https://mirrors.ustc.edu.cn/ubuntu/"
-                "https://mirrors.aliyun.com/ubuntu/"
-            )
-            ;;
-        "us")
-            local mirrors=(
-                "http://archive.ubuntu.com/ubuntu/"
-                "http://us.archive.ubuntu.com/ubuntu/"
-            )
-            ;;
-        *)
-            # 自動檢測最快鏡像
-            local mirrors=(
-                "http://archive.ubuntu.com/ubuntu/"
-                "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/"
-                "https://mirrors.ustc.edu.cn/ubuntu/"
-            )
-            ;;
-    esac
-    
-    local fastest_mirror=""
-    local best_time=999
-    
-    for mirror in "${mirrors[@]}"; do
-        local response_time
-        response_time=$(curl -o /dev/null -s -w "%{time_total}" --max-time 5 "$mirror" 2>/dev/null || echo "999")
-        
-        if [ "$response_time" != "999" ] && [ "$(awk "BEGIN {print ($response_time < $best_time)}" )" = "1" ]; then
-            best_time="$response_time"
-            fastest_mirror="$mirror"
-        fi
-    done
-    
-    if [ -n "$fastest_mirror" ]; then
-        log_success "選擇最快鏡像源: $fastest_mirror (響應時間: ${best_time}s)"
-        echo "$fastest_mirror"
-    else
-        log_warning "無法檢測最快鏡像源，使用預設值"
-        echo "http://archive.ubuntu.com/ubuntu/"
-    fi
-}
-
-# ==============================================================================
-# 鏡像源管理
-# ==============================================================================
-
-get_best_mirror() {
-    local mirrors=(
-        "https://pypi.org/simple/"
-        "https://pypi.tuna.tsinghua.edu.cn/simple/"
-        "https://pypi.douban.com/simple/"
-        "https://mirrors.aliyun.com/pypi/simple/"
-    )
-    
-    local best_mirror=""
-    local best_speed=0
-    
-    for mirror in "${mirrors[@]}"; do
-        local speed
-        speed=$(curl -o /dev/null -s -w "%{time_total}" --max-time 5 "$mirror" 2>/dev/null || echo "999")
-        
-        if [ "$speed" != "999" ] && ([ "$best_speed" = "0" ] || [ "$(awk "BEGIN {print ($speed < $best_speed)}" )" = "1" ]); then
-            best_speed="$speed"
-            best_mirror="$mirror"
-        fi
-    done
-    
-    echo "${best_mirror:-https://pypi.org/simple/}"
-}
 
 # ==============================================================================
 # 版本比較函數
@@ -2672,37 +2339,6 @@ tui_gauge() {
     whiptail --title "$title" --gauge "$prompt" 10 70 "$initial_percent"
 }
 
-# TUI 輸入框
-tui_inputbox() {
-    local title="$1"
-    local prompt="$2"
-    local default="${3:-}"
-
-    # 檢查 TUI 是否可用
-    if [ "$USE_TUI" != "true" ]; then
-        return 1
-    fi
-
-    local height=10
-    local width=60
-
-    if [ "${TUI_BACKEND:-whiptail}" = "gum" ]; then
-        gum input --placeholder "$prompt" --value "$default"
-        return $?
-    fi
-
-    local result
-    result=$(whiptail --title "$title" --inputbox "$prompt" $height $width "$default" 3>&1 1>&2 2>&3)
-    local exit_code=$?
-
-    if [ $exit_code -eq 0 ]; then
-        echo "$result"
-        return 0
-    else
-        return 1
-    fi
-}
-
 # ==============================================================================
 # 清理函數
 # ==============================================================================
@@ -2712,19 +2348,6 @@ cleanup_temp_files() {
         rm -rf "$TEMP_DIR"
         log_info "清理臨時文件: $TEMP_DIR"
     fi
-}
-
-# ==============================================================================
-# 時間計算函數
-# ==============================================================================
-
-get_elapsed_time() {
-    local end_time
-    end_time=$(date +%s)
-    local elapsed=$((end_time - SCRIPT_START_TIME))
-    local minutes=$((elapsed / 60))
-    local seconds=$((elapsed % 60))
-    printf "%02d:%02d" "$minutes" "$seconds"
 }
 
 # ==============================================================================
@@ -2884,21 +2507,21 @@ linux_release_arch() {
 
 # 安全導出所有函數供子 shell 使用
 func_list="_log_should_print_status_to_terminal log_error log_info log_success log_warning log_debug init_progress show_progress run_as_root"
-func_list="$func_list check_command check_package_installed check_python_version check_disk_space check_network check_internet_speed"
+func_list="$func_list check_command check_package_installed check_python_version check_disk_space check_network"
 func_list="$func_list check_pip_package_installed check_cargo_package_installed check_npm_package_installed"
 func_list="$func_list install_with_fallback install_with_homebrew_fallback install_package install_apt_package install_apt_packages_parallel install_packages_batch"
-func_list="$func_list install_brew_package install_brew_packages_batch check_brew_package_installed ensure_brew_shell_aliases ensure_homebrew_installed update_system"
+func_list="$func_list install_brew_package check_brew_package_installed ensure_brew_shell_aliases ensure_homebrew_installed update_system"
 func_list="$func_list ensure_package_index_fresh _pkg_index_needs_update _file_mtime _log_file_writable _pkg_run _root_exec _root_exec_apt _pkg_root_exec"
 func_list="$func_list github_latest_release_tag linux_release_arch"
 func_list="$func_list verify_sha256_in_list manifest_record"
 func_list="$func_list backup_file safe_append_to_file"
-func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_cache cleanup_cache"
-func_list="$func_list safe_download download_files_parallel get_best_mirror"
-func_list="$func_list optimize_apt_performance cleanup_apt_system select_fastest_apt_mirror"
+func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_cache"
+func_list="$func_list safe_download"
+func_list="$func_list optimize_apt_performance"
 func_list="$func_list version_greater_equal check_architecture_compatibility install_arch_specific_package"
-func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_log_viewer tui_gauge tui_inputbox"
+func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_log_viewer tui_gauge"
 func_list="$func_list _tui_terminal_too_small"
-func_list="$func_list cleanup_temp_files get_elapsed_time check_sudo_access init_common_env detect_and_inject_tool_paths"
+func_list="$func_list cleanup_temp_files check_sudo_access init_common_env detect_and_inject_tool_paths"
 func_list="$func_list is_non_interactive safe_read ensure_npm_user_prefix"
 func_list="$func_list _tui_expand_text _tui_display_width _tui_max_display_width _tui_term_size _tui_dialog_size _tui_menu_fits_text _tui_fzf_height"
 

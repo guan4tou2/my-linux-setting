@@ -235,6 +235,43 @@ test_script_version_bumped() {
     fi
 }
 
+# 模組管理器可能在函式內被 source（install.sh 的 load_module_manager 就是如此）。
+# 若資料表不是以全域宣告，函式返回後就會消失，實際安裝時以模組 id 當索引會出現
+# "unbound variable"。用真正的 common.sh、module_manager.sh 與 modules.conf 驗證，不用替身。
+test_module_manager_survives_function_scope() {
+    log_test "檢查在函式內載入模組管理器後資料表仍然存在..."
+
+    if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+        log_warn "略過：模組管理器需要 bash 4 以上"
+        return
+    fi
+
+    local out rc=0
+    out="$(HOME="$(mktemp -d)" bash -c '
+        set -euo pipefail
+        root="$1"
+        SCRIPT_DIR="$root/scripts"
+        # shellcheck source=/dev/null
+        source "$root/scripts/core/common.sh" >/dev/null 2>&1
+        loader() {
+            # shellcheck source=/dev/null
+            source "$SCRIPT_DIR/core/module_manager.sh"
+            init_module_manager >/dev/null 2>&1
+        }
+        loader
+        first="${MODULE_LIST[0]}"
+        printf "%s|%s|%s" "${#MODULE_LIST[@]}" "$first" "${MODULE_NAMES[$first]:-MISSING}"
+    ' _ "$SCRIPT_DIR" 2>&1)" || rc=$?
+
+    local count="${out%%|*}"
+    if [ "$rc" -eq 0 ] && [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -gt 0 ] \
+       && [[ "$out" != *"MISSING"* ]] && [[ "$out" != *"unbound variable"* ]]; then
+        log_pass "函式返回後仍可用模組 id 取得資料（$out）"
+    else
+        log_fail "函式內載入後模組資料遺失 (rc=$rc): ${out:0:200}"
+    fi
+}
+
 # 檢查 install.sh 是否初始化 SKIP_PYTHON_CHECK
 test_skip_python_check_default() {
     log_test "檢查 SKIP_PYTHON_CHECK 預設值..."
@@ -255,6 +292,39 @@ test_module_manager_install_path() {
     else
         log_fail "install.sh 未使用 install_module"
     fi
+}
+
+# 只載入暫存替身，不執行安裝流程；驗證必要模組管理器的失敗邊界。
+test_required_module_manager() {
+    log_test "檢查必要模組管理器的載入與失敗處理..."
+    local funcs tmp mode out rc
+    funcs="$(extract_install_functions load_module_manager)"
+    tmp="$(mktemp -d)"
+    mkdir -p "$tmp/core"
+    for mode in missing source_failed init_failed empty ready; do
+        rm -f "$tmp/core/module_manager.sh"
+        case "$mode" in
+            source_failed) printf 'return 1\n' > "$tmp/core/module_manager.sh" ;;
+            init_failed) printf 'init_module_manager() { return 1; }\n' > "$tmp/core/module_manager.sh" ;;
+            empty) printf 'init_module_manager() { MODULE_LIST=(); }\n' > "$tmp/core/module_manager.sh" ;;
+            ready) printf 'init_module_manager() { MODULE_LIST=(base); }\n' > "$tmp/core/module_manager.sh" ;;
+        esac
+        rc=0
+        out="$(bash -c '
+            set -euo pipefail
+            eval "$1"
+            SCRIPT_DIR="$2"
+            log_error() { printf "%s\n" "$1" >&2; return 1; }
+            load_module_manager
+            printf ready
+        ' _ "$funcs" "$tmp" 2>&1)" || rc=$?
+        case "$mode:$rc:$out" in
+            missing:1:*找不到必要的模組管理器*|source_failed:1:*無法載入*|init_failed:1:*初始化失敗*|empty:1:*未載入任何模組*|ready:0:ready)
+                log_pass "模組管理器載入邊界：$mode" ;;
+            *) log_fail "模組管理器載入邊界不正確：$mode rc=$rc $out" ;;
+        esac
+    done
+    rm -rf "$tmp"
 }
 
 # 檢查 run_all_tests.sh 是否只在 Linux CI 跑進階測試
@@ -353,7 +423,7 @@ test_module_manager_package_status_cache() {
         return
     fi
 
-    if search_literal 'declare -A MODULE_PKG_STATUS_CACHE' "$module_manager" && \
+    if search_literal 'declare -gA MODULE_PKG_STATUS_CACHE' "$module_manager" && \
        search_literal '_module_pkg_is_installed()' "$module_manager" && \
        search_literal 'MODULE_PKG_STATUS_CACHE["$cache_key"]' "$module_manager"; then
         log_pass "module_manager.sh 已快取套件狀態查詢"
@@ -416,7 +486,7 @@ test_common_tui_log_viewer() {
        search_literal 'gum pager < "$view_file"' "$common" && \
        search_literal 'fzf --height=80% --border --no-sort' "$common" && \
        search_literal 'whiptail --title "$title" --textbox "$view_file"' "$common" && \
-       search_literal 'func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_log_viewer tui_gauge tui_inputbox"' "$common"; then
+       search_literal 'func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_log_viewer tui_gauge"' "$common"; then
         log_pass "common.sh 已提供跨 backend 的 TUI log viewer"
     else
         log_fail "common.sh 缺少跨 backend 的 TUI log viewer"
@@ -1428,23 +1498,19 @@ test_install_module_checklist_behavior() {
     tag_def="$(grep -E '^ADVANCED_CHECKLIST_(TAG|LABEL)=' "$SCRIPT_DIR/install.sh")"
 
     local rc=0 out
-    # 預設狀態：已安裝 OFF、部分安裝／未安裝 ON；模組管理器不可用時全 ON
+    # 預設狀態：已安裝 OFF、部分安裝／未安裝 ON
     out="$(bash -c '
         eval "$1"; eval "$2"
         declare -A MODULE_NAMES=([base]="基礎工具" [dev]="開發工具" [term]="終端設定")
         declare -A MODULE_DESCRIPTIONS=([base]="git" [dev]="nvim" [term]="zsh")
         MODULE_LIST=(base dev term)
-        USE_MODULE_MANAGER=true
         check_module_status() { case "$1" in base) echo installed ;; dev) echo partial ;; *) echo not_installed ;; esac; }
         checklist_items=(); checklist_states=()
         build_module_checklist_items
         echo "${checklist_states[*]}"; echo "${checklist_items[1]}"
-        USE_MODULE_MANAGER=false
-        build_module_checklist_items
-        echo "${checklist_states[*]}"; echo "${#checklist_items[@]}"
     ' _ "$funcs" "$tag_def")" || rc=$?
     if [ "$rc" -eq 0 ] && \
-       [[ "$out" == "OFF ON ON"$'\n'"基礎工具 — git（已安裝）"$'\n'"ON ON ON ON ON ON"$'\n'"12" ]]; then
+       [[ "$out" == "OFF ON ON"$'\n'"基礎工具 — git（已安裝）" ]]; then
         log_pass "已安裝的模組預設不勾選，其餘預設勾選（標籤仍顯示已安裝）"
     else
         log_fail "勾選預設狀態不正確 (rc=$rc): $out"
@@ -1475,7 +1541,7 @@ test_install_module_checklist_behavior() {
         eval "$1"; eval "$2"
         declare -A MODULE_NAMES=([base]="基礎工具" [dev]="開發工具")
         declare -A MODULE_DESCRIPTIONS=([base]="git" [dev]="nvim")
-        MODULE_LIST=(base dev); USE_MODULE_MANAGER=true; INSTALL_MODE=full
+        MODULE_LIST=(base dev); INSTALL_MODE=full
         check_module_status() { [ "$1" = base ] && echo installed || echo not_installed; }
         _tui_backend_supports_state_checklist() { [ "$STATE_BACKEND" = yes ]; }
         next_result() { local n; n=$(cat "$T/n" 2>/dev/null || echo 0); echo $((n + 1)) > "$T/n"; sed -n "$((n + 1))p" "$T/results"; }
@@ -1605,7 +1671,7 @@ test_guided_override_lifecycle() {
         # CLI 完成後也清除覆寫；使用無對應模組的清單及 stub，避免任何安裝。
         (
             GUIDED_RESULT_SCREEN=false; selected_modules=unknown
-            USE_MODULE_MANAGER=true; MODULE_LIST=(base); DRY_RUN=false; ADVANCED_MODE=false
+            MODULE_LIST=(base); DRY_RUN=false; ADVANCED_MODE=false
             CYAN=""; NC=""
             installer_tui_quiet() { return 1; }
             prepare_package_index() { :; }; install_homebrew_if_requested() { :; }
@@ -1628,7 +1694,7 @@ test_guided_cancel_all_results() {
     funcs="$(extract_install_functions run_guided_tui_flow install_selected_modules reset_install_results install_results_exit_code)"
     LC_ALL=C bash -c '
         set -euo pipefail; eval "$1"
-        RED=""; NC=""; USE_MODULE_MANAGER=true; MODULE_LIST=(base); DRY_RUN=false
+        RED=""; NC=""; MODULE_LIST=(base); DRY_RUN=false
         ADVANCED_MODE=true; NON_INTERACTIVE=false
         log_info() { :; }; log_warning() { :; }
         module_interactive_package_filter() { return 1; }
@@ -1700,11 +1766,10 @@ test_install_package_index_step() {
         declare -A MODULE_PACKAGES=([withscript]="" [noscript]="a b" [allin]="a" [partial]="a zz")
         declare -A MODULE_APT_FALLBACK=() MODULE_BREW_PACKAGES=()
         _module_pkg_is_installed() { [ "$2" = a ] || [ "$2" = b ]; }
-        USE_MODULE_MANAGER=true; FORCE_REINSTALL=false
+        FORCE_REINSTALL=false
         need() { if selected_modules_need_package_index "$1"; then printf "Y"; else printf "N"; fi; }
         need allin; need withscript; need partial; need "allin noscript"
         FORCE_REINSTALL=true; need allin; FORCE_REINSTALL=false
-        USE_MODULE_MANAGER=false; need allin; USE_MODULE_MANAGER=true
         printf "|\n"
 
         # prepare_package_index：以假函式觀察行為
@@ -1725,7 +1790,7 @@ test_install_package_index_step() {
     ' _ "$funcs")" || rc=$?
 
     local expected
-    expected="NYYNYY|"$'\n'"run(更新套件索引);ensure;finish(ok:);"$'\n'"run(更新套件索引);ensure;finish(partial:更新失敗，繼續安裝);"$'\n'"ensure;"$'\n'"ensure;"$'\n'$'\n'"[]"
+    expected="NYYNY|"$'\n'"run(更新套件索引);ensure;finish(ok:);"$'\n'"run(更新套件索引);ensure;finish(partial:更新失敗，繼續安裝);"$'\n'"ensure;"$'\n'"ensure;"$'\n'$'\n'"[]"
     if [ "$rc" -eq 0 ] && [ "$out" = "$expected" ]; then
         log_pass "套件索引更新在第一個模組前以獨立進度行顯示，失敗為警示並繼續，且只在需要時執行"
     else
@@ -1875,9 +1940,12 @@ run_all_tests() {
     echo
     test_script_version_bumped
     echo
+    test_module_manager_survives_function_scope
+    echo
     test_skip_python_check_default
     echo
     test_module_manager_install_path
+    test_required_module_manager
     echo
     test_linux_ci_gate_for_extended_suites
     echo

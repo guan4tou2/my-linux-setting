@@ -5,25 +5,6 @@
 # Version: 2.2.9
 # ==============================================================================
 
-# 自動切換到 Homebrew bash (需要 bash 4+ 支持關聯陣列)
-if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
-    # 嘗試找到 Homebrew 安裝的 bash
-    # macOS: /opt/homebrew/bin (Apple Silicon), /usr/local/bin (Intel)
-    # Linux: /home/linuxbrew/.linuxbrew/bin, $HOME/.linuxbrew/bin
-    for brew_bash in \
-        /opt/homebrew/bin/bash \
-        /usr/local/bin/bash \
-        /home/linuxbrew/.linuxbrew/bin/bash \
-        "$HOME/.linuxbrew/bin/bash"; do
-        if [ -x "$brew_bash" ] && "$brew_bash" --version 2>/dev/null | grep -q "version [4-9]"; then
-            exec "$brew_bash" "$0" "$@"
-        fi
-    done
-    # 如果沒有找到新版 bash，顯示警告但繼續執行（使用備用邏輯）
-    echo -e "\033[0;33mWARNING: Bash 版本 ($BASH_VERSION) 較舊，部分功能可能受限\033[0m"
-    echo -e "\033[0;33m建議安裝新版 Bash: brew install bash\033[0m"
-fi
-
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
@@ -326,6 +307,12 @@ if [ "$ROLLBACK_MODE" = true ]; then
     exit "$rollback_rc"
 fi
 
+# 參數解析與本機備份還原不依賴 bash 4；安裝流程需要關聯陣列。
+if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+    printf 'ERROR: 需要 Bash 4 以上（目前為 %s）。本工具支援 Ubuntu 最新 LTS、Debian stable、Kali rolling。\n' "$BASH_VERSION" >&2
+    exit 1
+fi
+
 show_welcome
 
 # Export variables for child scripts
@@ -437,20 +424,29 @@ fi
 # Initialize environment
 init_common_env
 
-# 載入模組管理器（需要 bash 4.0+ 支持關聯陣列）
-USE_MODULE_MANAGER=false
-if [ -f "$SCRIPT_DIR/core/module_manager.sh" ]; then
-    # 檢查 bash 版本是否支持關聯陣列 (需要 4.0+)
-    if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
-        source "$SCRIPT_DIR/core/module_manager.sh"
-        init_module_manager
-        USE_MODULE_MANAGER=true
-    else
-        log_warning "Bash 版本 ($BASH_VERSION) 不支持關聯陣列，使用內建配置"
-        log_info "建議安裝 Bash 4+: brew install bash"
+# 本機在啟動階段載入；遠端安裝在 main 下載完成後載入。
+load_module_manager() {
+    if [ ! -f "$SCRIPT_DIR/core/module_manager.sh" ]; then
+        log_error "找不到必要的模組管理器: $SCRIPT_DIR/core/module_manager.sh" || true
+        exit 1
     fi
-else
-    log_info "模組管理器不可用，使用內建配置"
+    # shellcheck source=/dev/null
+    if ! source "$SCRIPT_DIR/core/module_manager.sh"; then
+        log_error "無法載入 module_manager.sh" || true
+        exit 1
+    fi
+    if ! init_module_manager; then
+        log_error "模組管理器初始化失敗" || true
+        exit 1
+    fi
+    if [ ${#MODULE_LIST[@]} -eq 0 ]; then
+        log_error "模組管理器未載入任何模組" || true
+        exit 1
+    fi
+}
+
+if [ "$REMOTE_INSTALL" != true ]; then
+    load_module_manager
 fi
 
 show_install_log_dialog() {
@@ -958,10 +954,8 @@ run_remote_script_downloads() {
 }
 
 # 定義模組陣列
-MODULES="python docker base terminal dev monitoring"
 MINIMAL_MODULES="base python terminal"
 selected_modules=""
-installed_modules=""
 
 # REMOTE_INSTALL 只由上方的遠端 bootstrap 設定（找不到本地 common.sh 時）。
 # 過去這裡還會把「SCRIPT_DIR 位於 /tmp」當成遠端安裝，結果在 /tmp 下的完整專案
@@ -1025,34 +1019,22 @@ ADVANCED_CHECKLIST_LABEL="進階：安裝前逐模組挑選套件"
 build_module_checklist_items() {
     checklist_items=()
     checklist_states=()
-    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-        local module_id
-        for module_id in "${MODULE_LIST[@]}"; do
-            local name="${MODULE_NAMES[$module_id]:-$module_id}"
-            local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
-            local status=""
+    local module_id
+    for module_id in "${MODULE_LIST[@]}"; do
+        local name="${MODULE_NAMES[$module_id]:-$module_id}"
+        local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
+        local status=""
 
-            if command -v check_module_status >/dev/null 2>&1; then
-                status=$(check_module_status "$module_id" 2>/dev/null || true)
-            fi
+        if command -v check_module_status >/dev/null 2>&1; then
+            status=$(check_module_status "$module_id" 2>/dev/null || true)
+        fi
 
-            checklist_items+=("$module_id" "$(module_checklist_label "$name" "$desc" "$status")")
-            case "$status" in
-                installed) checklist_states+=("OFF") ;;
-                *) checklist_states+=("ON") ;;
-            esac
-        done
-    else
-        checklist_items=(
-            "python"     "$(module_checklist_label "Python 開發環境" "python3, pip, uv, ranger")"
-            "docker"     "$(module_checklist_label "Docker 工具" "docker-ce, lazydocker")"
-            "base"       "$(module_checklist_label "基礎工具" "git, lsd, bat, ripgrep, fzf")"
-            "terminal"   "$(module_checklist_label "終端設定" "zsh, oh-my-zsh, powerlevel10k")"
-            "dev"        "$(module_checklist_label "開發工具" "neovim, lazygit, nodejs, rust")"
-            "monitoring" "$(module_checklist_label "監控工具" "btop, htop, iftop, fail2ban")"
-        )
-        checklist_states=(ON ON ON ON ON ON)
-    fi
+        checklist_items+=("$module_id" "$(module_checklist_label "$name" "$desc" "$status")")
+        case "$status" in
+            installed) checklist_states+=("OFF") ;;
+            *) checklist_states+=("ON") ;;
+        esac
+    done
 }
 
 parse_module_selection() {
@@ -1560,21 +1542,10 @@ main() {
         run_remote_script_downloads
     fi
 
-    # 遠端流程下載完成後補載入 module_manager（啟用進階模式、模組詳情、動態 checklist）
-    if [ -f "$SCRIPT_DIR/core/module_manager.sh" ] \
-       && [ "${BASH_VERSINFO[0]:-0}" -ge 4 ] \
-       && [ "${USE_MODULE_MANAGER:-false}" != "true" ]; then
-        # shellcheck source=/dev/null
-        if source "$SCRIPT_DIR/core/module_manager.sh"; then
-            if init_module_manager; then
-                USE_MODULE_MANAGER=true
-                log_success "模組管理器已啟用（${#MODULE_LIST[@]} 個模組）"
-            else
-                log_warning "模組管理器初始化失敗，進階模式與詳情將使用備援顯示"
-            fi
-        else
-            log_warning "無法載入 module_manager.sh，進階模式與詳情將使用備援顯示"
-        fi
+    # 遠端流程下載完成後補載入模組管理器。
+    if [ "$REMOTE_INSTALL" = true ]; then
+        load_module_manager
+        log_success "模組管理器已啟用（${#MODULE_LIST[@]} 個模組）"
     fi
 
     # 無人值守模式：自動選擇模組並直接執行，不進入互動選單
@@ -1582,10 +1553,8 @@ main() {
         USE_TUI=false
         if [ "$INSTALL_MODE" = "minimal" ]; then
             selected_modules="$MINIMAL_MODULES"
-        elif [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-            selected_modules="${MODULE_LIST[*]}"
         else
-            selected_modules="$MODULES"
+            selected_modules="${MODULE_LIST[*]}"
         fi
 
         local ni_rc=0
@@ -1627,16 +1596,12 @@ main() {
                 ;;
             d|D)
                 # 查看詳情：提供選擇單個模組或全部查看
-                if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-                    printf "\n${CYAN}查看模組詳情${NC}\n"
-                    printf "輸入模組編號查看單一模組，或按 Enter 查看全部: "
-                    read -r detail_num
-                    if [ -n "$detail_num" ] && [ "$detail_num" -ge 1 ] 2>/dev/null && [ "$detail_num" -le ${#MODULE_LIST[@]} ] 2>/dev/null; then
-                        local module_id="${MODULE_LIST[$((detail_num - 1))]}"
-                        show_module_detail_dialog "$module_id"
-                    else
-                        show_module_details
-                    fi
+                printf "\n${CYAN}查看模組詳情${NC}\n"
+                printf "輸入模組編號查看單一模組，或按 Enter 查看全部: "
+                read -r detail_num
+                if [ -n "$detail_num" ] && [ "$detail_num" -ge 1 ] 2>/dev/null && [ "$detail_num" -le ${#MODULE_LIST[@]} ] 2>/dev/null; then
+                    local module_id="${MODULE_LIST[$((detail_num - 1))]}"
+                    show_module_detail_dialog "$module_id"
                 else
                     show_module_details
                 fi
@@ -1675,42 +1640,31 @@ show_menu() {
     printf "${CYAN}%s${NC}\n\n" "$rule"
 
     # 動態生成模組選項
-    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-        local index=1
-        local module_id
-        for module_id in "${MODULE_LIST[@]}"; do
-            local name="${MODULE_NAMES[$module_id]:-$module_id}"
-            local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
-            local status=""
-            local mark="[ ]"
+    local index=1
+    local module_id
+    for module_id in "${MODULE_LIST[@]}"; do
+        local name="${MODULE_NAMES[$module_id]:-$module_id}"
+        local desc="${MODULE_DESCRIPTIONS[$module_id]:-}"
+        local status=""
+        local mark="[ ]"
 
-            # 獲取安裝狀態標記
-            if command -v check_module_status >/dev/null 2>&1; then
-                status=$(check_module_status "$module_id" 2>/dev/null || true)
-            fi
-            case "$status" in
-                installed) mark="[${GREEN}✓${NC}]" ;;
-                partial)   mark="[${YELLOW}◐${NC}]" ;;
-            esac
+        # 獲取安裝狀態標記
+        if command -v check_module_status >/dev/null 2>&1; then
+            status=$(check_module_status "$module_id" 2>/dev/null || true)
+        fi
+        case "$status" in
+            installed) mark="[${GREEN}✓${NC}]" ;;
+            partial)   mark="[${YELLOW}◐${NC}]" ;;
+        esac
 
-            printf "  ${GREEN}[%d]${NC} %b %s" "$index" "$mark" "$name"
-            if [ -n "$desc" ]; then
-                printf " — %s" "$desc"
-            fi
-            printf "\n"
-            index=$((index + 1))
-        done
-        printf "  ${GREEN}[%d]${NC}     全部安裝\n" "$index"
-    else
-        # 備用靜態選單
-        printf "  ${GREEN}[1]${NC} Python 開發環境 — python3, pip, uv, ranger\n"
-        printf "  ${GREEN}[2]${NC} Docker 工具 — docker-ce, lazydocker\n"
-        printf "  ${GREEN}[3]${NC} 基礎工具 — git, lsd, bat, ripgrep, fzf\n"
-        printf "  ${GREEN}[4]${NC} 終端設定 — zsh, oh-my-zsh, powerlevel10k\n"
-        printf "  ${GREEN}[5]${NC} 開發工具 — neovim, lazygit, nodejs, rust\n"
-        printf "  ${GREEN}[6]${NC} 監控工具 — btop, htop, iftop, fail2ban\n"
-        printf "  ${GREEN}[7]${NC} 全部安裝\n"
-    fi
+        printf "  ${GREEN}[%d]${NC} %b %s" "$index" "$mark" "$name"
+        if [ -n "$desc" ]; then
+            printf " — %s" "$desc"
+        fi
+        printf "\n"
+        index=$((index + 1))
+    done
+    printf "  ${GREEN}[%d]${NC}     全部安裝\n" "$index"
 
     # 顯示狀態圖例
     printf "\n  [${GREEN}✓${NC}] 已安裝  [${YELLOW}◐${NC}] 部分安裝  [ ] 未安裝\n"
@@ -1734,57 +1688,13 @@ show_menu() {
     printf "\n輸入選項（例如：1 3 4）："
 }
 
-# 無 module_manager 設定檔時的單一模組說明（與靜態 checklist 一致）
-_show_static_module_detail_msg() {
-    local mid="$1"
-    local title="模組詳情"
-    local body=""
-    case "$mid" in
-        python)
-            title="模組詳情: Python 開發環境"
-            body="內容概覽：python3、pip、venv、uv、ranger、s-t-ui 等。\n\n若看不到套件級狀態，請確認已下載 config/modules.conf 並成功載入模組管理器。"
-            ;;
-        docker)
-            title="模組詳情: Docker 工具"
-            body="內容概覽：Docker CE、lazydocker（安裝流程由 docker_setup.sh 處理）。"
-            ;;
-        base)
-            title="模組詳情: 基礎工具"
-            body="內容概覽：git、curl、wget、建置工具、lsd/bat/ripgrep/fzf 等 CLI（依系統與 Homebrew 可用性）。"
-            ;;
-        terminal)
-            title="模組詳情: 終端設定"
-            body="內容概覽：zsh、Oh My Zsh、Powerlevel10k 與常用插件。"
-            ;;
-        dev)
-            title="模組詳情: 開發工具"
-            body="內容概覽：Neovim/LazyVim、lazygit、Node.js、Rust 工具鏈等。"
-            ;;
-        monitoring)
-            title="模組詳情: 監控工具"
-            body="內容概覽：btop、htop、iftop、nethogs、fail2ban 等。"
-            ;;
-        *)
-            title="模組詳情"
-            body="未知模組 ID：$mid"
-            ;;
-    esac
-    if [ "$USE_TUI" = "true" ] && command -v tui_msgbox >/dev/null 2>&1; then
-        tui_msgbox "$title" "$(printf '%b' "$body")"
-    else
-        printf '%b\n\n' "$body"
-        printf "按 Enter 返回..."
-        read -r
-    fi
-}
 
 # 顯示單個模組詳細資訊（TUI 對話框）
 show_module_detail_dialog() {
     local module_id="$1"
 
-    if [ "$USE_MODULE_MANAGER" != "true" ] || ! module_exists "$module_id" 2>/dev/null; then
+    if ! module_exists "$module_id" 2>/dev/null; then
         log_warning "模組不存在: $module_id"
-        _show_static_module_detail_msg "$module_id"
         return 1
     fi
 
@@ -1812,50 +1722,21 @@ show_detail_selection_menu() {
         local menu_labels=()
         local menu_ids=()
 
-        if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-            for module_id in "${MODULE_LIST[@]}"; do
-                local name="${MODULE_NAMES[$module_id]:-$module_id}"
-                local status_icon=""
-                if command -v check_module_status >/dev/null 2>&1; then
-                    local status
-                    status=$(check_module_status "$module_id" 2>/dev/null || true)
-                    case "$status" in
-                        installed)     status_icon="[✓] " ;;
-                        partial)       status_icon="[◐] " ;;
-                        not_installed) status_icon="[ ] " ;;
-                    esac
-                fi
-                menu_labels+=("${status_icon}${name}")
-                menu_ids+=("$module_id")
-            done
-        else
-            local _static_ids=(python docker base terminal dev monitoring)
-            local _static_labels=(
-                "Python 開發環境"
-                "Docker 工具"
-                "基礎工具"
-                "終端設定"
-                "開發工具"
-                "監控工具"
-            )
-            local _si=0
-            for module_id in "${_static_ids[@]}"; do
-                local name="${_static_labels[$_si]}"
-                _si=$((_si + 1))
-                local status_icon=""
-                if command -v check_module_status >/dev/null 2>&1; then
-                    local status
-                    status=$(check_module_status "$module_id" 2>/dev/null || true)
-                    case "$status" in
-                        installed)     status_icon="[✓] " ;;
-                        partial)       status_icon="[◐] " ;;
-                        not_installed) status_icon="[ ] " ;;
-                    esac
-                fi
-                menu_labels+=("${status_icon}${name}")
-                menu_ids+=("$module_id")
-            done
-        fi
+        for module_id in "${MODULE_LIST[@]}"; do
+            local name="${MODULE_NAMES[$module_id]:-$module_id}"
+            local status_icon=""
+            if command -v check_module_status >/dev/null 2>&1; then
+                local status
+                status=$(check_module_status "$module_id" 2>/dev/null || true)
+                case "$status" in
+                    installed)     status_icon="[✓] " ;;
+                    partial)       status_icon="[◐] " ;;
+                    not_installed) status_icon="[ ] " ;;
+                esac
+            fi
+            menu_labels+=("${status_icon}${name}")
+            menu_ids+=("$module_id")
+        done
 
         menu_labels+=("返回主選單")
         menu_ids+=("RETURN")
@@ -1881,12 +1762,7 @@ show_detail_selection_menu() {
             return 0
         fi
 
-        if [ "$USE_MODULE_MANAGER" = "true" ] && command -v module_exists >/dev/null 2>&1 \
-            && module_exists "$picked_id" 2>/dev/null; then
-            show_module_detail_dialog "$picked_id" || true
-        else
-            _show_static_module_detail_msg "$picked_id"
-        fi
+        show_module_detail_dialog "$picked_id" || true
         return 0
     else
         # 命令行模式：顯示完整的模組詳情
@@ -1900,145 +1776,129 @@ show_module_details() {
     printf "${CYAN}                    模組詳細資訊                               ${NC}\n"
     printf "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n\n"
 
-    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-        local index=1
-        for module_id in "${MODULE_LIST[@]}"; do
-            if command -v _module_pkg_status_cache_clear >/dev/null 2>&1; then
-                _module_pkg_status_cache_clear
-            fi
+    local index=1
+    for module_id in "${MODULE_LIST[@]}"; do
+        if command -v _module_pkg_status_cache_clear >/dev/null 2>&1; then
+            _module_pkg_status_cache_clear
+        fi
 
-            local name="${MODULE_NAMES[$module_id]:-$module_id}"
-            local system_packages="${MODULE_PACKAGES[$module_id]:-}"
-            local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
-            local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
-            local cargo_packages="${MODULE_CARGO_PACKAGES[$module_id]:-}"
-            local npm_packages="${MODULE_NPM_PACKAGES[$module_id]:-}"
+        local name="${MODULE_NAMES[$module_id]:-$module_id}"
+        local system_packages="${MODULE_PACKAGES[$module_id]:-}"
+        local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
+        local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
+        local cargo_packages="${MODULE_CARGO_PACKAGES[$module_id]:-}"
+        local npm_packages="${MODULE_NPM_PACKAGES[$module_id]:-}"
 
-            # 獲取安裝狀態
-            local status_icon=" "
-            local status_text="未安裝"
-            if command -v check_module_status >/dev/null 2>&1; then
-                local status
-                status=$(check_module_status "$module_id" true 2>/dev/null)
-                case "$status" in
-                    installed)
-                        status_icon="✓"
-                        status_text="已安裝"
-                        ;;
-                    partial)
-                        status_icon="◐"
-                        status_text="部分安裝"
-                        ;;
-                    not_installed)
-                        status_icon=" "
-                        status_text="未安裝"
-                        ;;
-                esac
-            fi
+        # 獲取安裝狀態
+        local status_icon=" "
+        local status_text="未安裝"
+        if command -v check_module_status >/dev/null 2>&1; then
+            local status
+            status=$(check_module_status "$module_id" true 2>/dev/null)
+            case "$status" in
+                installed)
+                    status_icon="✓"
+                    status_text="已安裝"
+                    ;;
+                partial)
+                    status_icon="◐"
+                    status_text="部分安裝"
+                    ;;
+                not_installed)
+                    status_icon=" "
+                    status_text="未安裝"
+                    ;;
+            esac
+        fi
 
-            # 根據狀態顯示不同顏色
-            if [ "$status_icon" = "✓" ]; then
-                printf "${GREEN}[%d] [%s] %s (%s)${NC}\n" "$index" "$status_icon" "$name" "$status_text"
-            elif [ "$status_icon" = "◐" ]; then
-                printf "${YELLOW}[%d] [%s] %s (%s)${NC}\n" "$index" "$status_icon" "$name" "$status_text"
-            else
-                printf "[%d] [ ] %s (%s)\n" "$index" "$name" "$status_text"
-            fi
+        # 根據狀態顯示不同顏色
+        if [ "$status_icon" = "✓" ]; then
+            printf "${GREEN}[%d] [%s] %s (%s)${NC}\n" "$index" "$status_icon" "$name" "$status_text"
+        elif [ "$status_icon" = "◐" ]; then
+            printf "${YELLOW}[%d] [%s] %s (%s)${NC}\n" "$index" "$status_icon" "$name" "$status_text"
+        else
+            printf "[%d] [ ] %s (%s)\n" "$index" "$name" "$status_text"
+        fi
 
-            # 顯示套件清單（帶狀態標記）
-            if [ -n "$system_packages" ]; then
-                printf "    ${BLUE}系統套件:${NC} "
-                local first=true
-                for pkg in $system_packages; do
-                    [ "$first" = true ] || printf ", " || true
-                    first=false
-                    if _module_pkg_is_installed apt "$pkg"; then
-                        printf "${GREEN}%s${NC}" "$pkg"
-                    else
-                        printf "${RED}%s${NC}" "$pkg"
-                    fi
-                done
-                printf "\n"
-            fi
-
-            if [ -n "$brew_packages" ]; then
-                printf "    ${BLUE}Homebrew:${NC} "
-                local first=true
-                for pkg in $brew_packages; do
-                    [ "$first" = true ] || printf ", " || true
-                    first=false
-                    if command -v brew >/dev/null 2>&1 && _module_pkg_is_installed brew "$pkg"; then
-                        printf "${GREEN}%s${NC}" "$pkg"
-                    else
-                        printf "${RED}%s${NC}" "$pkg"
-                    fi
-                done
-                printf "\n"
-            fi
-
-            if [ -n "$pip_packages" ]; then
-                printf "    ${BLUE}Python (uv):${NC} "
-                local first=true
-                for pkg in $pip_packages; do
-                    [ "$first" = true ] || printf ", " || true
-                    first=false
-                    if _module_pkg_is_installed pip "$pkg"; then
-                        printf "${GREEN}%s${NC}" "$pkg"
-                    else
-                        printf "${RED}%s${NC}" "$pkg"
-                    fi
-                done
-                printf "\n"
-            fi
-
-            if [ -n "$cargo_packages" ]; then
-                printf "    ${BLUE}Cargo:${NC} "
-                local first=true
-                for pkg in $cargo_packages; do
-                    [ "$first" = true ] || printf ", " || true
-                    first=false
-                    if command -v cargo >/dev/null 2>&1 && _module_pkg_is_installed cargo "$pkg"; then
-                        printf "${GREEN}%s${NC}" "$pkg"
-                    else
-                        printf "${RED}%s${NC}" "$pkg"
-                    fi
-                done
-                printf "\n"
-            fi
-
-            if [ -n "$npm_packages" ]; then
-                printf "    ${BLUE}NPM:${NC} "
-                local first=true
-                for pkg in $npm_packages; do
-                    [ "$first" = true ] || printf ", " || true
-                    first=false
-                    if command -v npm >/dev/null 2>&1 && _module_pkg_is_installed npm "$pkg"; then
-                        printf "${GREEN}%s${NC}" "$pkg"
-                    else
-                        printf "${RED}%s${NC}" "$pkg"
-                    fi
-                done
-                printf "\n"
-            fi
-
+        # 顯示套件清單（帶狀態標記）
+        if [ -n "$system_packages" ]; then
+            printf "    ${BLUE}系統套件:${NC} "
+            local first=true
+            for pkg in $system_packages; do
+                [ "$first" = true ] || printf ", " || true
+                first=false
+                if _module_pkg_is_installed apt "$pkg"; then
+                    printf "${GREEN}%s${NC}" "$pkg"
+                else
+                    printf "${RED}%s${NC}" "$pkg"
+                fi
+            done
             printf "\n"
-            index=$((index + 1))
-        done
-    else
-        # 備用靜態詳細資訊
-        printf "${GREEN}[1] Python 開發環境${NC}\n"
-        printf "    python3, pip, uv, ranger-fm, s-tui\n\n"
-        printf "${GREEN}[2] Docker 工具${NC}\n"
-        printf "    docker-ce, lazydocker\n\n"
-        printf "${GREEN}[3] 基礎工具${NC}\n"
-        printf "    git, lsd, bat, ripgrep, fzf\n\n"
-        printf "${GREEN}[4] 終端設定${NC}\n"
-        printf "    zsh, oh-my-zsh, powerlevel10k\n\n"
-        printf "${GREEN}[5] 開發工具${NC}\n"
-        printf "    neovim, lazygit, nodejs, rust\n\n"
-        printf "${GREEN}[6] 監控工具${NC}\n"
-        printf "    btop, htop, iftop, fail2ban\n\n"
-    fi
+        fi
+
+        if [ -n "$brew_packages" ]; then
+            printf "    ${BLUE}Homebrew:${NC} "
+            local first=true
+            for pkg in $brew_packages; do
+                [ "$first" = true ] || printf ", " || true
+                first=false
+                if command -v brew >/dev/null 2>&1 && _module_pkg_is_installed brew "$pkg"; then
+                    printf "${GREEN}%s${NC}" "$pkg"
+                else
+                    printf "${RED}%s${NC}" "$pkg"
+                fi
+            done
+            printf "\n"
+        fi
+
+        if [ -n "$pip_packages" ]; then
+            printf "    ${BLUE}Python (uv):${NC} "
+            local first=true
+            for pkg in $pip_packages; do
+                [ "$first" = true ] || printf ", " || true
+                first=false
+                if _module_pkg_is_installed pip "$pkg"; then
+                    printf "${GREEN}%s${NC}" "$pkg"
+                else
+                    printf "${RED}%s${NC}" "$pkg"
+                fi
+            done
+            printf "\n"
+        fi
+
+        if [ -n "$cargo_packages" ]; then
+            printf "    ${BLUE}Cargo:${NC} "
+            local first=true
+            for pkg in $cargo_packages; do
+                [ "$first" = true ] || printf ", " || true
+                first=false
+                if command -v cargo >/dev/null 2>&1 && _module_pkg_is_installed cargo "$pkg"; then
+                    printf "${GREEN}%s${NC}" "$pkg"
+                else
+                    printf "${RED}%s${NC}" "$pkg"
+                fi
+            done
+            printf "\n"
+        fi
+
+        if [ -n "$npm_packages" ]; then
+            printf "    ${BLUE}NPM:${NC} "
+            local first=true
+            for pkg in $npm_packages; do
+                [ "$first" = true ] || printf ", " || true
+                first=false
+                if command -v npm >/dev/null 2>&1 && _module_pkg_is_installed npm "$pkg"; then
+                    printf "${GREEN}%s${NC}" "$pkg"
+                else
+                    printf "${RED}%s${NC}" "$pkg"
+                fi
+            done
+            printf "\n"
+        fi
+
+        printf "\n"
+        index=$((index + 1))
+    done
 
     printf "${CYAN}═══════════════════════════════════════════════════════════════${NC}\n"
     printf "\n${YELLOW}圖例:${NC} ${GREEN}綠色${NC}=已安裝  ${RED}紅色${NC}=未安裝\n"
@@ -2047,57 +1907,24 @@ show_module_details() {
     read -r
 }
 
-# 執行安裝腳本函數
-execute_script() {
-    local script=$1
-    local module_name=$2
-    if [ -f "$SCRIPT_DIR/$script" ]; then
-        log_info "開始安裝 $module_name"
-        if run_logged_command bash "$SCRIPT_DIR/$script"; then
-            installed_modules="$installed_modules $module_name"
-            log_success "$module_name 安裝完成"
-        else
-            log_error "$module_name 安裝失敗" || true
-            return 1
-        fi
-    else
-        log_error "找不到腳本 $SCRIPT_DIR/$script" || true
-        return 1
-    fi
-}
 
 # 添加模組到選擇列表（動態支援）
 add_module() {
     local num=$1
 
-    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-        local total=${#MODULE_LIST[@]}
-        local all_num=$((total + 1))
+    local total=${#MODULE_LIST[@]}
+    local all_num=$((total + 1))
 
-        if [ "$num" -eq "$all_num" ]; then
-            # 全部安裝
-            selected_modules="${MODULE_LIST[*]}"
-            return
-        elif [ "$num" -ge 1 ] && [ "$num" -le "$total" ]; then
-            local module_id="${MODULE_LIST[$((num - 1))]}"
-            # 避免重複添加
-            if [[ " $selected_modules " != *" $module_id "* ]]; then
-                selected_modules="$selected_modules $module_id"
-            fi
-            return
+    if [ "$num" -eq "$all_num" ]; then
+        # 全部安裝
+        selected_modules="${MODULE_LIST[*]}"
+        return
+    elif [ "$num" -ge 1 ] && [ "$num" -le "$total" ]; then
+        local module_id="${MODULE_LIST[$((num - 1))]}"
+        # 避免重複添加
+        if [[ " $selected_modules " != *" $module_id "* ]]; then
+            selected_modules="$selected_modules $module_id"
         fi
-    else
-        # 備用靜態邏輯
-        case $num in
-            1) selected_modules="$selected_modules python" ;;
-            2) selected_modules="$selected_modules docker" ;;
-            3) selected_modules="$selected_modules base" ;;
-            4) selected_modules="$selected_modules terminal" ;;
-            5) selected_modules="$selected_modules dev" ;;
-            6) selected_modules="$selected_modules monitoring" ;;
-            7) selected_modules="$MODULES" ;;
-            *) printf "${RED}無效的選項：$num${NC}\n" ;;
-        esac
         return
     fi
 
@@ -2745,33 +2572,11 @@ run_install_with_tui() {
     return "$install_rc"
 }
 
-# 無模組管理器時，各模組對應的安裝腳本
-module_fallback_script() {
-    case "$1" in
-        base) printf '%s' "core/base_tools.sh" ;;
-        dev) printf '%s' "core/dev_tools.sh" ;;
-        python) printf '%s' "core/python_setup.sh" ;;
-        terminal) printf '%s' "core/terminal_setup.sh" ;;
-        monitoring) printf '%s' "core/monitoring_tools.sh" ;;
-        docker) printf '%s' "core/docker_setup.sh" ;;
-        *) printf '%s' "" ;;
-    esac
-}
 
-# 執行單一模組（模組管理器或備援腳本）
+# 執行單一模組
 run_module_install() {
     local module="$1"
-    if [ "$USE_MODULE_MANAGER" = "true" ] && command -v install_module >/dev/null 2>&1; then
-        run_logged_command install_module "$module"
-    else
-        local script
-        script="$(module_fallback_script "$module")"
-        if [ -z "$script" ]; then
-            log_error "未知模組：$module" || true
-            return 1
-        fi
-        execute_script "$script" "$module"
-    fi
+    run_logged_command install_module "$module"
 }
 
 # 模組失敗策略：
@@ -2828,8 +2633,7 @@ _handle_module_failure() {
 # shellcheck disable=SC2120 # 參數為可選，預設用 selected_modules；測試會傳入清單
 selected_modules_need_package_index() {
     local modules="${1:-$selected_modules}"
-    if [ "${USE_MODULE_MANAGER:-false}" != "true" ] \
-       || [[ "$(declare -p MODULE_SCRIPTS 2>/dev/null)" != "declare -A"* ]] \
+    if [[ "$(declare -p MODULE_SCRIPTS 2>/dev/null)" != "declare -A"* ]] \
        || ! command -v _module_pkg_is_installed >/dev/null 2>&1; then
         return 0
     fi
@@ -2890,11 +2694,7 @@ install_selected_modules() {
     fi
 
     local install_order=()
-    if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-        install_order=("${MODULE_LIST[@]}")
-    else
-        install_order=(base dev python monitoring docker terminal)
-    fi
+    install_order=("${MODULE_LIST[@]}")
 
     # 無論 modules.conf 定義順序為何，都將 terminal 放到最後執行，
     # 以便在全部模組完成後再套用 zsh/提示符相關設定。
@@ -2936,48 +2736,13 @@ install_selected_modules() {
                 *) continue ;;
             esac
 
-            if [ "$USE_MODULE_MANAGER" = "true" ] && [ ${#MODULE_LIST[@]} -gt 0 ]; then
-                local module_name="${MODULE_NAMES[$module]:-$module}"
-                printf "${GREEN}[$module]${NC} %s\n" "$module_name"
-                [ -n "${MODULE_PACKAGES[$module]:-}" ] && printf "  • packages: %s\n" "${MODULE_PACKAGES[$module]}" || true
-                [ -n "${MODULE_BREW_PACKAGES[$module]:-}" ] && printf "  • brew: %s\n" "${MODULE_BREW_PACKAGES[$module]}" || true
-                [ -n "${MODULE_PIP_PACKAGES[$module]:-}" ] && printf "  • pip: %s\n" "${MODULE_PIP_PACKAGES[$module]}" || true
-                [ -n "${MODULE_CARGO_PACKAGES[$module]:-}" ] && printf "  • cargo: %s\n" "${MODULE_CARGO_PACKAGES[$module]}" || true
-                [ -n "${MODULE_NPM_PACKAGES[$module]:-}" ] && printf "  • npm: %s\n" "${MODULE_NPM_PACKAGES[$module]}" || true
-            else
-                printf "${GREEN}[$module]${NC}\n"
-                case $module in
-                    base)
-                        printf "  • git, curl, wget, build-essential\n"
-                        printf "  • lsd, bat, fzf, ripgrep\n"
-                        printf "  • tealdeer, superfile\n"
-                        ;;
-                    dev)
-                        printf "  • neovim + lazyvim\n"
-                        printf "  • lazygit\n"
-                        printf "  • nodejs, cargo\n"
-                        ;;
-                    python)
-                        printf "  • python3, pip\n"
-                        printf "  • uv (快速包管理器)\n"
-                        printf "  • ranger-fm, s-tui\n"
-                        ;;
-                    terminal)
-                        printf "  • zsh + oh-my-zsh\n"
-                        printf "  • powerlevel10k 主題\n"
-                        printf "  • 多個 zsh 插件\n"
-                        ;;
-                    monitoring)
-                        printf "  • btop, htop\n"
-                        printf "  • iftop, nethogs\n"
-                        printf "  • fail2ban\n"
-                        ;;
-                    docker)
-                        printf "  • docker-ce\n"
-                        printf "  • lazydocker\n"
-                        ;;
-                esac
-            fi
+            local module_name="${MODULE_NAMES[$module]:-$module}"
+            printf "${GREEN}[$module]${NC} %s\n" "$module_name"
+            [ -n "${MODULE_PACKAGES[$module]:-}" ] && printf "  • packages: %s\n" "${MODULE_PACKAGES[$module]}" || true
+            [ -n "${MODULE_BREW_PACKAGES[$module]:-}" ] && printf "  • brew: %s\n" "${MODULE_BREW_PACKAGES[$module]}" || true
+            [ -n "${MODULE_PIP_PACKAGES[$module]:-}" ] && printf "  • pip: %s\n" "${MODULE_PIP_PACKAGES[$module]}" || true
+            [ -n "${MODULE_CARGO_PACKAGES[$module]:-}" ] && printf "  • cargo: %s\n" "${MODULE_CARGO_PACKAGES[$module]}" || true
+            [ -n "${MODULE_NPM_PACKAGES[$module]:-}" ] && printf "  • npm: %s\n" "${MODULE_NPM_PACKAGES[$module]}" || true
             printf "\n"
         done
 
@@ -2990,7 +2755,6 @@ install_selected_modules() {
 
     # 進階模式：在開始安裝前，逐模組讓使用者再選具體要裝的套件
     if [ "${ADVANCED_MODE:-false}" = "true" ] \
-       && [ "$USE_MODULE_MANAGER" = "true" ] \
        && command -v module_interactive_package_filter >/dev/null 2>&1 \
        && [ "${NON_INTERACTIVE:-false}" != "true" ]; then
         log_info "進階模式：逐模組選擇套件"
@@ -3056,7 +2820,6 @@ install_selected_modules() {
         # 的邏輯由 module_manager.sh::install_module 處理。
         # 設 FORCE_REINSTALL=true 或 --force 可強制重裝所有套件。
         if [ "${FORCE_REINSTALL:-false}" != "true" ] \
-           && [ "$USE_MODULE_MANAGER" = "true" ] \
            && command -v check_module_status >/dev/null 2>&1; then
             module_status=$(check_module_status "$module" 2>/dev/null || echo "not_installed")
             if [ "$module_status" = "installed" ]; then
