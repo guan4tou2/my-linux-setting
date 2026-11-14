@@ -248,13 +248,13 @@ CONF
     choose_exit "$backend" "$expected"
     wait_screen "TUI_EXIT=$expected"
     [ "$(cat "$dir/exit-code")" = "$expected" ] || { echo '結束碼檔案與畫面不符。'; return 1; }
-    # 專案複本位於暫存目錄；安裝程式必須使用複本裡的腳本，不可再從遠端下載覆蓋，
-    # 否則這個測試驗證的會是 $REPO_URL 上的版本而不是目前的程式碼。
-    if grep -rqs '下載安裝腳本\|已下載 core/' "$dir/logs"; then
-        echo '安裝程式在本地專案上仍走了遠端下載路徑。'
+    # 專案複本位於暫存目錄；安裝程式必須直接使用複本裡的腳本，不可走 bootstrap 重新下載
+    # 壓縮檔，否則這個測試驗證的會是遠端的版本而不是目前的程式碼。
+    if grep -rqs '下載專案壓縮檔\|專案已解壓縮\|linux-setting-bootstrap' "$dir/logs"; then
+        echo '安裝程式在本地專案上仍走了 bootstrap（下載壓縮檔）路徑。'
         return 1
     fi
-    echo "通過 | $scenario | 使用本地腳本，未從遠端下載"
+    echo "通過 | $scenario | 使用本地腳本，未走 bootstrap 下載"
     dpkg-query -W -f='${Status}\n' "$package" | grep -q '^install ok installed$'
     echo "通過 | $scenario | 套件 $package 已安裝，結束碼 $expected"
     tmux -L "$socket" kill-session -t "$scenario"

@@ -21,14 +21,21 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+# 網站根目錄只放兩個檔案：install.sh（目前工作樹）與 repo.tar.gz（由目前工作樹打包，
+# 頂層一層目錄，模擬 GitHub archive；不依賴 git，排除 .git 與大型本機檔案）
+mkdir -p "$work/www" "$work/stage/my-linux-setting-main"
+cp "$REPO_ROOT/install.sh" "$work/www/install.sh"
+(cd "$REPO_ROOT" && tar -cf - --exclude=.git --exclude='*.db' --exclude='*.log' --exclude=logs .) \
+    | tar -xf - -C "$work/stage/my-linux-setting-main"
+tar -czf "$work/www/repo.tar.gz" -C "$work/stage" my-linux-setting-main
 # 使用標準庫 CLI 的埠 0，由作業系統分配埠，避免先探測後綁定的競爭。
-python3 -u -m http.server "${LOCAL_HTTP_PORT:-0}" --bind 127.0.0.1 --directory "$REPO_ROOT" >"$work/http.log" 2>&1 &
+python3 -u -m http.server "${LOCAL_HTTP_PORT:-0}" --bind 127.0.0.1 --directory "$work/www" >"$work/http.log" 2>&1 &
 server_pid=$!
 deadline=$((SECONDS + 30))
 url=''
 while [ "$SECONDS" -lt "$deadline" ]; do
     port=$(sed -n 's/.* port \([0-9][0-9]*\) .*/\1/p' "$work/http.log" | head -n 1)
-    if [ -n "$port" ] && curl -fsS "http://127.0.0.1:$port/" >/dev/null 2>&1; then
+    if [ -n "$port" ] && curl -fsS "http://127.0.0.1:$port/install.sh" >/dev/null 2>&1; then
         url="http://127.0.0.1:$port"
         break
     fi
@@ -36,26 +43,29 @@ while [ "$SECONDS" -lt "$deadline" ]; do
     sleep 0.2
 done
 [ -n "$url" ] || { echo '等待 HTTP 伺服器逾時。'; exit 1; }
-mkdir "$work/empty"
+mkdir "$work/empty" "$work/tmp"
 cd "$work/empty"
 installer=$(curl -fsSL "$url/install.sh")
 status=0
-printf '1 3 4 5 6\ni\n' | REPO_URL="$url" TUI_MODE=quiet bash -c "$installer" >"$work/install.log" 2>&1 || status=$?
+printf '1 3 4 5 6\ni\n' | TMPDIR="$work/tmp" LINUX_SETTING_ARCHIVE_URL="$url/repo.tar.gz" TUI_MODE=quiet bash -c "$installer" >"$work/install.log" 2>&1 || status=$?
 cat "$work/install.log"
 [ "$status" -eq 0 ] || { echo "安裝程式結束碼：$status"; exit "$status"; }
-missing=0
-for path in install.sh scripts/core/common.sh scripts/core/module_manager.sh config/modules.conf \
-    scripts/core/python_setup.sh scripts/core/base_tools.sh scripts/core/terminal_setup.sh \
-    scripts/core/dev_tools.sh scripts/core/monitoring_tools.sh; do
-    if grep -Fq "\"GET /$path HTTP/1.1\" 200" "$work/http.log"; then
-        echo "通過 | 遠端 GET /$path"
-    else
-        echo "缺少 | 遠端 GET /$path"
-        missing=$((missing + 1))
-    fi
-done
+# 伺服器紀錄只能有 /install.sh（上面取得安裝腳本的兩次，含探測）與 /repo.tar.gz 的 GET，沒有逐檔下載
+bad=$(grep -F '"GET ' "$work/http.log" | grep -vF '"GET /install.sh HTTP' | grep -vF '"GET /repo.tar.gz HTTP' || true)
+if [ -n "$bad" ]; then
+    echo '伺服器紀錄出現預期以外的請求（疑似逐檔下載）：'
+    echo "$bad"
+    exit 1
+fi
+grep -Fq '"GET /repo.tar.gz HTTP/1.1" 200' "$work/http.log" || { echo '缺少 GET /repo.tar.gz'; exit 1; }
+echo '通過 | 伺服器只收到 /install.sh 與 /repo.tar.gz 的 GET'
 [ ! -e "$work/empty/scripts" ] || { echo '空目錄出現 scripts/，無法證明遠端載入。'; exit 1; }
 echo '通過 | 空目錄沒有 scripts/'
-[ "$missing" -eq 0 ] || exit 1
+leftover=$(find "$work/tmp" -maxdepth 1 -name 'linux-setting-bootstrap.*' | head -n 1)
+[ -z "$leftover" ] || { echo "bootstrap 暫存目錄未清除：$leftover"; exit 1; }
+echo '通過 | bootstrap 暫存目錄已清除'
+uninstaller="${XDG_CONFIG_HOME:-$HOME/.config}/linux-setting/uninstall.sh"
+[ -x "$uninstaller" ] || { echo "缺少可執行的卸載腳本：$uninstaller"; exit 1; }
+echo "通過 | 已保存卸載腳本 $uninstaller"
 bash "$REPO_ROOT/tests/verify_install.sh" python base terminal dev monitoring
 echo '遠端安裝與成果驗證全部通過。'

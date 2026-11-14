@@ -32,6 +32,13 @@ Linux Setting Scripts - 自動安裝腳本 v2.2.9
   TUI_MODE=quiet|normal              控制安裝輸出詳細程度
   TUI_LOG_LINES=300                  TUI 查看安裝日誌時顯示的尾端行數
 
+遠端安裝（bash -c "$(curl ...)"）會下載整包專案壓縮檔再執行，可用以下變數調整來源：
+  LINUX_SETTING_REPO=擁有者/名稱     GitHub 儲存庫（預設 guan4tou2/my-linux-setting）
+  LINUX_SETTING_REF=main             分支、tag 或 commit（預設 main；釘選版本請用 tag 或 commit）
+  LINUX_SETTING_ARCHIVE_URL=<網址>   直接指定壓縮檔網址（優先於上兩者；必須是 https）
+  LINUX_SETTING_ARCHIVE_SHA256=<雜湊> 下載後以 SHA-256 驗證壓縮檔（建議搭配固定的 tag 或 commit）
+  （舊的 REPO_URL=https://raw.githubusercontent.com/<擁有者>/<名稱>/<ref> 仍相容）
+
 範例:
   ./install.sh                    # 標準安裝（互動式選單）
   ./install.sh --minimal          # 最小安裝
@@ -57,7 +64,7 @@ show_welcome() {
 
 # ==============================================================================
 # --rollback：還原最近一次安裝前的設定檔備份
-# 這段在 common.sh 載入之前執行（遠端執行時 common.sh 尚未下載），
+# 這段在 common.sh 載入之前執行（遠端執行時專案壓縮檔尚未下載），
 # 因此不可使用 common.sh 的函式或顏色變數，也不會下載任何東西。
 # ==============================================================================
 
@@ -156,9 +163,33 @@ run_rollback() {
     return 0
 }
 
+# ==============================================================================
+# 遠端安裝（bootstrap）：下載整包專案壓縮檔、解壓，再以解出來的 install.sh 重新執行
+# 這一段在 common.sh 載入之前執行，只能使用這裡自己定義的函式，不可使用 common.sh
+# 的函式或顏色變數。bootstrap 之後一律是「本地流程」。
+# ==============================================================================
+
+# bootstrap 暫存目錄的名稱樣式（mktemp 產生）；只有符合樣式的目錄才會被清除
+BOOTSTRAP_DIR_PREFIX="linux-setting-bootstrap"
+
+bootstrap_status() {
+    local level="$1"
+    local message="$2"
+
+    if [ "$level" != "ERROR" ] && [ "${TUI_MODE:-quiet}" = "quiet" ] && [ "${TUI_LOG_TO_TERMINAL:-auto}" != "true" ]; then
+        return 0
+    fi
+
+    case "$level" in
+        INFO) printf "\033[0;36mINFO: %s\033[0m\n" "$message" ;;
+        SUCCESS) printf "\033[0;32mSUCCESS: %s\033[0m\n" "$message" ;;
+        ERROR) printf "\033[0;31mERROR: %s\033[0m\n" "$message" >&2 ;;
+        *) printf "%s: %s\n" "$level" "$message" ;;
+    esac
+}
+
 # 下載網址檢查：必須是 https://；唯一例外是主機為 localhost、127.0.0.1 或 [::1] 的
 # http://（本機測試伺服器）。含 userinfo（@）的 http 網址一律拒絕。
-# 這些網址會用來下載並執行腳本，且此段在 common.sh 載入之前執行，所以自成一體。
 _download_url_allowed() {
     local url="$1" rest authority host
     case "$url" in
@@ -182,17 +213,217 @@ _download_url_allowed() {
     return 1
 }
 
-validate_download_urls() {
-    local name value bad=0
-    for name in REPO_URL SCRIPTS_URL P10K_CONFIG_URL REQUIREMENTS_URL; do
-        value="${!name:-}"
-        [ -n "$value" ] || continue
-        if ! _download_url_allowed "$value"; then
-            printf '\033[0;31mERROR: %s 必須是 https:// 網址（僅 localhost、127.0.0.1、[::1] 允許 http://），目前為：%s\033[0m\n' "$name" "$value" >&2
-            bad=1
+# repo 必須是「擁有者/名稱」，ref 可為分支、tag 或 commit（允許 /）；兩者都不可含 ..
+_bootstrap_valid_repo() {
+    local re='^[A-Za-z0-9_][A-Za-z0-9._-]*/[A-Za-z0-9_][A-Za-z0-9._-]*$'
+    [[ "$1" =~ $re ]] && [[ "$1" != *..* ]]
+}
+
+_bootstrap_valid_ref() {
+    local re='^[A-Za-z0-9_][A-Za-z0-9._/-]*$'
+    [[ "$1" =~ $re ]] && [[ "$1" != *..* ]] && [[ "$1" != *//* ]] && [[ "$1" != */ ]]
+}
+
+# 決定壓縮檔網址，結果放在 BOOTSTRAP_ARCHIVE_URL。優先順序：
+#   LINUX_SETTING_ARCHIVE_URL > LINUX_SETTING_REPO / LINUX_SETTING_REF > 舊的 REPO_URL > 預設值
+bootstrap_resolve_archive_url() {
+    local repo="${LINUX_SETTING_REPO:-}" ref="${LINUX_SETTING_REF:-}"
+    BOOTSTRAP_ARCHIVE_URL=""
+
+    if [ -n "${LINUX_SETTING_ARCHIVE_URL:-}" ]; then
+        BOOTSTRAP_ARCHIVE_URL="$LINUX_SETTING_ARCHIVE_URL"
+    else
+        if [ -z "$repo" ] && [ -z "$ref" ] && [ -n "${REPO_URL:-}" ]; then
+            # 向下相容：REPO_URL=https://raw.githubusercontent.com/<擁有者>/<名稱>/<ref>
+            local legacy="${REPO_URL%/}"
+            local legacy_re='^https://raw\.githubusercontent\.com/([A-Za-z0-9_][A-Za-z0-9._-]*)/([A-Za-z0-9_][A-Za-z0-9._-]*)/(.+)$'
+            if [[ "$legacy" =~ $legacy_re ]]; then
+                repo="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+                ref="${BASH_REMATCH[3]}"
+                printf '提示：REPO_URL 已被 LINUX_SETTING_REPO 與 LINUX_SETTING_REF 取代，已解析為 %s@%s，建議改用新變數。\n' "$repo" "$ref" >&2
+            else
+                bootstrap_status "ERROR" "無法從 REPO_URL（$REPO_URL）推得壓縮檔網址。請改用 LINUX_SETTING_REPO 與 LINUX_SETTING_REF，或直接設定 LINUX_SETTING_ARCHIVE_URL。"
+                return 1
+            fi
+        fi
+        repo="${repo:-guan4tou2/my-linux-setting}"
+        ref="${ref:-main}"
+        if ! _bootstrap_valid_repo "$repo"; then
+            bootstrap_status "ERROR" "LINUX_SETTING_REPO 格式不正確（需為 擁有者/名稱，只允許英數與 ._-）：$repo"
+            return 1
+        fi
+        if ! _bootstrap_valid_ref "$ref"; then
+            bootstrap_status "ERROR" "LINUX_SETTING_REF 格式不正確（只允許英數與 ._-/，且不可含 ..）：$ref"
+            return 1
+        fi
+        BOOTSTRAP_ARCHIVE_URL="https://github.com/$repo/archive/$ref.tar.gz"
+    fi
+
+    if ! _download_url_allowed "$BOOTSTRAP_ARCHIVE_URL"; then
+        bootstrap_status "ERROR" "壓縮檔網址必須是 https://（僅 localhost、127.0.0.1、[::1] 允許 http://），目前為：$BOOTSTRAP_ARCHIVE_URL"
+        return 1
+    fi
+    return 0
+}
+
+# 只刪除「確實是目錄、不是符號連結、名稱符合 mktemp 樣式」的 bootstrap 暫存目錄
+bootstrap_remove_dir() {
+    local dir="${1:-}"
+    local re="^${BOOTSTRAP_DIR_PREFIX//./\\.}\\.[A-Za-z0-9]{6}\$"
+    [ -n "$dir" ] || return 0
+    [[ "${dir##*/}" =~ $re ]] || return 0
+    [ -d "$dir" ] && [ ! -L "$dir" ] || return 0
+    rm -rf -- "$dir"
+}
+
+_bootstrap_signal() {
+    bootstrap_remove_dir "${BOOTSTRAP_ACTIVE_DIR:-}"
+    exit "$1"
+}
+
+_bootstrap_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        return 1
+    fi
+}
+
+# 列出壓縮檔內容並拒絕不安全的項目：絕對路徑、含 .. 的路徑、指向外部的連結、裝置檔
+bootstrap_check_archive_entries() {
+    local archive="$1" entry line target
+    local dotdot_re='(^|/)\.\.(/|$)'
+    if ! tar -tzf "$archive" >/dev/null 2>&1; then
+        bootstrap_status "ERROR" "無法讀取壓縮檔內容（檔案損毀或不是 tar.gz）"
+        return 1
+    fi
+    while IFS= read -r entry; do
+        if [[ "$entry" == /* ]] || [[ "$entry" =~ $dotdot_re ]]; then
+            bootstrap_status "ERROR" "壓縮檔含有不安全的路徑，已中止：$entry"
+            return 1
+        fi
+    done < <(tar -tzf "$archive" 2>/dev/null)
+    while IFS= read -r line; do
+        case "${line:0:1}" in
+            -|d) ;;
+            l|h)
+                target="${line##* -> }"
+                [ "$target" != "$line" ] || target="${line##* link to }"
+                if [[ "$target" == /* ]] || [[ "$target" =~ $dotdot_re ]]; then
+                    bootstrap_status "ERROR" "壓縮檔含有指向外部的連結，已中止：$line"
+                    return 1
+                fi
+                ;;
+            *)
+                bootstrap_status "ERROR" "壓縮檔含有不允許的檔案類型，已中止：$line"
+                return 1
+                ;;
+        esac
+    done < <(tar -tvzf "$archive" 2>/dev/null)
+    return 0
+}
+
+# 下載、驗證、解壓，並以解出來的 install.sh 重新執行（成功時不會返回）
+# 失敗時印出原因、清除暫存目錄並回傳非 0。
+run_bootstrap() {
+    bootstrap_resolve_archive_url || return 1
+
+    local tool
+    for tool in curl tar mktemp; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            bootstrap_status "ERROR" "遠端安裝需要 $tool，請先安裝後再執行。"
+            return 1
         fi
     done
-    [ "$bad" -eq 0 ]
+
+    local url="$BOOTSTRAP_ARCHIVE_URL" max_bytes="${LINUX_SETTING_MAX_ARCHIVE_BYTES:-52428800}"
+    local dir="" tmp_root="${TMPDIR:-/tmp}"
+    dir="$(mktemp -d "${tmp_root%/}/${BOOTSTRAP_DIR_PREFIX}.XXXXXX")" || {
+        bootstrap_status "ERROR" "無法建立暫存目錄"
+        return 1
+    }
+    chmod 0700 "$dir" || true
+    # 中斷時一併清掉暫存目錄（exec 成功後由子程序自己接手清理）
+    BOOTSTRAP_ACTIVE_DIR="$dir"
+    trap '_bootstrap_signal 130' INT
+    trap '_bootstrap_signal 143' TERM
+    trap '_bootstrap_signal 129' HUP
+
+    local archive="$dir/archive.tar.gz" src="$dir/src"
+    local curl_opts=(-fsS --connect-timeout 15 --max-time "${LINUX_SETTING_DOWNLOAD_TIMEOUT:-300}" --max-filesize "$max_bytes")
+    case "$url" in
+        https://*) curl_opts+=(-L --max-redirs 5 --proto '=https' --proto-redir '=https') ;;
+        *) curl_opts+=(--proto '=http') ;;
+    esac
+
+    bootstrap_status "INFO" "下載專案壓縮檔：$url"
+    if ! curl "${curl_opts[@]}" "$url" -o "$archive"; then
+        bootstrap_status "ERROR" "下載壓縮檔失敗：$url"
+        bootstrap_remove_dir "$dir"
+        return 1
+    fi
+    local size=0
+    size="$(wc -c < "$archive" | tr -d '[:space:]')" || size=0
+    if [ "${size:-0}" -le 0 ] || [ "$size" -gt "$max_bytes" ]; then
+        bootstrap_status "ERROR" "壓縮檔大小不合理（$size bytes，上限 $max_bytes）"
+        bootstrap_remove_dir "$dir"
+        return 1
+    fi
+
+    if [ -n "${LINUX_SETTING_ARCHIVE_SHA256:-}" ]; then
+        local expected actual
+        expected="$(printf '%s' "$LINUX_SETTING_ARCHIVE_SHA256" | tr '[:upper:]' '[:lower:]')"
+        if ! [[ "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+            bootstrap_status "ERROR" "LINUX_SETTING_ARCHIVE_SHA256 必須是 64 個十六進位字元"
+            bootstrap_remove_dir "$dir"
+            return 1
+        fi
+        if ! actual="$(_bootstrap_sha256 "$archive")" || [ -z "$actual" ]; then
+            bootstrap_status "ERROR" "找不到 sha256sum 或 shasum，無法驗證壓縮檔"
+            bootstrap_remove_dir "$dir"
+            return 1
+        fi
+        if [ "$actual" != "$expected" ]; then
+            bootstrap_status "ERROR" "壓縮檔 SHA-256 不符，已中止（預期 $expected，實際 $actual）"
+            bootstrap_remove_dir "$dir"
+            return 1
+        fi
+        bootstrap_status "SUCCESS" "壓縮檔 SHA-256 驗證通過"
+    fi
+
+    if ! bootstrap_check_archive_entries "$archive"; then
+        bootstrap_remove_dir "$dir"
+        return 1
+    fi
+
+    if ! mkdir -p "$src" || ! tar -xzf "$archive" -C "$src" --strip-components=1 --no-same-owner 2>/dev/null; then
+        bootstrap_status "ERROR" "解壓縮失敗"
+        bootstrap_remove_dir "$dir"
+        return 1
+    fi
+    rm -f "$archive"
+
+    local required
+    for required in install.sh scripts/core/common.sh scripts/core/module_manager.sh config/modules.conf; do
+        if [ ! -f "$src/$required" ]; then
+            bootstrap_status "ERROR" "壓縮檔內容不完整，缺少：$required"
+            bootstrap_remove_dir "$dir"
+            return 1
+        fi
+    done
+    bootstrap_status "SUCCESS" "專案已解壓縮，重新執行安裝程式"
+
+    # 用環境變數告知子程序：這是 bootstrap 啟動的，結束時要清掉這個目錄、也不可再次 bootstrap
+    export LINUX_SETTING_BOOTSTRAP_DIR="$dir"
+    shopt -s execfail
+    # execfail 讓 exec 失敗時繼續往下清理，所以 exec 之後的程式碼是刻意保留的
+    # shellcheck disable=SC2093
+    exec "${BASH:-bash}" "$src/install.sh" ${INSTALL_ORIG_ARGS[@]+"${INSTALL_ORIG_ARGS[@]}"}
+    bootstrap_status "ERROR" "無法重新執行解出來的 install.sh"
+    bootstrap_remove_dir "$dir"
+    return 1
 }
 
 # Set strict error handling
@@ -204,6 +435,9 @@ trap 'handle_error $? $LINENO "$BASH_COMMAND"' ERR
 # ==============================================================================
 # Argument Parsing
 # ==============================================================================
+
+# 原始參數：bootstrap 後要原樣傳給解出來的 install.sh（解析迴圈會 shift 掉它們）
+INSTALL_ORIG_ARGS=("$@")
 
 INSTALL_MODE="${INSTALL_MODE:-full}"
 UPDATE_MODE="${UPDATE_MODE:-false}"
@@ -313,6 +547,47 @@ if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
     exit 1
 fi
 
+# ==============================================================================
+# 啟動：判斷是否「從完整專案執行」
+# 條件：BASH_SOURCE[0] 是存在的檔案，且其所在目錄下有 scripts/core/common.sh。
+# 不查找目前目錄（$PWD）——在別人準備好的目錄裡執行一鍵安裝不可載入該目錄的檔案。
+# 否則進入 bootstrap：下載整包壓縮檔、解壓，再以解出來的 install.sh 重新執行。
+# ==============================================================================
+
+INSTALL_SH_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    INSTALL_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || INSTALL_SH_DIR=""
+fi
+if [ -n "$INSTALL_SH_DIR" ] && [ -f "$INSTALL_SH_DIR/scripts/core/common.sh" ]; then
+    SCRIPT_DIR="$INSTALL_SH_DIR/scripts"
+    # 由 bootstrap 啟動：記下暫存根目錄，結束時（正常、失敗、中斷）清除。
+    # 環境變數只認名稱符合樣式、確實是目錄、且 install.sh 就在其 src/ 底下的路徑。
+    BOOTSTRAP_CLEANUP_DIR=""
+    if [ -n "${LINUX_SETTING_BOOTSTRAP_DIR:-}" ]; then
+        _bs_root="$(cd "$LINUX_SETTING_BOOTSTRAP_DIR" 2>/dev/null && pwd -P)" || _bs_root=""
+        if [ -n "$_bs_root" ] && [ "$INSTALL_SH_DIR" = "$_bs_root/src" ]; then
+            BOOTSTRAP_CLEANUP_DIR="$_bs_root"
+        fi
+        unset LINUX_SETTING_BOOTSTRAP_DIR _bs_root
+    fi
+    if [ -n "$BOOTSTRAP_CLEANUP_DIR" ]; then
+        trap 'bootstrap_remove_dir "$BOOTSTRAP_CLEANUP_DIR"' EXIT
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        trap 'exit 129' HUP
+    fi
+else
+    if [ -n "${LINUX_SETTING_BOOTSTRAP_DIR:-}" ]; then
+        # 已經 bootstrap 過卻仍找不到完整專案：不可再次下載，避免無限迴圈
+        bootstrap_status "ERROR" "bootstrap 解出來的目錄不完整，已中止。"
+        bootstrap_remove_dir "$LINUX_SETTING_BOOTSTRAP_DIR"
+        exit 1
+    fi
+    trap - ERR
+    run_bootstrap || exit 1
+    exit 1
+fi
+
 show_welcome
 
 # Export variables for child scripts
@@ -321,11 +596,6 @@ export INSTALL_MODE UPDATE_MODE VERBOSE DEBUG DRY_RUN SKIP_PYTHON_CHECK NON_INTE
 # ==============================================================================
 # Configuration
 # ==============================================================================
-
-REPO_URL="${REPO_URL:-https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main}"
-SCRIPTS_URL="${SCRIPTS_URL:-$REPO_URL/scripts}"
-P10K_CONFIG_URL="${P10K_CONFIG_URL:-$REPO_URL/.p10k.zsh}"
-REQUIREMENTS_URL="${REQUIREMENTS_URL:-$REPO_URL/requirements.txt}"
 
 # Performance options
 ENABLE_PARALLEL_INSTALL="${ENABLE_PARALLEL_INSTALL:-true}"
@@ -336,95 +606,20 @@ if [ "$PARALLEL_JOBS" = "auto" ]; then
     PARALLEL_JOBS=$(nproc 2>/dev/null || echo 4)
 fi
 
-# 這些網址會被用來下載並執行腳本：在任何下載之前先確認是 https（或本機測試伺服器）
-validate_download_urls || exit 1
-
 # Export configuration
-export REPO_URL SCRIPTS_URL P10K_CONFIG_URL REQUIREMENTS_URL
 export ENABLE_PARALLEL_INSTALL PARALLEL_JOBS
 
 # ==============================================================================
-# Remote Installation with Security Verification
+# 載入共用函式庫（此時一定是完整專案：本地執行，或 bootstrap 解壓後的副本）
 # ==============================================================================
 
-# 以 install.sh 所在目錄推導 SCRIPT_DIR，避免使用者 `cd /tmp && bash ~/repo/install.sh`
-# 或透過絕對路徑執行時被誤判為「找不到本地檔案」而走遠端下載。
-# 注意：`bash -c "$(curl ... install.sh)"` 時 BASH_SOURCE[0] 為空，這種情況才會走遠端。
-if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-    INSTALL_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    SCRIPT_DIR="$INSTALL_SH_DIR/scripts"
-else
-    SCRIPT_DIR="$PWD/scripts"
-fi
-REMOTE_INSTALL=false
-# 遠端安裝才會建立暫存目錄；先給預設值，避免 cleanup_temp_files 在 set -u 下讀到未定義變數
-TEMP_DIR="${TEMP_DIR:-}"
-
-bootstrap_status() {
-    local level="$1"
-    local message="$2"
-
-    if [ "$level" != "ERROR" ] && [ "${TUI_MODE:-quiet}" = "quiet" ] && [ "${TUI_LOG_TO_TERMINAL:-auto}" != "true" ]; then
-        return 0
-    fi
-
-    case "$level" in
-        INFO) printf "\033[0;36mINFO: %s\033[0m\n" "$message" ;;
-        SUCCESS) printf "\033[0;32mSUCCESS: %s\033[0m\n" "$message" ;;
-        ERROR) printf "\033[0;31mERROR: %s\033[0m\n" "$message" >&2 ;;
-        *) printf "%s: %s\n" "$level" "$message" ;;
-    esac
-}
-
-# Try local common.sh first
-if [ -f "$SCRIPT_DIR/core/common.sh" ]; then
-    source "$SCRIPT_DIR/core/common.sh"
-elif [ -f "./scripts/core/common.sh" ]; then
-    SCRIPT_DIR="$PWD/scripts"
-    source "./scripts/core/common.sh"
-else
-    # Remote installation - bootstrap without common.sh functions
-    TEMP_DIR=$(mktemp -d)
-    SCRIPT_DIR="$TEMP_DIR/scripts"
-    mkdir -p "$SCRIPT_DIR/core"
-
-    bootstrap_status "INFO" "Downloading common library from remote source..."
-
-    # Download common.sh (without using safe_download since it's not loaded yet)
-    COMMON_URL="$SCRIPTS_URL/core/common.sh"
-    COMMON_OUTPUT="$SCRIPT_DIR/core/common.sh"
-
-    if curl -fsSL --max-time 30 "$COMMON_URL" -o "$COMMON_OUTPUT" 2>/dev/null; then
-        # Basic validation before sourcing
-        if [ -s "$COMMON_OUTPUT" ] && head -1 "$COMMON_OUTPUT" | grep -q "^#!/"; then
-            # shellcheck source=/dev/null
-            source "$COMMON_OUTPUT"
-            REMOTE_INSTALL=true
-            bootstrap_status "SUCCESS" "Common library loaded"
-        else
-            bootstrap_status "ERROR" "Downloaded file appears invalid"
-            rm -rf "$TEMP_DIR"
-            exit 1
-        fi
-    else
-        bootstrap_status "ERROR" "Failed to download common library"
-        rm -rf "$TEMP_DIR"
-        exit 1
-    fi
-fi
-
-# common.sh 可能載入了使用者設定檔並改寫上述網址；後續下載前再檢查一次
-if ! validate_download_urls; then
-    if [ -n "${TEMP_DIR:-}" ]; then
-        rm -rf "$TEMP_DIR"
-    fi
-    exit 1
-fi
+# shellcheck source=scripts/core/common.sh
+source "$SCRIPT_DIR/core/common.sh"
 
 # Initialize environment
 init_common_env
 
-# 本機在啟動階段載入；遠端安裝在 main 下載完成後載入。
+# 模組管理器在啟動階段載入
 load_module_manager() {
     if [ ! -f "$SCRIPT_DIR/core/module_manager.sh" ]; then
         log_error "找不到必要的模組管理器: $SCRIPT_DIR/core/module_manager.sh" || true
@@ -445,9 +640,7 @@ load_module_manager() {
     fi
 }
 
-if [ "$REMOTE_INSTALL" != true ]; then
-    load_module_manager
-fi
+load_module_manager
 
 show_install_log_dialog() {
     local tail_lines="${1:-${TUI_LOG_LINES:-300}}"
@@ -857,6 +1050,33 @@ record_created_configs() {
     done
 }
 
+# 把 uninstall.sh 複製到固定位置，讓一鍵遠端安裝（暫存的專案副本用完即刪）之後仍能卸載。
+# 只在有寫入卸載清單時進行；失敗只警告。成功時路徑放在 UNINSTALLER_COPY。
+UNINSTALLER_COPY=""
+install_uninstaller_copy() {
+    UNINSTALLER_COPY=""
+    [ "${DRY_RUN:-false}" != "true" ] || return 0
+    [ -n "${INSTALL_MANIFEST_FILE:-}" ] && [ -f "$INSTALL_MANIFEST_FILE" ] || return 0
+
+    local source_file="$INSTALL_SH_DIR/uninstall.sh"
+    local dest_dir="${XDG_CONFIG_HOME:-$HOME/.config}/linux-setting"
+    local dest="$dest_dir/uninstall.sh"
+    if [ ! -f "$source_file" ]; then
+        log_warning "找不到 uninstall.sh，未保存卸載腳本"
+        return 0
+    fi
+    if mkdir -p "$dest_dir" \
+       && cp "$source_file" "$dest.tmp" \
+       && chmod 0700 "$dest.tmp" \
+       && mv -f "$dest.tmp" "$dest"; then
+        UNINSTALLER_COPY="$dest"
+    else
+        rm -f "$dest.tmp"
+        log_warning "無法保存卸載腳本到 $dest；之後可從專案取得 uninstall.sh"
+    fi
+    return 0
+}
+
 # 設置日誌
 setup_logging() {
     # LOG_DIR 可能已在 common.sh 中定義為 readonly，使用局部變數
@@ -876,91 +1096,9 @@ setup_logging() {
     fi
 }
 
-remote_download_progress() {
-    local enabled="$1"
-    local percent="$2"
-    local message="$3"
-
-    [ "$enabled" = "true" ] || return 0
-    printf '%s\n' "$percent"
-    printf 'XXX\n%s\nXXX\n' "$message"
-}
-
-download_remote_file() {
-    local label="$1"
-    local url="$2"
-    local output="$3"
-    local mode="${4:-}"
-    local curl_opts=(-fsSL --connect-timeout 15 --max-time "${DOWNLOAD_TIMEOUT:-60}")
-
-    log_info "下載 $label..."
-    curl "${curl_opts[@]}" "$url" -o "$output"
-    if [ -n "$mode" ]; then
-        chmod "$mode" "$output"
-    fi
-    log_success "已下載 $label"
-}
-
-download_remote_scripts() {
-    local show_progress="${1:-false}"
-    local total=10
-    local current=0
-
-    mkdir -p "$SCRIPT_DIR/core" "$SCRIPT_DIR/utils" "$SCRIPT_DIR/maintenance"
-
-    local script=""
-    for script in python_setup.sh docker_setup.sh terminal_setup.sh base_tools.sh dev_tools.sh monitoring_tools.sh; do
-        current=$((current + 1))
-        remote_download_progress "$show_progress" "$((current * 100 / total))" "下載 core/$script..."
-        download_remote_file "core/$script" "$SCRIPTS_URL/core/$script" "$SCRIPT_DIR/core/$script" "+x"
-    done
-
-    current=$((current + 1))
-    remote_download_progress "$show_progress" "$((current * 100 / total))" "下載 utils/secure_download.sh..."
-    download_remote_file "utils/secure_download.sh" "$SCRIPTS_URL/utils/secure_download.sh" "$SCRIPT_DIR/utils/secure_download.sh" "+x"
-
-    current=$((current + 1))
-    remote_download_progress "$show_progress" "$((current * 100 / total))" "下載 maintenance/update_tools.sh..."
-    download_remote_file "maintenance/update_tools.sh" "$SCRIPTS_URL/maintenance/update_tools.sh" "$SCRIPT_DIR/maintenance/update_tools.sh" "+x"
-
-    current=$((current + 1))
-    remote_download_progress "$show_progress" "$((current * 100 / total))" "下載 core/module_manager.sh..."
-    download_remote_file "core/module_manager.sh" "$SCRIPTS_URL/core/module_manager.sh" "$SCRIPT_DIR/core/module_manager.sh" "+x"
-
-    current=$((current + 1))
-    remote_download_progress "$show_progress" "$((current * 100 / total))" "下載 config/modules.conf..."
-    mkdir -p "$SCRIPT_DIR/../config"
-    download_remote_file "config/modules.conf" "$REPO_URL/config/modules.conf" "$SCRIPT_DIR/../config/modules.conf"
-}
-
-run_remote_script_downloads() {
-    log_info "下載安裝腳本..."
-
-    if installer_tui_quiet \
-       && [ "${USE_TUI:-false}" = "true" ] \
-       && [ "${TUI_BACKEND:-}" = "whiptail" ] \
-       && command -v tui_gauge >/dev/null 2>&1; then
-        download_remote_scripts true | tui_gauge "下載安裝腳本" "正在下載必要腳本..." 0
-    else
-        download_remote_scripts false
-        if installer_tui_quiet \
-           && [ "${USE_TUI:-false}" = "true" ] \
-           && command -v tui_msgbox >/dev/null 2>&1; then
-            tui_msgbox "下載安裝腳本" "必要腳本已下載完成。\n\n詳細內容已寫入安裝日誌。" || true
-        fi
-    fi
-
-    log_success "安裝腳本下載完成"
-}
-
 # 定義模組陣列
 MINIMAL_MODULES="base python terminal"
 selected_modules=""
-
-# REMOTE_INSTALL 只由上方的遠端 bootstrap 設定（找不到本地 common.sh 時）。
-# 過去這裡還會把「SCRIPT_DIR 位於 /tmp」當成遠端安裝，結果在 /tmp 下的完整專案
-# （例如 git clone 到 /tmp）執行時，本地腳本會被 $REPO_URL 的版本覆蓋。
-REMOTE_INSTALL=${REMOTE_INSTALL:-false}
 
 # 模組顯示名稱：優先使用 modules.conf 的 name，否則用內建名稱，最後退回 id
 module_display_name() {
@@ -1538,16 +1676,6 @@ main() {
     check_environment
     backup_config_files
     
-    if [ "$REMOTE_INSTALL" = true ]; then
-        run_remote_script_downloads
-    fi
-
-    # 遠端流程下載完成後補載入模組管理器。
-    if [ "$REMOTE_INSTALL" = true ]; then
-        load_module_manager
-        log_success "模組管理器已啟用（${#MODULE_LIST[@]} 個模組）"
-    fi
-
     # 無人值守模式：自動選擇模組並直接執行，不進入互動選單
     if [ "$NON_INTERACTIVE" = "true" ]; then
         USE_TUI=false
@@ -2138,11 +2266,16 @@ build_install_report_text() {
     local shown_log="${LOG_FILE:-未設定}"
     case "$shown_log" in "$HOME"/*) shown_log="~${shown_log#"$HOME"}" ;; esac
     report+="日誌：${shown_log}${nl}"
+    if [ -n "${UNINSTALLER_COPY:-}" ]; then
+        local shown_uninstaller="$UNINSTALLER_COPY"
+        case "$shown_uninstaller" in "$HOME"/*) shown_uninstaller="~${shown_uninstaller#"$HOME"}" ;; esac
+        report+="卸載：bash ${shown_uninstaller}${nl}"
+    fi
 
     if [ "$failed" -gt 0 ] || [ "$partial" -gt 0 ]; then
         report+="${nl}建議：查看日誌找出失敗原因，修正後重新執行；已安裝的套件會自動略過。${nl}"
         if [ -n "${BACKUP_DIR:-}" ] && [ -n "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
-            report+="如需還原安裝前的設定檔，可執行 ./install.sh --rollback。${nl}"
+            report+="如需還原安裝前的設定檔，可執行 install.sh --rollback（一鍵安裝請在指令後加 -- --rollback）。${nl}"
         fi
     fi
 
@@ -2881,6 +3014,7 @@ install_selected_modules() {
     fi
 
     record_created_configs
+    install_uninstaller_copy
 
     show_installation_report
     selected_modules=""

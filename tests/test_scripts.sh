@@ -538,9 +538,10 @@ test_common_tui_quiet_status_logs_are_log_only() {
     rm -f "$tmp_log"
 }
 
-# 檢查 remote bootstrap 階段不再直接輸出 INFO/SUCCESS，避免 common.sh 載入前污染 TUI
+# 檢查 bootstrap 階段的狀態輸出可被 quiet 模式收斂（common.sh 載入前不可污染 TUI），
+# 且已移除逐檔下載的遠端流程
 test_install_remote_bootstrap_status_quiet() {
-    log_test "檢查 remote bootstrap 狀態輸出可被 quiet 模式收斂..."
+    log_test "檢查 bootstrap 狀態輸出可被 quiet 模式收斂..."
 
     local installer="$SCRIPT_DIR/install.sh"
     if [ ! -f "$installer" ]; then
@@ -549,14 +550,13 @@ test_install_remote_bootstrap_status_quiet() {
     fi
 
     if search_literal 'bootstrap_status()' "$installer" && \
-       search_literal 'bootstrap_status "INFO" "Downloading common library from remote source..."' "$installer" && \
-       search_literal 'bootstrap_status "SUCCESS" "Common library loaded"' "$installer" && \
+       search_literal 'bootstrap_status "INFO" "下載專案壓縮檔：$url"' "$installer" && \
        search_literal '[ "$level" != "ERROR" ] && [ "${TUI_MODE:-quiet}" = "quiet" ]' "$installer" && \
-       ! search_literal 'echo -e "\033[0;36mINFO: Downloading common library from remote source...\033[0m"' "$installer" && \
-       ! search_literal 'echo -e "\033[0;32mSUCCESS: Common library loaded\033[0m"' "$installer"; then
-        log_pass "remote bootstrap 狀態輸出已支援 quiet 收斂"
+       ! search_literal 'REMOTE_INSTALL' "$installer" && \
+       ! search_literal 'Downloading common library from remote source' "$installer"; then
+        log_pass "bootstrap 狀態輸出已支援 quiet 收斂，且無逐檔下載流程"
     else
-        log_fail "remote bootstrap 仍可能直接輸出 INFO/SUCCESS"
+        log_fail "bootstrap 狀態輸出或遠端流程不符合新設計"
     fi
 }
 
@@ -689,9 +689,9 @@ test_install_guided_tui_flow() {
     fi
 }
 
-# 檢查 TUI quiet 模式下，安裝日誌提示與 remote 下載腳本訊息不再直接刷到終端
+# 檢查 TUI quiet 模式下，安裝日誌提示不再直接刷到終端，且逐檔下載函式已移除
 test_install_tui_wraps_pre_menu_logs() {
-    log_test "檢查 TUI quiet 會包住安裝日誌與 remote 下載訊息..."
+    log_test "檢查 TUI quiet 會包住安裝日誌，且逐檔下載已移除..."
 
     local installer="$SCRIPT_DIR/install.sh"
     if [ ! -f "$installer" ]; then
@@ -701,19 +701,15 @@ test_install_tui_wraps_pre_menu_logs() {
 
     if search_literal 'installer_tui_quiet()' "$installer" && \
        search_literal 'run_logged_command()' "$installer" && \
-       search_literal 'run_remote_script_downloads()' "$installer" && \
-       search_literal 'download_remote_file()' "$installer" && \
        search_literal 'if installer_tui_quiet; then' "$installer" && \
        search_literal 'log_success "安裝日誌將保存到：$LOG_FILE"' "$installer" && \
        search_literal 'run_logged_command install_module "$module"' "$installer" && \
-       search_literal 'run_remote_script_downloads' "$installer" && \
-       ! search_literal 'exec 1> >(tee -a "$LOG_FILE") 2>&1' "$installer" && \
-       ! search_literal 'printf "${CYAN}########## 下載安裝腳本 ##########${NC}\n"' "$installer" && \
-       ! search_literal 'printf "${BLUE}下載 core/$script...${NC}\n"' "$installer" && \
-       ! search_literal 'printf "${BLUE}下載 utils/secure_download.sh...${NC}\n"' "$installer"; then
-        log_pass "TUI quiet 已收斂前置日誌與 remote 下載訊息"
+       ! search_literal 'run_remote_script_downloads' "$installer" && \
+       ! search_literal 'download_remote_file' "$installer" && \
+       ! search_literal 'exec 1> >(tee -a "$LOG_FILE") 2>&1' "$installer"; then
+        log_pass "TUI quiet 已收斂前置日誌，逐檔下載流程已移除"
     else
-        log_fail "TUI quiet 仍可能讓安裝日誌或 remote 下載訊息刷到終端"
+        log_fail "TUI quiet 前置日誌或逐檔下載移除狀態不符"
     fi
 }
 
@@ -1675,7 +1671,7 @@ test_guided_override_lifecycle() {
             CYAN=""; NC=""
             installer_tui_quiet() { return 1; }
             prepare_package_index() { :; }; install_homebrew_if_requested() { :; }
-            show_installation_report() { :; }; record_created_configs() { :; }
+            show_installation_report() { :; }; record_created_configs() { :; }; install_uninstaller_copy() { :; }
             seed
             trap "empty; [ -z \"\$selected_modules\" ] || exit 93" EXIT
             install_selected_modules >/dev/null

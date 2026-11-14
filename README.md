@@ -37,6 +37,37 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setti
 
 啟動互動式選單，選擇要安裝的模組（Python、Docker、基礎工具、終端機、開發工具、監控工具）。
 
+一鍵指令只會下載 `install.sh`；`install.sh` 接著下載**整包專案壓縮檔**（預設是 GitHub 上 `main` 的 `archive/main.tar.gz`）到私有暫存目錄、解壓，再用解出來的完整專案重新執行自己，結束後清除暫存目錄。所以遠端與本地使用同一套程式碼，所有檔案都來自同一個版本。
+
+### 釘選版本
+
+預設追蹤 `main`。要固定在某個版本，用 `LINUX_SETTING_REF` 指定 tag 或 commit（也可以是分支）；`install.sh` 本身的網址也要指向同一個 ref：
+
+```bash
+# 釘選到 tag
+export LINUX_SETTING_REF=<tag>
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/$LINUX_SETTING_REF/install.sh)"
+
+# 釘選到 commit，並驗證壓縮檔的 SHA-256
+export LINUX_SETTING_REF=<完整 commit>
+export LINUX_SETTING_ARCHIVE_SHA256=<壓縮檔的 sha256>
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/$LINUX_SETTING_REF/install.sh)"
+```
+
+壓縮檔的雜湊可先下載後自行計算：`curl -fsSL https://github.com/guan4tou2/my-linux-setting/archive/$LINUX_SETTING_REF.tar.gz | sha256sum`。
+
+| 環境變數 | 說明 |
+| --- | --- |
+| `LINUX_SETTING_REPO` | GitHub 儲存庫，格式 `擁有者/名稱`（預設 `guan4tou2/my-linux-setting`） |
+| `LINUX_SETTING_REF` | 分支、tag 或 commit（預設 `main`） |
+| `LINUX_SETTING_ARCHIVE_URL` | 直接指定壓縮檔網址，優先於上兩者；必須是 `https://` |
+| `LINUX_SETTING_ARCHIVE_SHA256` | 設定後會驗證下載的壓縮檔 SHA-256，不符就中止 |
+
+### 遠端安裝後如何卸載與回滾
+
+- 安裝完成後，`uninstall.sh` 會保存到 `~/.config/linux-setting/uninstall.sh`（權限 `0700`），最終報告也會提示這個路徑。卸載：`bash ~/.config/linux-setting/uninstall.sh`（先加 `--dry-run` 預覽）。
+- 回滾設定檔備份不需要下載任何東西：在一鍵指令後加 `-- --rollback`（見下方）。
+
 ---
 
 ## ⚙️ 指令列選項
@@ -54,7 +85,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setti
 # 詳細模式
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)" -- --verbose
 
-# 還原最近一次安裝前的設定檔備份（不需要 sudo，不會下載任何東西）
+# 還原最近一次安裝前的設定檔備份（不需要 sudo，不會下載壓縮檔）
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/install.sh)" -- --rollback
 ```
 
@@ -202,7 +233,10 @@ brew install gum
 
 **下載與執行來源**
 
-- 一行安裝指令會從 `REPO_URL`（預設為本專案 GitHub `main` 分支的 raw 檔案）下載 `install.sh`、`scripts/` 與 `config/modules.conf` 並直接執行。`REPO_URL`、`SCRIPTS_URL`、`P10K_CONFIG_URL`、`REQUIREMENTS_URL` 必須是 `https://`（唯一例外是 `localhost`、`127.0.0.1`、`[::1]` 的 `http://`，供本機測試伺服器使用），否則安裝程式拒絕執行。
+- 一行安裝指令先下載 `install.sh`，再由它下載**一個**專案壓縮檔（預設 `https://github.com/guan4tou2/my-linux-setting/archive/main.tar.gz`），不再逐檔下載。壓縮檔網址必須是 `https://`（唯一例外是 `localhost`、`127.0.0.1`、`[::1]` 的 `http://`，供本機測試伺服器使用），並以 `--proto '=https'` 限制連線與轉址；`LINUX_SETTING_REPO` 與 `LINUX_SETTING_REF` 只允許英數與 `._-/`、不可含 `..`。
+- 設定 `LINUX_SETTING_ARCHIVE_SHA256` 時會驗證壓縮檔的 SHA-256，不符就中止；沒有設定時只靠 TLS 與 GitHub 的信任（`main` 分支會隨時間變動，要固定版本請搭配 tag 或 commit 與雜湊，見「釘選版本」）。
+- 解壓前會先檢查壓縮檔內容：含絕對路徑、`..`、指向外部的連結或裝置檔的項目一律拒絕；解壓後必須有 `install.sh`、`scripts/core/common.sh`、`scripts/core/module_manager.sh`、`config/modules.conf`。解壓目錄是權限 `0700` 的私有暫存目錄，結束（含失敗與 Ctrl-C）後清除。
+- **不信任目前目錄**：一鍵安裝只使用下載解壓出來的專案，不會載入目前工作目錄下的 `scripts/`、`config/`；只有「從完整專案目錄執行 `./install.sh`」時才使用該專案內的檔案。
 - 有驗證雜湊的下載：**tealdeer**（發行版附的 `.sha256`）、**lazygit** 與 **lazydocker**（同一版本的 `checksums.txt`）。雜湊不符就不安裝。
 - 只靠 TLS 與上游信任、**沒有**驗證雜湊或簽章的來源：oh-my-zsh（官方安裝腳本）、powerlevel10k 與各 zsh 外掛（`git clone`）、uv（astral.sh 安裝腳本）、rustup、Homebrew、Docker（`get.docker.com`）、LazyVim starter（`git clone`）、superfile、lsd 的發行版執行檔。
 - `scripts/utils/secure_download.sh` 對官方安裝腳本只做：僅允許 https、網域白名單、大小上限、私有暫存檔。網域白名單**只檢查最初的網址**；上游安裝程式本來就會轉址，所以允許轉址，但限制只能轉到 https。它不分析腳本內容，也不替上游內容背書。
@@ -221,6 +255,7 @@ brew install gum
 
 - 備份目錄：`~/.config/linux-setting-backup/`
 - 日誌位置：`~/.local/log/linux-setting/`
+- 卸載腳本：`~/.config/linux-setting/uninstall.sh`（每次安裝結束時從專案複製一份，遠端安裝後也能卸載）
 - 安裝清單：`~/.config/linux-setting/installed.manifest`（記錄本工具新安裝的套件、新建立的路徑與被修改的設定檔，供 `./uninstall.sh` 使用）
 - 每次安裝開始前自動備份 `~/.zshrc`、`~/.p10k.zsh`、`~/.config/nvim`；之後可用 `./install.sh --rollback` 還原設定檔（安裝失敗時不會自動回滾）
 - 備份與日誌目錄權限為 `0700`
@@ -238,8 +273,12 @@ brew install gum
 
 ## 🔧 客製化
 
-Fork 此專案後，修改 `install.sh` 中的 `REPO_URL`：
+Fork 此專案後，用環境變數指向你的儲存庫（`install.sh` 本身的網址也改成你的 fork）：
 
 ```bash
-export REPO_URL="https://raw.githubusercontent.com/<your-name>/<your-repo>/main"
+export LINUX_SETTING_REPO="<your-name>/<your-repo>"
+export LINUX_SETTING_REF="main"   # 分支、tag 或 commit
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/$LINUX_SETTING_REPO/$LINUX_SETTING_REF/install.sh)"
 ```
+
+舊的 `REPO_URL`（形如 `https://raw.githubusercontent.com/<擁有者>/<名稱>/<ref>`）仍相容：沒有設定新變數時會解析出儲存庫與 ref 並提示改用新變數；其他形式的 `REPO_URL` 會被拒絕，請改用 `LINUX_SETTING_ARCHIVE_URL`。

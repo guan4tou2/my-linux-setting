@@ -98,27 +98,13 @@ fi
 # 強制確保基礎依賴存在（處理已存在的 venv）
 install_venv_setuptools
 
-# 取得 requirements.txt：本地完整專案內的檔案優先（與目前腳本版本一致），
-# 找不到才從 REQUIREMENTS_URL 下載到私有暫存檔（用完即刪）
-show_progress "下載套件需求文件"
+# requirements.txt 使用專案內的檔案（與目前腳本版本一致）
 REQUIREMENTS_FILE=""
-REQUIREMENTS_TMP=""
 if [ -f "$SCRIPT_DIR/../../requirements.txt" ]; then
     REQUIREMENTS_FILE="$SCRIPT_DIR/../../requirements.txt"
-    log_info "使用本地 requirements.txt"
-elif [ -n "${REQUIREMENTS_URL:-}" ]; then
-    if REQUIREMENTS_TMP="$(mktemp)" \
-       && safe_download "$REQUIREMENTS_URL" "$REQUIREMENTS_TMP" 3 false; then
-        REQUIREMENTS_FILE="$REQUIREMENTS_TMP"
-    else
-        log_warning "下載 requirements.txt 失敗，使用預設套件"
-        if [ -n "$REQUIREMENTS_TMP" ]; then
-            rm -f "$REQUIREMENTS_TMP"
-            REQUIREMENTS_TMP=""
-        fi
-    fi
+    log_info "使用專案內的 requirements.txt"
 else
-    log_warning "未找到 requirements.txt，使用預設套件"
+    log_warning "未找到專案內的 requirements.txt，使用預設套件"
 fi
 
 # 安裝 Python 工具
@@ -141,9 +127,6 @@ if [ -n "$REQUIREMENTS_FILE" ] && [ -f "$REQUIREMENTS_FILE" ]; then
 
     requirements_rc=0
     install_requirements_with_fallback || requirements_rc=$?
-    if [ -n "$REQUIREMENTS_TMP" ]; then
-        rm -f "$REQUIREMENTS_TMP"
-    fi
     if [ "$requirements_rc" -ne 0 ]; then
         exit "$requirements_rc"
     fi

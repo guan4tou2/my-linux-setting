@@ -354,7 +354,7 @@ echo "== install.sh 下載網址檢查 =="
 
 test_url_validation() {
     local fns
-    fns="$(awk '/^_download_url_allowed\(\)/,/^}/ {print} /^validate_download_urls\(\)/,/^}/ {print}' "$SCRIPT_DIR/install.sh")"
+    fns="$(awk '/^_download_url_allowed\(\)/,/^}/ {print}' "$SCRIPT_DIR/install.sh")"
     local url
     for url in \
         "https://raw.githubusercontent.com/x/y/main" \
@@ -367,18 +367,6 @@ test_url_validation() {
         "http://evil.example/?x=localhost"; do
         if bash -c "$fns"$'\n''_download_url_allowed "$1"' _ "$url"; then fail "應拒絕 $url"; else pass "拒絕 $url"; fi
     done
-    local out rc=0
-    if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
-        # Bash 3 會先被版本檢查拒絕，直接驗證相同的下載前網址檢查。
-        out="$(REPO_URL=http://example.com bash -c "$fns"$'\n''validate_download_urls' 2>&1)" || rc=$?
-    else
-    out="$(env HOME="$(new_home)" REPO_URL=http://example.com bash "$SCRIPT_DIR/install.sh" --dry-run --non-interactive </dev/null 2>&1)" || rc=$?
-    fi
-    if [ "$rc" -ne 0 ] && contains "$out" "必須是 https://"; then
-        pass "REPO_URL=http://example.com 時下載前網址檢查以非 0 結束"
-    else
-        fail "REPO_URL=http://example.com 應被拒絕（rc=$rc）"
-    fi
 }
 
 test_url_validation

@@ -253,6 +253,19 @@ snap_packages=code slack
 
 修改 `install.sh` 中的 `show_menu()` 函數，或使用 `module_manager.sh` 中的 `generate_cli_menu()` 函數。
 
+### 遠端安裝來源（Fork 與釘選版本）
+
+一鍵遠端安裝會下載整包專案壓縮檔再執行，所以你改過的 `modules.conf`、腳本與 `.p10k.zsh`、`requirements.txt` 都只要 push 到你的 fork 就會被一起使用，不需要另外維護下載清單。來源用環境變數控制：
+
+```bash
+export LINUX_SETTING_REPO="<你的帳號>/<你的 fork>"   # 預設 guan4tou2/my-linux-setting
+export LINUX_SETTING_REF="<tag 或 commit>"           # 分支、tag 或 commit，預設 main
+export LINUX_SETTING_ARCHIVE_SHA256="<sha256>"       # 選用：驗證壓縮檔
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/$LINUX_SETTING_REPO/$LINUX_SETTING_REF/install.sh)"
+```
+
+也可用 `LINUX_SETTING_ARCHIVE_URL` 直接指定壓縮檔網址（必須是 https）。舊的 `REPO_URL` 仍相容。`.p10k.zsh` 與 `requirements.txt` 一律取自專案內的檔案。
+
 ## 測試變更
 
 ```bash

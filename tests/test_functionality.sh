@@ -271,14 +271,14 @@ test_script_dependencies() {
         fi
     done
     
-    # 檢查 install.sh 對子腳本的依賴
-    if [ -f "$SCRIPT_DIR/install.sh" ]; then
+    # 模組腳本由 config/modules.conf 的 script= 引用（install.sh 不再維護逐檔下載清單）
+    if [ -f "$SCRIPT_DIR/config/modules.conf" ]; then
         for script in "${scripts[@]}"; do
             script_name=$(basename "$script")
-            if grep -q "$script_name" "$SCRIPT_DIR/install.sh"; then
-                log_pass "install.sh 包含 $script_name 引用"
+            if grep -q "^script=$script_name" "$SCRIPT_DIR/config/modules.conf"; then
+                log_pass "modules.conf 包含 $script_name 引用"
             else
-                log_warn "install.sh 可能未包含 $script_name 引用"
+                log_warn "modules.conf 可能未包含 $script_name 引用"
             fi
         done
     fi

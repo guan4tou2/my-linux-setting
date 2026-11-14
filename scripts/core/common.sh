@@ -35,7 +35,6 @@ set -euo pipefail
 : "${ADVANCED_MODE:=false}"
 : "${ABORT_ON_FAILURE:=false}"
 : "${SKIP_PYTHON_CHECK:=false}"
-: "${REMOTE_INSTALL:=false}"
 : "${ENABLE_PARALLEL_INSTALL:=false}"
 : "${PREFER_HOMEBREW:=false}"
 : "${PREFER_UV:=true}"
