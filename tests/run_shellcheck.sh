@@ -10,7 +10,11 @@ if ! command -v shellcheck >/dev/null 2>&1; then
     exit 0
 fi
 files=()
-while IFS= read -r -d '' file; do files+=("$file"); done < <(git ls-files -z -- '*.sh')
+# 除了已加入版控的檔案，也涵蓋「尚未提交但沒有被 .gitignore 忽略」的新腳本，
+# 否則新檔案在提交前永遠不會被檢查到，本機顯示 0 個警告而 CI 卻失敗。
+while IFS= read -r -d '' file; do
+    if [ -f "$file" ]; then files+=("$file"); fi
+done < <(git ls-files -z --cached --others --exclude-standard -- '*.sh')
 if [ "${#files[@]}" -eq 0 ]; then echo '沒有受版控的 Bash 腳本。'; exit 0; fi
 report=$(mktemp)
 trap 'rm -f "$report"' EXIT

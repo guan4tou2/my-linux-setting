@@ -50,7 +50,7 @@ mv "$WORK/bin" "$WORK/base-bin"
 mkdir "$WORK/bin"
 ln -s "$WORK/base-bin/bash" "$WORK/bin/bash"
 run_health quick 0 '僅有 bash：quick 不因基本指令缺失而崩潰'
-rm -rf "$WORK/bin"
+rm -rf "${WORK:?}/bin"
 mv "$WORK/base-bin" "$WORK/bin"
 
 # 數據為空、多行、格式錯誤，以及沒有 systemd 的失敗路徑。

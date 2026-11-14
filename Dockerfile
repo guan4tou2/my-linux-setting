@@ -23,6 +23,8 @@ RUN apt-get update && \
         bc \
         tmux \
         whiptail \
+        fzf \
+        gum \
         shellcheck \
         git \
         sudo \
