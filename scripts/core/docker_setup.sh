@@ -43,11 +43,17 @@ if ! check_command docker; then
     fi
 
     # 僅在 Docker 安裝成功後處理群組設定
+    # 加入 docker 群組等同給予該使用者 root 權限，因此可用 ADD_USER_TO_DOCKER_GROUP=false 關閉
     if check_command docker; then
-        log_info "將用戶加入 docker 群組"
-        if ! groups "$USER" | grep -q docker; then
-            sudo usermod -aG docker "$USER"
-            log_warning "請重新登入以套用 docker 群組權限"
+        docker_user="$(id -un)"
+        if [ "${ADD_USER_TO_DOCKER_GROUP:-true}" = "true" ]; then
+            log_warning "將 $docker_user 加入 docker 群組：這等同給予該使用者 root 權限（可用 ADD_USER_TO_DOCKER_GROUP=false 關閉）"
+            if ! id -nG "$docker_user" | tr ' ' '\n' | grep -qx docker; then
+                sudo usermod -aG docker "$docker_user"
+                log_warning "請重新登入以套用 docker 群組權限"
+            fi
+        else
+            log_info "ADD_USER_TO_DOCKER_GROUP=false，不加入 docker 群組；需用 sudo 執行 docker"
         fi
     else
         log_warning "Docker 尚未可用，跳過 docker 群組設定"

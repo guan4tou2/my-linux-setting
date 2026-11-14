@@ -42,6 +42,9 @@ Linux Setting Scripts - 自動安裝腳本 v2.2.9
   --force, --force-reinstall      強制重新安裝（不跳過已安裝的模組）
   -a, --advanced                  進階模式：每個模組進去再選具體要裝的套件
   --abort-on-failure              單一模組失敗就中斷（預設僅警告並繼續）
+  --rollback                      把最近一次安裝前的備份（~/.zshrc、~/.p10k.zsh、
+                                  ~/.config/nvim）還原到原位置；不需要 sudo，也不下載任何東西
+  -y, --yes                       搭配 --rollback 時不詢問、直接還原
   -v, --verbose                   顯示詳細日誌
   -h, --help                      顯示此幫助訊息
   --config <file>                 指定配置文件路徑
@@ -57,6 +60,7 @@ Linux Setting Scripts - 自動安裝腳本 v2.2.9
   ./install.sh --non-interactive --minimal  # 無人值守最小安裝
   ./install.sh --dry-run          # 預覽將要安裝的內容
   ./install.sh --update           # 更新模式
+  ./install.sh --rollback         # 還原最近一次安裝前的設定檔備份
   ./install.sh --verbose          # 詳細模式
   TUI_BACKEND=fzf ./install.sh     # 使用 fzf 互動選單
   TUI_BACKEND=gum ./install.sh     # 使用 gum 互動選單
@@ -72,6 +76,146 @@ show_welcome() {
     printf "  自動化開發環境配置工具\n\n"
 }
 
+
+# ==============================================================================
+# --rollback：還原最近一次安裝前的設定檔備份
+# 這段在 common.sh 載入之前執行（遠端執行時 common.sh 尚未下載），
+# 因此不可使用 common.sh 的函式或顏色變數，也不會下載任何東西。
+# ==============================================================================
+
+# 備份目錄內的名稱 -> 原位置（只認 backup_config_files 會備份的三項）
+rollback_dest_for() {
+    case "$1" in
+        .zshrc|.p10k.zsh) printf '%s\n' "$HOME/$1" ;;
+        nvim) printf '%s\n' "$HOME/.config/nvim" ;;
+        *) return 1 ;;
+    esac
+}
+
+run_rollback() {
+    local c_y=$'\033[0;33m' c_g=$'\033[0;32m' c_r=$'\033[0;31m' c_n=$'\033[0m'
+    local backup_root="$HOME/.config/linux-setting-backup"
+    local latest="" d
+
+    if [ -d "$backup_root" ]; then
+        # 目錄名稱為 YYYYmmdd_HHMMSS，字串排序即時間排序
+        while IFS= read -r d; do
+            latest="$d"
+        done < <(find "$backup_root" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
+    fi
+
+    local srcs=() dests=() src name dest
+    if [ -n "$latest" ]; then
+        for src in "$latest"/.[!.]* "$latest"/*; do
+            if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+                continue
+            fi
+            name="$(basename "$src")"
+            if dest="$(rollback_dest_for "$name")"; then
+                srcs+=("$src")
+                dests+=("$dest")
+            fi
+        done
+    fi
+
+    if [ "${#srcs[@]}" -eq 0 ]; then
+        printf '%s沒有可還原的備份%s（%s）\n' "$c_y" "$c_n" "$backup_root" >&2
+        printf '備份由 install.sh 在每次安裝開始時自動建立。\n' >&2
+        return 1
+    fi
+
+    printf '\n將從備份 %s 還原以下設定檔：\n' "$latest"
+    local i
+    for i in "${!srcs[@]}"; do
+        printf '  %s -> %s\n' "$(basename "${srcs[$i]}")" "${dests[$i]}"
+    done
+    printf '目前的檔案會先另存為同目錄下的 .before-rollback 副本。\n\n'
+
+    if [ "$ASSUME_YES" != "true" ] && [ "$NON_INTERACTIVE" != "true" ]; then
+        if [ ! -t 0 ]; then
+            printf '%s非互動環境且未指定 -y / --non-interactive，終止還原%s\n' "$c_r" "$c_n" >&2
+            return 1
+        fi
+        local answer=""
+        read -r -p "確認還原？(y/N) " answer || true
+        if [ "$answer" != "y" ] && [ "$answer" != "Y" ]; then
+            printf '已取消\n'
+            return 0
+        fi
+    fi
+
+    local failed=0 saved
+    for i in "${!srcs[@]}"; do
+        src="${srcs[$i]}"
+        dest="${dests[$i]}"
+        saved="$dest.before-rollback"
+        mkdir -p "$(dirname "$dest")" || { failed=$((failed + 1)); continue; }
+        if [ -e "$dest" ] || [ -L "$dest" ]; then
+            rm -rf "$saved"
+            if ! mv "$dest" "$saved"; then
+                printf '%s無法保存目前的 %s，略過%s\n' "$c_r" "$dest" "$c_n" >&2
+                failed=$((failed + 1))
+                continue
+            fi
+        fi
+        if cp -a "$src" "$dest"; then
+            printf '%s已還原%s %s\n' "$c_g" "$c_n" "$dest"
+        else
+            printf '%s還原失敗%s %s\n' "$c_r" "$c_n" "$dest" >&2
+            rm -rf "$dest"
+            if [ -e "$saved" ] || [ -L "$saved" ]; then
+                mv "$saved" "$dest" || true
+            fi
+            failed=$((failed + 1))
+        fi
+    done
+
+    if [ "$failed" -gt 0 ]; then
+        printf '%s有 %d 項還原失敗%s\n' "$c_r" "$failed" "$c_n" >&2
+        return 1
+    fi
+    printf '%s還原完成%s\n' "$c_g" "$c_n"
+    return 0
+}
+
+# 下載網址檢查：必須是 https://；唯一例外是主機為 localhost、127.0.0.1 或 [::1] 的
+# http://（本機測試伺服器）。含 userinfo（@）的 http 網址一律拒絕。
+# 這些網址會用來下載並執行腳本，且此段在 common.sh 載入之前執行，所以自成一體。
+_download_url_allowed() {
+    local url="$1" rest authority host
+    case "$url" in
+        https://*) return 0 ;;
+        http://*)
+            rest="${url#http://}"
+            authority="${rest%%[/?#]*}"
+            case "$authority" in
+                *@*|*\\*|*[[:space:]]*) return 1 ;;
+            esac
+            case "$authority" in
+                \[*) host="${authority%%]*}]" ;;
+                *) host="${authority%%:*}" ;;
+            esac
+            case "$host" in
+                localhost|127.0.0.1|"[::1]") return 0 ;;
+            esac
+            return 1
+            ;;
+    esac
+    return 1
+}
+
+validate_download_urls() {
+    local name value bad=0
+    for name in REPO_URL SCRIPTS_URL P10K_CONFIG_URL REQUIREMENTS_URL; do
+        value="${!name:-}"
+        [ -n "$value" ] || continue
+        if ! _download_url_allowed "$value"; then
+            printf '\033[0;31mERROR: %s 必須是 https:// 網址（僅 localhost、127.0.0.1、[::1] 允許 http://），目前為：%s\033[0m\n' "$name" "$value" >&2
+            bad=1
+        fi
+    done
+    [ "$bad" -eq 0 ]
+}
 
 # Set strict error handling
 set -euo pipefail
@@ -93,6 +237,8 @@ NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
 FORCE_REINSTALL="${FORCE_REINSTALL:-false}"
 ADVANCED_MODE="${ADVANCED_MODE:-false}"
 ABORT_ON_FAILURE="${ABORT_ON_FAILURE:-false}"
+ROLLBACK_MODE=false
+ASSUME_YES=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -123,6 +269,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --abort-on-failure)
             ABORT_ON_FAILURE=true
+            shift
+            ;;
+        --rollback)
+            ROLLBACK_MODE=true
+            shift
+            ;;
+        -y|--yes)
+            ASSUME_YES=true
             shift
             ;;
         -v|--verbose)
@@ -167,6 +321,14 @@ if [ "${EUID:-$(id -u)}" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "${ALLOW_ROOT:-
     exit 1
 fi
 
+# --rollback：只還原本機備份，不需要 sudo、不做環境檢查、不下載任何東西
+if [ "$ROLLBACK_MODE" = true ]; then
+    trap - ERR
+    rollback_rc=0
+    run_rollback || rollback_rc=$?
+    exit "$rollback_rc"
+fi
+
 show_welcome
 
 # Export variables for child scripts
@@ -189,6 +351,9 @@ PARALLEL_JOBS="${PARALLEL_JOBS:-auto}"
 if [ "$PARALLEL_JOBS" = "auto" ]; then
     PARALLEL_JOBS=$(nproc 2>/dev/null || echo 4)
 fi
+
+# 這些網址會被用來下載並執行腳本：在任何下載之前先確認是 https（或本機測試伺服器）
+validate_download_urls || exit 1
 
 # Export configuration
 export REPO_URL SCRIPTS_URL P10K_CONFIG_URL REQUIREMENTS_URL
@@ -261,6 +426,14 @@ else
         rm -rf "$TEMP_DIR"
         exit 1
     fi
+fi
+
+# common.sh 可能載入了使用者設定檔並改寫上述網址；後續下載前再檢查一次
+if ! validate_download_urls; then
+    if [ -n "${TEMP_DIR:-}" ]; then
+        rm -rf "$TEMP_DIR"
+    fi
+    exit 1
 fi
 
 # Initialize environment
@@ -435,33 +608,6 @@ print_error_summary() {
     printf "\n需要幫助？https://github.com/guan4tou2/my-linux-setting/issues\n\n"
 }
 
-# 回滾機制
-rollback_installation() {
-    log_info "開始回滾安裝..."
-    
-    if [ -d "$BACKUP_DIR" ]; then
-        for backup_file in "$BACKUP_DIR"/*; do
-            if [ -f "$backup_file" ]; then
-                local original_name
-                original_name=$(basename "$backup_file" | sed 's/\.backup\.[0-9_]*$//')
-                local original_path="$HOME/$original_name"
-                
-                if [[ "$original_name" == .* ]]; then
-                    original_path="$HOME/$original_name"
-                else
-                    original_path="$HOME/.$original_name"
-                fi
-                
-                cp "$backup_file" "$original_path"
-                log_info "已回滾: $original_path"
-            fi
-        done
-        log_success "回滾完成"
-    else
-        log_warning "找不到備份目錄，無法回滾"
-    fi
-}
-
 # 清理函數  
 cleanup() {
     cleanup_temp_files
@@ -483,11 +629,6 @@ check_environment() {
     # 檢查是否為支援的發行版
     if [ "$DISTRO_FAMILY" = "unknown" ]; then
         log_warning "無法檢測 Linux 發行版，將嘗試使用預設設定"
-    fi
-
-    # 優化 APT 性能（Debian 系列）
-    if [ "$DISTRO_FAMILY" = "debian" ] && command -v optimize_apt_performance >/dev/null 2>&1; then
-        optimize_apt_performance || log_warning "APT 優化失敗，繼續安裝"
     fi
 
     # 檢測並啟用 TUI（如果可用）
@@ -646,23 +787,48 @@ check_environment() {
     log_success "環境檢查完成"
 }
 
+# 安裝清單是否已有某一行（供備份時判斷，不依賴 common.sh 的內部細節）
+_manifest_has() {
+    local manifest="${INSTALL_MANIFEST_FILE:-}"
+    [ -n "$manifest" ] && [ -f "$manifest" ] && grep -qxF -- "$1:$2" "$manifest" 2>/dev/null
+}
+
 # 備份配置文件
 # 自動保留最新 N 份（預設 10），透過 BACKUP_RETENTION 環境變數調整
+# 備份可能含有憑證，根目錄與備份目錄都設為 0700
 backup_config_files() {
     log_info "備份配置文件..."
     local backup_root="$HOME/.config/linux-setting-backup"
+    mkdir -p "$backup_root"
+    chmod 0700 "$backup_root" 2>/dev/null || true
     BACKUP_DIR="$backup_root/$(date +%Y%m%d_%H%M%S)"
     mkdir -p "$BACKUP_DIR"
+    chmod 0700 "$BACKUP_DIR" 2>/dev/null || true
+    # 讓子行程的 backup_file 也寫進同一個備份目錄，而不是另建一個較新的目錄
+    export BACKUP_DIR
 
-    # 備份現有的配置文件
+    # 備份現有的配置文件；安裝前不存在的記下來，安裝結束後若已出現就是本工具建立的
+    BACKUP_ABSENT_PATHS=()
+    local file recorded=false
     for file in ~/.zshrc ~/.p10k.zsh ~/.config/nvim; do
         if [ -e "$file" ]; then
             cp -r "$file" "$BACKUP_DIR/"
             log_success "已備份：$file"
+            # 已列為「本工具建立」的檔案，還原到先前安裝的狀態沒有意義；
+            # 已列為 file 的檔案，最早的那一份備份才是安裝前的狀態，不再記新的
+            if ! _manifest_has path "$file" && ! _manifest_has file "$file"; then
+                manifest_record file "$file"
+                recorded=true
+            fi
+        else
+            BACKUP_ABSENT_PATHS+=("$file")
         fi
     done
+    if [ "$recorded" = true ]; then
+        manifest_record backup "$BACKUP_DIR"
+    fi
 
-    # Retention：保留最新 N 份，刪除更舊的
+    # Retention：保留最新 N 份，刪除更舊的（安裝清單引用的備份一律保留）
     local retention="${BACKUP_RETENTION:-10}"
     if [ -d "$backup_root" ] && [ "$retention" -gt 0 ] 2>/dev/null; then
         # 列出所有備份子目錄（依日期格式排序）並移除超出 retention 的舊者
@@ -670,6 +836,9 @@ backup_config_files() {
         old_backups=$(ls -1t "$backup_root" 2>/dev/null | tail -n +$((retention + 1)))
         if [ -n "$old_backups" ]; then
             while IFS= read -r dir; do
+                if [ -n "$dir" ] && _manifest_has backup "$backup_root/$dir"; then
+                    continue
+                fi
                 [ -n "$dir" ] && rm -rf "$backup_root/$dir" \
                     && log_info "已清理舊備份：$dir"
             done <<< "$old_backups"
@@ -677,11 +846,22 @@ backup_config_files() {
     fi
 }
 
+# 安裝結束後，把「安裝前不存在、現在存在」的設定檔記為本工具建立的路徑
+record_created_configs() {
+    local f
+    for f in ${BACKUP_ABSENT_PATHS[@]+"${BACKUP_ABSENT_PATHS[@]}"}; do
+        if [ -e "$f" ]; then
+            manifest_record path "$f"
+        fi
+    done
+}
+
 # 設置日誌
 setup_logging() {
     # LOG_DIR 可能已在 common.sh 中定義為 readonly，使用局部變數
     local log_dir="${LOG_DIR:-$HOME/.local/log/linux-setting}"
     mkdir -p "$log_dir"
+    chmod 0700 "$log_dir" 2>/dev/null || true
     LOG_FILE="$log_dir/install_$(date +%Y%m%d_%H%M%S).log"
     export LOG_FILE
     export ENABLE_LOGGING=true
@@ -2127,6 +2307,9 @@ build_install_report_text() {
 
     if [ "$failed" -gt 0 ] || [ "$partial" -gt 0 ]; then
         report+="${nl}建議：查看日誌找出失敗原因，修正後重新執行；已安裝的套件會自動略過。${nl}"
+        if [ -n "${BACKUP_DIR:-}" ] && [ -n "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
+            report+="如需還原安裝前的設定檔，可執行 ./install.sh --rollback。${nl}"
+        fi
     fi
 
     if module_result_succeeded terminal; then
@@ -2826,6 +3009,12 @@ install_selected_modules() {
         progress_begin "$total_modules"
     fi
 
+    # 優化 APT 性能（Debian 系列）：會寫入 /etc/apt/apt.conf.d/，
+    # 所以只在 dry-run 返回與使用者確認之後、第一次用到套件管理器之前執行
+    if [ "${DISTRO_FAMILY:-}" = "debian" ] && command -v optimize_apt_performance >/dev/null 2>&1; then
+        optimize_apt_performance || log_warning "APT 優化失敗，繼續安裝"
+    fi
+
     prepare_package_index "$use_progress"
     install_homebrew_if_requested
 
@@ -2915,6 +3104,8 @@ install_selected_modules() {
     if [ "$use_progress" = "true" ]; then
         progress_end
     fi
+
+    record_created_configs
 
     show_installation_report
     selected_modules=""

@@ -3,10 +3,14 @@
 # 載入共用函數庫
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-source "$SCRIPT_DIR/common.sh" || {
+# common.sh 位於 scripts/core/；舊寫法從本目錄載入，腳本一啟動就會失敗
+source "$SCRIPT_DIR/../core/common.sh" || {
     echo "錯誤: 無法載入共用函數庫"
     exit 1
 }
+
+# thefuck 固定在 requirements.txt 釘選的 commit；必須與 requirements.txt 一致（測試會比對）
+THEFUCK_PINNED_COMMIT="c7e7e1d884d3bb241ea6448f72a989434c2a35ec"
 
 log_info "########## 更新系統工具 ##########"
 
@@ -77,7 +81,7 @@ update_pip_packages() {
                 "$VENV_DIR/bin/python" -m pip install --upgrade -r "$PROJECT_ROOT/requirements.txt" || log_warning "虛擬環境套件更新失敗"
             else
                 # 手動更新關鍵套件
-                "$VENV_DIR/bin/python" -m pip install --upgrade thefuck ranger-fm s-tui || log_warning "部分套件更新失敗"
+                "$VENV_DIR/bin/python" -m pip install --upgrade ranger-fm s-tui "git+https://github.com/nvbn/thefuck.git@$THEFUCK_PINNED_COMMIT" || log_warning "部分套件更新失敗"
             fi
             log_success "虛擬環境套件更新完成"
         fi

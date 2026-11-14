@@ -4,15 +4,11 @@
 
 # 載入共用函數庫
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh" || {
+# common.sh 位於 scripts/core/；舊寫法從本目錄載入，腳本一啟動就會失敗
+source "$SCRIPT_DIR/../core/common.sh" || {
     echo "錯誤: 無法載入共用函數庫"
     exit 1
 }
-
-# 載入配置管理
-if [ -f "$SCRIPT_DIR/config_manager_simple.sh" ]; then
-    source "$SCRIPT_DIR/config_manager_simple.sh" 2>/dev/null || true
-fi
 
 log_info "########## 進階系統健康檢查 ##########"
 

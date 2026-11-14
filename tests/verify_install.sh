@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/bin:$PATH"
+# Debian 的一般使用者 PATH 預設不含 sbin，但 iftop 等工具裝在 /usr/sbin；
+# 這裡要驗證的是「有沒有裝上」，所以把 sbin 目錄一併納入搜尋。
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/bin:$PATH:/usr/local/sbin:/usr/sbin:/sbin"
 missing=0
 check() {
     local label="$1"

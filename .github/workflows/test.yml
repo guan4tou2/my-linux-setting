@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main ]
 
+# 這個 workflow 只需要讀取程式碼
+permissions:
+  contents: read
+
 # 防止同一個 PR 多次推送同時跑（節省 runner）
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -20,7 +24,7 @@ jobs:
     name: Lint & syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: bash -n on every shell script
         run: |
@@ -47,21 +51,34 @@ jobs:
           NON_INTERACTIVE: true
         run: bash tests/test_scripts.sh
 
+      - name: Run uninstall / rollback / hardening tests
+        env:
+          CI: true
+        run: bash tests/test_uninstall.sh
+
   # ---------------------------------------------------------------------------
   # 2. Functional tests (Linux runner, vanilla ubuntu)
   #    跑 test_dependencies + test_functionality；測試本身對 CI 環境友善
   # ---------------------------------------------------------------------------
   functional:
-    name: Functional (vanilla ubuntu)
-    runs-on: ubuntu-latest
+    name: Functional (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     env:
       CI: true
       SKIP_NETWORK_TESTS: true
       NON_INTERACTIVE: true
       FORCE_LINUX_TESTS: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Run unified test suite
         run: bash tests/run_all_tests.sh
@@ -70,13 +87,47 @@ jobs:
   # 3. Real install simulation (docker, slow but high-fidelity)
   #    在 docker 容器跑完整 install.sh，最接近使用者真實環境
   # ---------------------------------------------------------------------------
+  #    只測各發行版的最新版本（浮動標籤），並涵蓋 x86_64 與 arm64。
+  #    Kali 為滾動更新，列為實驗性：失敗不擋合併。
   install-simulation:
-    name: Install simulation (docker)
-    runs-on: ubuntu-latest
+    name: Install (${{ matrix.distro }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     needs: lint
-    timeout-minutes: 40
+    timeout-minutes: 60
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu-latest
+            base_image: ubuntu:latest
+            arch: x86_64
+            runner: ubuntu-latest
+            experimental: false
+          - distro: ubuntu-latest
+            base_image: ubuntu:latest
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            experimental: false
+          - distro: debian-stable
+            base_image: debian:stable
+            arch: x86_64
+            runner: ubuntu-latest
+            experimental: false
+          - distro: debian-stable
+            base_image: debian:stable
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            experimental: false
+          - distro: kali-rolling
+            base_image: kalilinux/kali-rolling
+            arch: x86_64
+            runner: ubuntu-latest
+            experimental: true
+    env:
+      BASE_IMAGE: ${{ matrix.base_image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Build docker image
         run: ./docker-test.sh build

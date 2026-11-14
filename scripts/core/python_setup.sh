@@ -92,21 +92,33 @@ if [ ! -d "$VENV_DIR" ]; then
     # 安裝基礎依賴（包含 setuptools 用於 thefuck）
     install_venv_setuptools
     log_success "虛擬環境創建成功: $VENV_DIR"
+    manifest_record path "$VENV_DIR"
 fi
 
 # 強制確保基礎依賴存在（處理已存在的 venv）
 install_venv_setuptools
 
-# 下載 requirements.txt (不使用快取以確保獲取最新版本)
+# 取得 requirements.txt：本地完整專案內的檔案優先（與目前腳本版本一致），
+# 找不到才從 REQUIREMENTS_URL 下載到私有暫存檔（用完即刪）
 show_progress "下載套件需求文件"
-if [ -n "$REQUIREMENTS_URL" ]; then
-    safe_download "$REQUIREMENTS_URL" "/tmp/requirements.txt" 3 false
-    REQUIREMENTS_FILE="/tmp/requirements.txt"
-elif [ -f "$(dirname "$SCRIPT_DIR")/requirements.txt" ]; then
-    REQUIREMENTS_FILE="$(dirname "$SCRIPT_DIR")/requirements.txt"
+REQUIREMENTS_FILE=""
+REQUIREMENTS_TMP=""
+if [ -f "$SCRIPT_DIR/../../requirements.txt" ]; then
+    REQUIREMENTS_FILE="$SCRIPT_DIR/../../requirements.txt"
+    log_info "使用本地 requirements.txt"
+elif [ -n "${REQUIREMENTS_URL:-}" ]; then
+    if REQUIREMENTS_TMP="$(mktemp)" \
+       && safe_download "$REQUIREMENTS_URL" "$REQUIREMENTS_TMP" 3 false; then
+        REQUIREMENTS_FILE="$REQUIREMENTS_TMP"
+    else
+        log_warning "下載 requirements.txt 失敗，使用預設套件"
+        if [ -n "$REQUIREMENTS_TMP" ]; then
+            rm -f "$REQUIREMENTS_TMP"
+            REQUIREMENTS_TMP=""
+        fi
+    fi
 else
     log_warning "未找到 requirements.txt，使用預設套件"
-    REQUIREMENTS_FILE=""
 fi
 
 # 安裝 Python 工具
@@ -127,7 +139,14 @@ if [ -n "$REQUIREMENTS_FILE" ] && [ -f "$REQUIREMENTS_FILE" ]; then
         "$VENV_DIR/bin/python" -m pip install --no-build-isolation -r "$REQUIREMENTS_FILE"
     }
 
-    install_requirements_with_fallback
+    requirements_rc=0
+    install_requirements_with_fallback || requirements_rc=$?
+    if [ -n "$REQUIREMENTS_TMP" ]; then
+        rm -f "$REQUIREMENTS_TMP"
+    fi
+    if [ "$requirements_rc" -ne 0 ]; then
+        exit "$requirements_rc"
+    fi
 else
     # 回退到單個套件安裝
     uv_packages="thefuck ranger-fm s-tui"
@@ -141,7 +160,14 @@ show_progress "創建工具軟連結"
 mkdir -p "$HOME/.local/bin"
 for tool in ranger s-tui thefuck; do
     if [ -f "$VENV_DIR/bin/$tool" ]; then
+        tool_link_preexisting=false
+        if [ -e "$HOME/.local/bin/$tool" ] || [ -L "$HOME/.local/bin/$tool" ]; then
+            tool_link_preexisting=true
+        fi
         ln -sf "$VENV_DIR/bin/$tool" "$HOME/.local/bin/$tool"
+        if [ "$tool_link_preexisting" != "true" ]; then
+            manifest_record path "$HOME/.local/bin/$tool"
+        fi
         log_info "創建軟連結: $tool"
     fi
 done

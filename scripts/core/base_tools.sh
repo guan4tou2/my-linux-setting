@@ -143,6 +143,10 @@ if ! command -v lsd >/dev/null 2>&1; then
         case "$lsd_arch" in
             x86_64|aarch64)
                 lsd_tmp_dir=""
+                lsd_preexisting=false
+                if [ -e "$HOME/.local/bin/lsd" ] || [ -L "$HOME/.local/bin/lsd" ]; then
+                    lsd_preexisting=true
+                fi
                 if lsd_tag=$(github_latest_release_tag lsd-rs/lsd) && \
                    lsd_tmp_dir="$(mktemp -d)" && \
                    curl -fsSL --connect-timeout 15 --max-time 120 \
@@ -153,6 +157,9 @@ if ! command -v lsd >/dev/null 2>&1; then
                    install -m 0755 "$lsd_tmp_dir/lsd-$lsd_tag-$lsd_arch-unknown-linux-musl/lsd" "$HOME/.local/bin/lsd"; then
                     export PATH="$HOME/.local/bin:$PATH"
                     log_success "lsd 安裝成功 (GitHub)"
+                    if [ "$lsd_preexisting" != "true" ]; then
+                        manifest_record path "$HOME/.local/bin/lsd"
+                    fi
                 else
                     log_warning "lsd GitHub 備援安裝失敗，將繼續其他安裝方式"
                 fi
@@ -196,7 +203,14 @@ fi
 # 在 Debian/Ubuntu 上 fd 以 fdfind 命名，建立 ~/.local/bin/fd 軟連結讓使用者可直接輸入 fd
 if command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1; then
     mkdir -p "$HOME/.local/bin"
+    fd_link_preexisting=false
+    if [ -e "$HOME/.local/bin/fd" ] || [ -L "$HOME/.local/bin/fd" ]; then
+        fd_link_preexisting=true
+    fi
     ln -sf "$(command -v fdfind)" "$HOME/.local/bin/fd"
+    if [ "$fd_link_preexisting" != "true" ]; then
+        manifest_record path "$HOME/.local/bin/fd"
+    fi
 fi
 
 # 安裝 tealdeer（先使用預編譯套件，最後才用 cargo 編譯）
@@ -222,6 +236,10 @@ if ! command -v tldr >/dev/null 2>&1; then
         case "$tealdeer_arch" in
             x86_64|aarch64)
                 tealdeer_tmp_dir=""
+                tealdeer_preexisting=false
+                if [ -e "$HOME/.local/bin/tldr" ] || [ -L "$HOME/.local/bin/tldr" ]; then
+                    tealdeer_preexisting=true
+                fi
                 if tealdeer_tmp_dir="$(mktemp -d)" && \
                    curl -fsSL --connect-timeout 15 --max-time 120 \
                        -o "$tealdeer_tmp_dir/tldr" \
@@ -243,6 +261,9 @@ if ! command -v tldr >/dev/null 2>&1; then
                        install -m 0755 "$tealdeer_tmp_dir/tldr" "$HOME/.local/bin/tldr"; then
                         export PATH="$HOME/.local/bin:$PATH"
                         log_success "tealdeer 安裝成功 (GitHub)"
+                        if [ "$tealdeer_preexisting" != "true" ]; then
+                            manifest_record path "$HOME/.local/bin/tldr"
+                        fi
                     else
                         log_warning "tealdeer 雜湊不符、無法驗證或安裝失敗，略過 GitHub 執行檔"
                     fi
@@ -271,8 +292,15 @@ fi
 # 設定 bat 別名
 if command -v batcat > /dev/null 2>&1; then
     mkdir -p ~/.local/bin
+    bat_link_preexisting=false
+    if [ -e "$HOME/.local/bin/bat" ] || [ -L "$HOME/.local/bin/bat" ]; then
+        bat_link_preexisting=true
+    fi
     # 使用 -f 強制覆蓋已存在的符號連結，避免警告訊息
     ln -sf /usr/bin/batcat ~/.local/bin/bat
+    if [ "$bat_link_preexisting" != "true" ]; then
+        manifest_record path "$HOME/.local/bin/bat"
+    fi
 fi
 
 # 安裝 superfile（使用安全下載機制）
