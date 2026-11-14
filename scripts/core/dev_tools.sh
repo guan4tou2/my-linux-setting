@@ -198,18 +198,31 @@ if ! command -v lazygit > /dev/null 2>&1; then
 
     # 方法 2: 如果 Homebrew 失敗或不可用，從 GitHub 下載
     if [ "${BREW_FAILED:-0}" = "1" ]; then
-        printf "\033[36m從 GitHub 下載 Lazygit\033[0m\n"
-        LAZYGIT_VERSION=$(curl -s --connect-timeout 10 --max-time 30 \
-            "https://api.github.com/repos/jesseduffield/lazygit/releases/latest" \
-            | grep -Po '"tag_name": "v\K[^"]*')
-        lazygit_tmp_dir="$(mktemp -d)"
-        curl -fsSL --connect-timeout 15 --max-time 120 \
-            -o "$lazygit_tmp_dir/lazygit.tar.gz" \
-            "https://github.com/jesseduffield/lazygit/releases/latest/download/lazygit_${LAZYGIT_VERSION}_Linux_x86_64.tar.gz"
-        tar -xzf "$lazygit_tmp_dir/lazygit.tar.gz" -C "$lazygit_tmp_dir" lazygit
-        sudo install "$lazygit_tmp_dir/lazygit" /usr/local/bin
-        rm -rf "$lazygit_tmp_dir"
-        log_success "Lazygit 安裝成功 (GitHub)"
+        lazygit_arch=$(linux_release_arch) || lazygit_arch=""
+        case "$lazygit_arch" in
+            x86_64) lazygit_arch=x86_64 ;;
+            aarch64) lazygit_arch=arm64 ;;
+            armv7l|armv6l) lazygit_arch=armv6 ;;
+            i686|i386) lazygit_arch=32-bit ;;
+            *) log_warning "Lazygit 不支援架構: $lazygit_arch"; lazygit_arch="" ;;
+        esac
+        if [ -n "$lazygit_arch" ]; then
+            lazygit_tmp_dir=""
+            if LAZYGIT_VERSION=$(github_latest_release_tag jesseduffield/lazygit) && \
+               lazygit_tmp_dir="$(mktemp -d)" && \
+               curl -fsSL --connect-timeout 15 --max-time 120 \
+                   -o "$lazygit_tmp_dir/lazygit.tar.gz" \
+                   "https://github.com/jesseduffield/lazygit/releases/download/$LAZYGIT_VERSION/lazygit_${LAZYGIT_VERSION#v}_Linux_${lazygit_arch}.tar.gz" && \
+               tar -xzf "$lazygit_tmp_dir/lazygit.tar.gz" -C "$lazygit_tmp_dir" lazygit && \
+               sudo install -m 0755 "$lazygit_tmp_dir/lazygit" /usr/local/bin/lazygit; then
+                log_success "Lazygit 安裝成功 (GitHub)"
+            else
+                log_warning "Lazygit GitHub 備援安裝失敗，將繼續安裝流程"
+            fi
+            if [ -n "$lazygit_tmp_dir" ]; then
+                rm -rf "$lazygit_tmp_dir" || log_warning "無法清除 Lazygit 暫存目錄"
+            fi
+        fi
     fi
 fi
 

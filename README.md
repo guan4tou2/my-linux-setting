@@ -99,10 +99,10 @@ PARALLEL_JOBS=8 ./install.sh
 ### 本地測試
 
 ```bash
-./tests/run_all_tests.sh          # 測試入口（依賴/功能測試僅 Linux CI 預設執行）
-./tests/test_dependencies.sh      # 依賴檢查
-./tests/test_functionality.sh     # 功能測試
-./scripts/preview_config.sh       # 預覽配置
+./tests/run_all_tests.sh            # 測試入口（依賴/功能測試僅 Linux CI 預設執行）
+./tests/test_dependencies.sh        # 依賴檢查
+./tests/test_functionality.sh       # 功能測試
+./scripts/config/preview_config.sh  # 預覽配置
 ```
 
 ```bash
@@ -122,9 +122,9 @@ docker-compose -f docker-compose.test.yml up ubuntu-test    # 多系統測試
 ## 🛠️ 系統維護
 
 ```bash
-./scripts/health_check.sh    # 健康檢查
-./scripts/update_tools.sh    # 更新工具
-./uninstall.sh               # 卸載腳本
+./scripts/maintenance/health_check.sh # 健康檢查
+./scripts/maintenance/update_tools.sh # 更新工具
+./uninstall.sh                        # 卸載腳本
 ```
 
 ---
@@ -135,8 +135,10 @@ docker-compose -f docker-compose.test.yml up ubuntu-test    # 多系統測試
 
 - `quiet`（預設）：只顯示關鍵步驟
 - `normal`：顯示完整安裝輸出
-- TUI 使用導覽式流程：選安裝模式 → 選模組 → 確認摘要 → 安裝 → 結果報告
-- 安裝完成或失敗後可在 TUI 中「查看安裝日誌」
+- TUI 使用導覽式流程：勾選模組 → 確認摘要 → 安裝（顯示每個模組的進度）→ 結果畫面
+- 勾選清單預設只選尚未安裝的模組；最後一列可開啟進階模式，逐模組挑選套件
+- 結果畫面可「重試失敗的模組」、「查看安裝日誌」或重新選擇
+- 終端機小於 15 列或 50 欄時自動改用純文字選單
 - `TUI_LOG_LINES` 可控制 TUI 日誌檢視器顯示的尾端行數（預設 300）
 
 ```bash

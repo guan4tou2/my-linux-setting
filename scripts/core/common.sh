@@ -89,9 +89,70 @@ readonly SCRIPT_START_TIME=$(date +%s)
 TOTAL_STEPS=0
 CURRENT_STEP=0
 
+# 判斷 LOG_FILE 是否已設定且可寫入（用於 quiet 模式保留指令輸出）
+_log_file_writable() {
+    [ -n "${LOG_FILE:-}" ] || return 1
+    if [ -e "$LOG_FILE" ]; then
+        [ -f "$LOG_FILE" ] && [ -w "$LOG_FILE" ]
+    else
+        [ -d "$(dirname "$LOG_FILE")" ] && [ -w "$(dirname "$LOG_FILE")" ]
+    fi
+}
+
+# 依輸出模式執行指令：_pkg_run <quiet|normal> cmd [args...]
+# quiet：終端機保持安靜；LOG_FILE 可寫時 stdout/stderr 附加到日誌（保留失敗原因），否則丟棄。
+# normal：直接輸出到終端機。
+_pkg_run() {
+    local mode="$1"
+    shift
+    if [ "$mode" = "quiet" ]; then
+        if _log_file_writable; then
+            # 日誌中只記實際指令，不含內部包裝函式名稱
+            local shown_cmd="$*"
+            shown_cmd="${shown_cmd#_root_exec_apt }"
+            shown_cmd="${shown_cmd#_root_exec }"
+            printf '%s [CMD] %s\n' "$(date +%Y-%m-%dT%H:%M:%S 2>/dev/null)" "$shown_cmd" >> "$LOG_FILE" 2>/dev/null || true
+            "$@" >> "$LOG_FILE" 2>&1
+        else
+            "$@" >/dev/null 2>&1
+        fi
+    else
+        "$@"
+    fi
+}
+
+# 以 root 身分執行（已是 root 時不經 sudo，沒有 sudo 的環境也可用）
+_root_exec() {
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+# 以 root 身分執行 apt 類指令，強制非互動
+_root_exec_apt() {
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        env DEBIAN_FRONTEND=noninteractive "$@"
+    else
+        sudo DEBIAN_FRONTEND=noninteractive "$@"
+    fi
+}
+
+# 以 root 身分執行套件管理器指令並依 mode 處理輸出：_pkg_root_exec <quiet|normal> cmd [args...]
+_pkg_root_exec() {
+    local mode="$1"
+    shift
+    case "$1" in
+        apt|apt-get) _pkg_run "$mode" _root_exec_apt "$@" ;;
+        *) _pkg_run "$mode" _root_exec "$@" ;;
+    esac
+}
+
 # 統一處理 root 權限執行
 # 對 apt/apt-get 一律注入 DEBIAN_FRONTEND=noninteractive 與 --force-confold，
 # 避免 dpkg 設定檔 prompt 在非互動環境下卡死。
+# quiet 模式下 apt 輸出不顯示在終端機，但會附加到 LOG_FILE（若可寫）以便診斷。
 run_as_root() {
     local cmd="$1"
     shift || true
@@ -100,27 +161,15 @@ run_as_root() {
     if [ "$cmd" = "apt" ] || [ "$cmd" = "apt-get" ]; then
         local apt_opts=(-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
         if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
-            if [ "$EUID" -eq 0 ]; then
-                DEBIAN_FRONTEND=noninteractive "$cmd" -qq "${apt_opts[@]}" "$@" >/dev/null
-            else
-                sudo DEBIAN_FRONTEND=noninteractive "$cmd" -qq "${apt_opts[@]}" "$@" >/dev/null
-            fi
+            _pkg_root_exec quiet "$cmd" -qq "${apt_opts[@]}" "$@"
         else
-            if [ "$EUID" -eq 0 ]; then
-                DEBIAN_FRONTEND=noninteractive "$cmd" "${apt_opts[@]}" "$@"
-            else
-                sudo DEBIAN_FRONTEND=noninteractive "$cmd" "${apt_opts[@]}" "$@"
-            fi
+            _pkg_root_exec normal "$cmd" "${apt_opts[@]}" "$@"
         fi
         return $?
     fi
 
     # 其他命令維持原本行為
-    if [ "$EUID" -eq 0 ]; then
-        "$cmd" "$@"
-    else
-        sudo "$cmd" "$@"
-    fi
+    _root_exec "$cmd" "$@"
 }
 
 # ==============================================================================
@@ -476,6 +525,8 @@ check_internet_speed() {
 install_apt_packages_parallel() {
     local packages=("$@")
     local failed_packages=()
+    # 供呼叫端取得「實際失敗的套件」（批次失敗後逐一重試的結果）
+    APT_BATCH_FAILED_PACKAGES=()
 
     if [ ${#packages[@]} -eq 0 ]; then
         return 0
@@ -483,38 +534,34 @@ install_apt_packages_parallel() {
 
     log_info "批次安裝 ${#packages[@]} 個 APT 套件: ${packages[*]}"
 
-    local apt_env="DEBIAN_FRONTEND=noninteractive"
     local apt_opts=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+    local mode="normal"
+    [ "${TUI_MODE:-normal}" = "quiet" ] && mode="quiet" || true
 
-    # 步驟 1：嘗試一次性批次安裝
-    if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-        if sudo $apt_env apt-get install "${apt_opts[@]}" "${packages[@]}" >/dev/null 2>&1; then
-            log_success "批次安裝完成: ${#packages[@]}/${#packages[@]} 成功"
-            return 0
-        fi
-    else
-        if sudo $apt_env apt-get install "${apt_opts[@]}" "${packages[@]}"; then
-            log_success "批次安裝完成: ${#packages[@]}/${#packages[@]} 成功"
-            return 0
-        fi
+    # 步驟 1：嘗試一次性批次安裝（quiet 模式輸出寫入日誌）
+    if _pkg_root_exec "$mode" apt-get install "${apt_opts[@]}" "${packages[@]}"; then
+        log_success "批次安裝完成: ${#packages[@]}/${#packages[@]} 成功"
+        return 0
     fi
 
-    # 步驟 2：批次失敗時，逐個重試以找出真正壞掉的套件
+    # 步驟 2：批次失敗時，逐個重試以找出真正壞掉的套件（輸出一律寫入日誌）
     log_warning "批次安裝失敗，改為逐個安裝以隔離問題套件..."
     local success_count=0
+    local package
     for package in "${packages[@]}"; do
-        if sudo $apt_env apt-get install "${apt_opts[@]}" "$package" >/dev/null 2>&1; then
+        if _pkg_root_exec quiet apt-get install "${apt_opts[@]}" "$package"; then
             success_count=$((success_count + 1))
             log_success "✓ $package"
         else
             failed_packages+=("$package")
-            log_error "✗ $package"
+            log_error "✗ $package" || true
         fi
     done
 
     log_info "安裝完成: $success_count/${#packages[@]} 成功"
 
     if [ ${#failed_packages[@]} -gt 0 ]; then
+        APT_BATCH_FAILED_PACKAGES=("${failed_packages[@]}")
         log_warning "失敗的套件: ${failed_packages[*]}"
         return 1
     fi
@@ -740,24 +787,24 @@ install_package() {
 
     log_info "安裝 $package (使用 ${PKG_MANAGER:-apt})"
 
-    # 根據包管理器選擇安裝命令
-    # 對 apt 一律加上 DEBIAN_FRONTEND=noninteractive，避免 dpkg 跳出設定視窗造成卡死
-    local install_cmd
+    # 根據包管理器選擇安裝命令（一律經 _pkg_root_exec：已是 root 時不依賴 sudo，
+    # apt 一律加上 DEBIAN_FRONTEND=noninteractive，避免 dpkg 跳出設定視窗造成卡死）
+    local install_cmd=()
     case "${PKG_MANAGER:-apt}" in
         apt)
-            install_cmd="sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+            install_cmd=(apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
             ;;
         dnf)
-            install_cmd="sudo dnf install -y"
+            install_cmd=(dnf install -y)
             ;;
         yum)
-            install_cmd="sudo yum install -y"
+            install_cmd=(yum install -y)
             ;;
         pacman)
-            install_cmd="sudo pacman -S --noconfirm"
+            install_cmd=(pacman -S --noconfirm)
             ;;
         zypper)
-            install_cmd="sudo zypper install -y"
+            install_cmd=(zypper install -y)
             ;;
         *)
             log_error "不支援的包管理器: ${PKG_MANAGER}"
@@ -766,23 +813,15 @@ install_package() {
     esac
 
     # 根據 TUI_MODE 控制輸出詳細程度
-    if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-        # 靜默模式：隱藏詳細輸出
-        if $install_cmd "$package" >/dev/null 2>&1; then
-            log_success "$package 安裝成功"
-            return 0
-        else
-            log_error "$package 安裝失敗"
-            return 1
-        fi
-    fi
+    # 靜默模式：終端機不顯示，但指令輸出會附加到 LOG_FILE，失敗時可查原因
+    local mode="normal"
+    [ "${TUI_MODE:-normal}" = "quiet" ] && mode="quiet" || true
 
-    # 一般模式：顯示完整安裝輸出
-    if $install_cmd "$package"; then
+    if _pkg_root_exec "$mode" "${install_cmd[@]}" "$package"; then
         log_success "$package 安裝成功"
         return 0
     else
-        log_error "$package 安裝失敗"
+        log_error "$package 安裝失敗" || true
         return 1
     fi
 }
@@ -840,51 +879,127 @@ install_packages_batch() {
     return 0
 }
 
-# 通用系統更新函數
+# 通用系統更新函數（更新套件索引）
+# 本次執行（含子行程，透過 export 的環境變數）已成功更新過就直接略過；
+# 傳入 "force" 可強制重新更新。
 update_system() {
+    local force="${1:-}"
+
+    if [ "$force" != "force" ] && [ "${LINUX_SETTING_PKG_INDEX_UPDATED:-}" = "1" ]; then
+        log_info "本次執行已更新過套件索引，略過重複更新"
+        return 0
+    fi
+
     log_info "更新系統套件列表 (使用 ${PKG_MANAGER:-apt})"
+
+    local mode="normal"
+    [ "${TUI_MODE:-normal}" = "quiet" ] && mode="quiet" || true
+    local rc=0
 
     case "${PKG_MANAGER:-apt}" in
         apt)
-            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-                sudo DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null 2>&1
-            else
-                sudo DEBIAN_FRONTEND=noninteractive apt-get update
-            fi
+            # Error-Mode=any：來源抓取失敗時回傳非 0（預設只印 W: 警告並回傳 0，
+            # 會讓「索引更新成功」的判斷失準）；舊版 apt 不認得此選項時會直接忽略
+            _pkg_root_exec "$mode" apt-get update -o APT::Update::Error-Mode=any || rc=$?
             ;;
         dnf)
-            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-                sudo dnf check-update >/dev/null 2>&1 || true
-            else
-                sudo dnf check-update || true
-            fi
+            _pkg_root_exec "$mode" dnf check-update || rc=$?
+            [ "$rc" -ne 100 ] || rc=0
             ;;
         yum)
-            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-                sudo yum check-update >/dev/null 2>&1 || true
-            else
-                sudo yum check-update || true
-            fi
+            _pkg_root_exec "$mode" yum check-update || rc=$?
+            [ "$rc" -ne 100 ] || rc=0
             ;;
         pacman)
-            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-                sudo pacman -Sy >/dev/null 2>&1
-            else
-                sudo pacman -Sy
-            fi
+            _pkg_root_exec "$mode" pacman -Sy || rc=$?
             ;;
         zypper)
-            if [ "${TUI_MODE:-normal}" = "quiet" ]; then
-                sudo zypper refresh >/dev/null 2>&1
-            else
-                sudo zypper refresh
-            fi
+            _pkg_root_exec "$mode" zypper refresh || rc=$?
             ;;
         *)
             log_warning "不支援的包管理器，無法更新系統"
             return 1
             ;;
     esac
+
+    if [ "$rc" -eq 0 ]; then
+        export LINUX_SETTING_PKG_INDEX_UPDATED="1"
+    fi
+    return "$rc"
+}
+
+# 取得檔案修改時間（epoch 秒）；失敗輸出 0
+_file_mtime() {
+    stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
+}
+
+# 判斷套件索引是否需要更新（需要更新回傳 0）
+# apt：/var/lib/apt/lists 沒有套件索引，或索引／快取超過 PKG_INDEX_MAX_AGE 秒（預設 86400）未更新。
+# 可用 APT_LISTS_DIR、APT_PKGCACHE_FILE、APT_UPDATE_STAMP_FILE 覆寫路徑（測試用）。
+_pkg_index_needs_update() {
+    case "${PKG_MANAGER:-apt}" in
+        apt)
+            local lists_dir="${APT_LISTS_DIR:-/var/lib/apt/lists}"
+            local pkgcache="${APT_PKGCACHE_FILE:-/var/cache/apt/pkgcache.bin}"
+            local stamp="${APT_UPDATE_STAMP_FILE:-/var/lib/apt/periodic/update-success-stamp}"
+            local max_age="${PKG_INDEX_MAX_AGE:-86400}"
+
+            # 索引不存在或為空：需要更新
+            local newest_list=0 f m found=0
+            for f in "$lists_dir"/*Packages* "$lists_dir"/*Sources*; do
+                [ -f "$f" ] && [ -s "$f" ] || continue
+                found=1
+                m=$(_file_mtime "$f")
+                [ "$m" -gt "$newest_list" ] && newest_list=$m || true
+            done
+            [ "$found" -eq 1 ] || return 0
+
+            # 取索引檔、pkgcache、update stamp 中最新的時間判斷是否過舊
+            local newest="$newest_list"
+            for f in "$pkgcache" "$stamp"; do
+                [ -f "$f" ] || continue
+                m=$(_file_mtime "$f")
+                [ "$m" -gt "$newest" ] && newest=$m || true
+            done
+            local now
+            now=$(date +%s)
+            [ $((now - newest)) -gt "$max_age" ]
+            ;;
+        pacman)
+            # pacman 資料庫過舊時安裝會 404，每次執行同步一次
+            return 0
+            ;;
+        *)
+            # dnf / yum / zypper 安裝時會自動重新整理 metadata
+            return 1
+            ;;
+    esac
+}
+
+# 安裝系統套件前確保套件索引可用：每次執行（含子行程）最多真正更新一次。
+# 全新機器／容器沒有套件索引時，不先更新會讓所有 apt 套件安裝失敗。
+# 更新失敗只警告，不中斷流程。
+ensure_package_index_fresh() {
+    if [ "${LINUX_SETTING_PKG_INDEX_CHECKED:-}" = "1" ]; then
+        return 0
+    fi
+    export LINUX_SETTING_PKG_INDEX_CHECKED="1"
+
+    if [ "${LINUX_SETTING_PKG_INDEX_UPDATED:-}" = "1" ]; then
+        return 0
+    fi
+
+    if ! _pkg_index_needs_update; then
+        log_info "套件索引仍然新鮮，略過更新"
+        return 0
+    fi
+
+    log_info "套件索引不存在或已過舊，先更新一次"
+    if ! update_system; then
+        log_warning "套件索引更新失敗，後續套件安裝可能失敗；詳細原因請查看日誌"
+        return 0
+    fi
+    return 0
 }
 
 # ==============================================================================
@@ -1915,11 +2030,29 @@ _log_tui_backend_hint() {
     fi
 }
 
+# 僅判斷實際尺寸，不套用對話框尺寸的預設值。
+_tui_terminal_too_small() {
+    local rows="${1:-}" cols="${2:-}"
+    case "$rows" in ''|*[!0-9]*) return 1 ;; esac
+    case "$cols" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$rows" -lt 15 ] || [ "$cols" -lt 50 ]
+}
+
 # 檢測並確保 TUI backend 可用
 ensure_tui_available() {
     # 如果明確禁用 TUI，直接返回失敗
     if [ "$USE_TUI" = "false" ]; then
         return 1
+    fi
+
+    local actual_size rows cols
+    if actual_size=$(stty size 2>/dev/null </dev/tty); then
+        read -r rows cols <<< "$actual_size"
+        if _tui_terminal_too_small "$rows" "$cols"; then
+            log_info "終端機太小（實際尺寸：${rows} 列 × ${cols} 欄），改用命令行模式"
+            export USE_TUI=false
+            return 1
+        fi
     fi
 
     local requested_backend="${TUI_BACKEND:-auto}"
@@ -1959,6 +2092,212 @@ ensure_tui_available() {
     return 1
 }
 
+# ==============================================================================
+# TUI 對話框尺寸計算
+# ==============================================================================
+
+# 展開提示文字中的跳脫序列（呼叫端以 \n 表示換行；whiptail 會自行解讀，
+# fzf / gum 不會，因此統一先展開再交給各 backend）
+_tui_expand_text() {
+    printf '%b' "${1:-}"
+}
+
+# 估算單行文字的顯示寬度（欄數）。中文等多位元組字元為雙寬，
+# 以「非 ASCII 字元一律視為 3 bytes、寬度 2」保守估計（寧可略寬、不可被截斷）。
+_tui_display_width() {
+    local s="${1:-}"
+    local chars=${#s}
+    local bytes
+    bytes=$(LC_ALL=C; printf '%s' "${#s}")
+    if [ "$bytes" -le "$chars" ] 2>/dev/null; then
+        echo "$chars"
+    else
+        echo $((chars + (bytes - chars) / 2))
+    fi
+}
+
+# 取得多個字串中最大的顯示寬度
+_tui_max_display_width() {
+    local max=0 w item
+    for item in "$@"; do
+        w=$(_tui_display_width "$item")
+        [ "$w" -gt "$max" ] && max=$w || true
+    done
+    echo "$max"
+}
+
+# 取得終端機實際大小，輸出「列數 欄數」。
+# 優先序：TUI_TERM_ROWS/TUI_TERM_COLS（測試／覆寫用）> stty > tput > LINES/COLUMNS > 24x80
+_tui_term_size() {
+    local rows="${TUI_TERM_ROWS:-}"
+    local cols="${TUI_TERM_COLS:-}"
+    local sz=""
+
+    if [ -z "$rows" ] || [ -z "$cols" ]; then
+        sz=$(stty size 2>/dev/null </dev/tty) || sz=""
+        if [ -n "$sz" ]; then
+            [ -n "$rows" ] || rows="${sz% *}"
+            [ -n "$cols" ] || cols="${sz#* }"
+        fi
+    fi
+    if [ -z "$rows" ] || [ -z "$cols" ]; then
+        [ -n "$rows" ] || rows=$(tput lines 2>/dev/null </dev/tty || true)
+        [ -n "$cols" ] || cols=$(tput cols 2>/dev/null </dev/tty || true)
+    fi
+    [ -n "$rows" ] || rows="${LINES:-}"
+    [ -n "$cols" ] || cols="${COLUMNS:-}"
+
+    case "$rows" in ''|*[!0-9]*) rows=24 ;; esac
+    case "$cols" in ''|*[!0-9]*) cols=80 ;; esac
+    [ "$rows" -ge 10 ] || rows=24
+    [ "$cols" -ge 30 ] || cols=80
+    echo "$rows $cols"
+}
+
+# 計算對話框尺寸，輸出「height width list_height scroll」
+# 用法：_tui_dialog_size <yesno|msgbox|menu|checklist> <提示文字> [項目數] [項目內容寬度] [標題寬度]
+#   - 依訊息行數、長行折行後的行數、以及終端機實際列數/欄數上限計算
+#   - 內容超過終端機高度時 scroll=1（yesno/msgbox 應加 --scrolltext）
+#   - menu/checklist 至少保留 3 個清單列（項目少於 3 個則全部保留），提示文字過長時才截短
+_tui_dialog_size() {
+    local kind="${1:-yesno}"
+    local text
+    text=$(_tui_expand_text "${2:-}")
+    local item_count="${3:-0}"
+    local content_w="${4:-0}"
+    local title_w="${5:-0}"
+
+    local rows cols
+    read -r rows cols <<< "$(_tui_term_size)"
+
+    local min_w
+    case "$kind" in
+        yesno) min_w=60 ;;
+        menu) min_w=70 ;;
+        msgbox) min_w=76 ;;
+        checklist) min_w=78 ;;
+        *) min_w=60 ;;
+    esac
+
+    local max_w=$((cols - 4))
+    [ "$max_w" -gt 120 ] && max_w=120 || true
+    [ "$max_w" -lt 30 ] && max_w=30 || true
+    local max_h=$((rows - 2))
+
+    # 最長一行的顯示寬度
+    local longest=0 w line
+    while IFS= read -r line || [ -n "$line" ]; do
+        w=$(_tui_display_width "$line")
+        [ "$w" -gt "$longest" ] && longest=$w || true
+    done <<< "$text"
+
+    local width=$longest
+    [ "$content_w" -gt "$width" ] && width=$content_w || true
+    width=$((width + 8))
+    [ $((title_w + 8)) -gt "$width" ] && width=$((title_w + 8)) || true
+    [ "$width" -lt "$min_w" ] && width=$min_w || true
+    [ "$width" -gt "$max_w" ] && width=$max_w || true
+
+    # 折行後的實際行數（whiptail 文字區約為 width - 6）
+    local text_w=$((width - 6))
+    [ "$text_w" -lt 10 ] && text_w=10 || true
+    local text_rows=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        w=$(_tui_display_width "$line")
+        if [ "$w" -le "$text_w" ]; then
+            text_rows=$((text_rows + 1))
+        else
+            text_rows=$((text_rows + (w + text_w - 1) / text_w))
+        fi
+    done <<< "$text"
+    [ "$text_rows" -lt 1 ] && text_rows=1 || true
+
+    local height list_height=0 scroll=0
+    case "$kind" in
+        menu|checklist)
+            local min_list=$item_count
+            [ "$min_list" -gt 3 ] && min_list=3 || true
+            # 提示文字過長時截短，確保清單至少保留 min_list 列
+            local text_cap=$((max_h - 7 - min_list))
+            [ "$text_cap" -lt 1 ] && text_cap=1 || true
+            [ "$text_rows" -gt "$text_cap" ] && text_rows=$text_cap || true
+            list_height=$((max_h - text_rows - 7))
+            [ "$list_height" -gt "$item_count" ] && list_height=$item_count || true
+            [ "$list_height" -lt "$min_list" ] && list_height=$min_list || true
+            height=$((text_rows + list_height + 7))
+            ;;
+        *)
+            height=$((text_rows + 7))
+            [ "$height" -lt 9 ] && height=9 || true
+            if [ "$height" -gt "$max_h" ]; then
+                height=$max_h
+                scroll=1
+            fi
+            ;;
+    esac
+
+    echo "$height $width $list_height $scroll"
+}
+
+# 提示文字加上全部 item_count 個選項，能否完整放進同一個選單（不必截短提示文字或捲動清單）。
+# 用法：_tui_menu_fits_text <提示文字> <選項數> [項目內容寬度] [標題寬度]
+# 版面與 _tui_dialog_size 的 menu 計算一致：文字列數 + 選項數 + 7（邊框、按鈕與空白）<= 終端機列數 - 2
+_tui_menu_fits_text() {
+    local text
+    text=$(_tui_expand_text "${1:-}")
+    local item_count="${2:-0}"
+    local content_w="${3:-0}"
+    local title_w="${4:-0}"
+
+    local rows cols
+    read -r rows cols <<< "$(_tui_term_size)"
+
+    local max_w=$((cols - 4))
+    [ "$max_w" -gt 120 ] && max_w=120 || true
+    [ "$max_w" -lt 30 ] && max_w=30 || true
+
+    local longest=0 w line
+    while IFS= read -r line || [ -n "$line" ]; do
+        w=$(_tui_display_width "$line")
+        [ "$w" -gt "$longest" ] && longest=$w || true
+    done <<< "$text"
+
+    local width=$longest
+    [ "$content_w" -gt "$width" ] && width=$content_w || true
+    width=$((width + 8))
+    [ $((title_w + 8)) -gt "$width" ] && width=$((title_w + 8)) || true
+    [ "$width" -lt 70 ] && width=70 || true
+    [ "$width" -gt "$max_w" ] && width=$max_w || true
+
+    local text_w=$((width - 6))
+    [ "$text_w" -lt 10 ] && text_w=10 || true
+    local text_rows=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        w=$(_tui_display_width "$line")
+        if [ "$w" -le "$text_w" ]; then
+            text_rows=$((text_rows + 1))
+        else
+            text_rows=$((text_rows + (w + text_w - 1) / text_w))
+        fi
+    done <<< "$text"
+
+    [ $((text_rows + item_count + 7)) -le $((rows - 2)) ]
+}
+
+# fzf 用的高度（行數）：依提示文字行數估算，不超過終端機高度
+_tui_fzf_height() {
+    local text
+    text=$(_tui_expand_text "${1:-}")
+    local extra="${2:-6}"
+    local rows cols
+    read -r rows cols <<< "$(_tui_term_size)"
+    local n
+    n=$(printf '%s\n' "$text" | wc -l)
+    n=$((n + extra))
+    [ "$n" -gt $((rows - 1)) ] && n=$((rows - 1)) || true
+    echo "$n"
+}
+
 # TUI 多選菜單（返回選中的 tag，以空白分隔）
 # 參數：title prompt tag1 item1 tag2 item2 ...
 # tag 必須為單一「模組 id」等無空白字元；描述可含空白（顯示在第二欄），否則 whiptail 回傳含空白的 tag 會被 shell 拆字而無法還原。
@@ -1987,7 +2326,7 @@ tui_checklist() {
             gi=$((gi + 2))
         done
         local gum_result
-        printf "%s\n%s\n" "$title" "$prompt" >&2
+        printf '%s\n%b\n' "$title" "$prompt" >&2
         gum_result=$(printf '%s\n' "${gum_items[@]}" | gum choose --no-limit) || return 1
         _tui_emit_tags_from_tsv <<< "$gum_result"
         return 0
@@ -2001,8 +2340,9 @@ tui_checklist() {
             fi=$((fi + 2))
         done
         local fzf_result
-        local fzf_header="${prompt}"$'\n'"Space 勾選/取消；Tab 多選；Enter 確認；Esc 取消"
-        fzf_result=$(printf '%s' "$fzf_input" | fzf --multi \
+        local fzf_header
+        fzf_header="$(_tui_expand_text "$prompt")"$'\n'"Space 勾選/取消；Tab 多選；Enter 確認；Esc 取消"
+        fzf_result=$(printf '%s' "$fzf_input" | fzf --multi --layout=reverse \
             --delimiter=$'\t' --with-nth=2.. \
             --bind=space:toggle --marker="✓ " \
             --height=80% --border --prompt="$title> " --header="$fzf_header") || return 1
@@ -2020,16 +2360,20 @@ tui_checklist() {
     done
 
     local item_count=$((n / 2))
-    # 計算窗口大小
-    local height=$((item_count + 10))
-    [ "$height" -gt 25 ] && height=25 || true
-    local list_height=$item_count
-    [ "$list_height" -gt 15 ] && list_height=15 || true
-    local width=78
+    # 計算窗口大小：依提示文字行數、長行折行與終端機實際大小
+    local ci cw=0 w
+    for ((ci = 0; ci < n; ci += 2)); do
+        w=$(( $(_tui_display_width "${items[$ci]}") + $(_tui_display_width "${items[$((ci + 1))]}") + 8 ))
+        [ "$w" -gt "$cw" ] && cw=$w || true
+    done
+    local height width list_height _scroll
+    read -r height width list_height _scroll <<< "$(_tui_dialog_size checklist "$prompt" "$item_count" "$cw" "$(_tui_display_width "$title")")"
+    local text
+    text=$(_tui_expand_text "$prompt")
 
     # 顯示 checklist 並捕獲結果
     local result
-    result=$(whiptail --title "$title" --checklist "$prompt" $height $width $list_height "${checklist_args[@]}" 3>&1 1>&2 2>&3)
+    result=$(whiptail --title "$title" --checklist "$text" $height $width $list_height "${checklist_args[@]}" 3>&1 1>&2 2>&3)
     local exit_code=$?
 
     # 返回選中的項目（去除引號）
@@ -2075,14 +2419,19 @@ tui_checklist_with_state() {
         return 1
     fi
 
-    local height=$((item_count + 10))
-    [ $height -gt 25 ] && height=25 || true
-    local list_height=$item_count
-    [ $list_height -gt 15 ] && list_height=15 || true
-    local width=78
+    local ci cw=0 w
+    local -a _cl=("${checklist_args[@]}")
+    for ((ci = 0; ci < ${#_cl[@]}; ci += 3)); do
+        w=$(( $(_tui_display_width "${_cl[$ci]}") + $(_tui_display_width "${_cl[$((ci + 1))]}") + 8 ))
+        [ "$w" -gt "$cw" ] && cw=$w || true
+    done
+    local height width list_height _scroll
+    read -r height width list_height _scroll <<< "$(_tui_dialog_size checklist "$prompt" "$item_count" "$cw" "$(_tui_display_width "$title")")"
+    local text
+    text=$(_tui_expand_text "$prompt")
 
     local result
-    result=$(whiptail --title "$title" --checklist "$prompt" \
+    result=$(whiptail --title "$title" --checklist "$text" \
         $height $width $list_height "${checklist_args[@]}" 3>&1 1>&2 2>&3)
     local exit_code=$?
 
@@ -2116,28 +2465,32 @@ tui_menu() {
 
     if [ "${TUI_BACKEND:-whiptail}" = "gum" ]; then
         local gum_result
-        printf "%s\n" "$prompt" >&2
+        printf '%b\n' "$prompt" >&2
         gum_result=$(gum choose "${items[@]}") || return 1
         [ -n "$gum_result" ] && echo "$gum_result" && return 0
         return 1
     fi
 
     if [ "${TUI_BACKEND:-whiptail}" = "fzf" ]; then
-        local fzf_result
-        fzf_result=$(printf '%s\n' "${items[@]}" | fzf --height=80% --border \
-            --prompt="$title> " --header="$prompt") || return 1
+        local fzf_result fzf_header
+        fzf_header="$(_tui_expand_text "$prompt")"
+        fzf_result=$(printf '%s\n' "${items[@]}" | fzf --height="$(_tui_fzf_height "$prompt" $((${#items[@]} + 5)))" --border --layout=reverse \
+            --prompt="$title> " --header="$fzf_header") || return 1
         [ -n "$fzf_result" ] && echo "$fzf_result" && return 0
         return 1
     fi
 
-    # 計算窗口大小
-    local height=$((${#items[@]} + 10))
-    [ $height -gt 25 ] && height=25 || true
-    local width=70
+    # 計算窗口大小：提示文字行數（含長行折行）+ 項目數，受終端機實際大小限制
+    local item_w
+    item_w=$(( $(_tui_max_display_width "${items[@]}") + 10 ))
+    local height width list_height _scroll
+    read -r height width list_height _scroll <<< "$(_tui_dialog_size menu "$prompt" "${#items[@]}" "$item_w" "$(_tui_display_width "$title")")"
+    local text
+    text=$(_tui_expand_text "$prompt")
 
     # 顯示 menu 並捕獲結果
     local result
-    result=$(whiptail --title "$title" --menu "$prompt" $height $width $((${#items[@]})) "${menu_args[@]}" 3>&1 1>&2 2>&3)
+    result=$(whiptail --title "$title" --menu "$text" $height $width $list_height "${menu_args[@]}" 3>&1 1>&2 2>&3)
     local exit_code=$?
 
     # 返回選中項目的文本（而不是索引）
@@ -2160,36 +2513,46 @@ tui_yesno() {
         return 1
     fi
 
-    # 計算窗口大小
-    local height=10
-    local width=60
-
     # 設置預設按鈕
     local defaultno=""
     [ "$default" = "no" ] && defaultno="--defaultno" || true
 
+    local text
+    text=$(_tui_expand_text "$prompt")
+
     if [ "${TUI_BACKEND:-whiptail}" = "gum" ]; then
         if [ "$default" = "yes" ]; then
-            gum confirm "$prompt" --default=true
+            gum confirm "$text" --default=true
         else
-            gum confirm "$prompt" --default=false
+            gum confirm "$text" --default=false
         fi
         return $?
     fi
 
     if [ "${TUI_BACKEND:-whiptail}" = "fzf" ]; then
-        local fzf_result
+        local fzf_result fzf_h
+        fzf_h="$(_tui_fzf_height "$prompt" 6)"
         if [ "$default" = "yes" ]; then
-            fzf_result=$(printf "Yes\nNo\n" | fzf --height=40% --border --prompt="$title> " --header="$prompt") || return 1
+            fzf_result=$(printf "Yes\nNo\n" | fzf --height="$fzf_h" --border --layout=reverse --prompt="$title> " --header="$text") || return 1
         else
-            fzf_result=$(printf "No\nYes\n" | fzf --height=40% --border --prompt="$title> " --header="$prompt") || return 1
+            fzf_result=$(printf "No\nYes\n" | fzf --height="$fzf_h" --border --layout=reverse --prompt="$title> " --header="$text") || return 1
         fi
         [ "$fzf_result" = "Yes" ]
         return $?
     fi
 
+    # 計算窗口大小：依內容行數、長行折行與終端機大小；超出時啟用捲動
+    local height width list_height scroll
+    read -r height width list_height scroll <<< "$(_tui_dialog_size yesno "$prompt" 0 0 "$(_tui_display_width "$title")")"
+    local scroll_opt=()
+    if [ "$scroll" = "1" ]; then
+        # 可捲動時焦點在文字區，直接按 Enter 不會觸發按鈕；在標題提示操作方式
+        scroll_opt=(--scrolltext)
+        title="$title（↑↓ 捲動，Tab 切到按鈕）"
+    fi
+
     # 顯示 yesno 對話框
-    if whiptail --title "$title" $defaultno --yesno "$prompt" $height $width 3>&1 1>&2 2>&3; then
+    if whiptail --title "$title" $defaultno ${scroll_opt[@]+"${scroll_opt[@]}"} --yesno "$text" $height $width 3>&1 1>&2 2>&3; then
         return 0  # Yes
     else
         return 1  # No
@@ -2206,16 +2569,6 @@ tui_msgbox() {
         return 1
     fi
 
-    # 依內容行數調整高度（避免長內容在固定 15 行內像「空白」）
-    local width=76
-    local lines=1
-    if [ -n "$message" ]; then
-        lines=$(printf '%b' "$message" | wc -l)
-    fi
-    local height=$((lines + 7))
-    [ "$height" -lt 12 ] && height=12
-    [ "$height" -gt 28 ] && height=28
-
     if [ "${TUI_BACKEND:-whiptail}" = "gum" ]; then
         printf '%b\n' "$message" | gum pager
         return $?
@@ -2223,14 +2576,26 @@ tui_msgbox() {
 
     if [ "${TUI_BACKEND:-whiptail}" = "fzf" ]; then
         if [ -t 0 ]; then
-            printf '%b\n' "$message" | fzf --height=80% --border --prompt="$title> " --header="Enter 返回"
+            printf '%b\n' "$message" | fzf --height=80% --border --layout=reverse --prompt="$title> " --header="Enter 返回"
         else
             printf '%b\n' "$message"
         fi
         return 0
     fi
 
-    whiptail --title "$title" --msgbox "$message" $height $width 3>&1 1>&2 2>&3
+    # 依內容行數、長行折行與終端機大小調整；超出時啟用捲動
+    local height width list_height scroll
+    read -r height width list_height scroll <<< "$(_tui_dialog_size msgbox "$message" 0 0 "$(_tui_display_width "$title")")"
+    local scroll_opt=()
+    if [ "$scroll" = "1" ]; then
+        # 可捲動時焦點在文字區，直接按 Enter 不會觸發按鈕；在標題提示操作方式
+        scroll_opt=(--scrolltext)
+        title="$title（↑↓ 捲動，Tab 切到按鈕）"
+    fi
+    local text
+    text=$(_tui_expand_text "$message")
+
+    whiptail --title "$title" ${scroll_opt[@]+"${scroll_opt[@]}"} --msgbox "$text" $height $width 3>&1 1>&2 2>&3
 }
 
 # TUI 日誌檢視器（顯示最後 N 行，預設 300 行）
@@ -2266,6 +2631,7 @@ tui_log_viewer() {
     elif [ "${TUI_BACKEND:-whiptail}" = "fzf" ]; then
         if [ -t 0 ]; then
             fzf --height=80% --border --no-sort \
+                --layout=reverse \
                 --prompt="$title> " \
                 --header="輸入可搜尋；Enter 選取一行；Esc 返回" \
                 < "$view_file" >/dev/null || rc=$?
@@ -2273,7 +2639,14 @@ tui_log_viewer() {
             cat "$view_file"
         fi
     else
-        whiptail --title "$title" --textbox "$view_file" 25 100 3>&1 1>&2 2>&3 || rc=$?
+        # 依終端機實際大小決定檢視器尺寸（上限 40x140），小視窗不會超出畫面
+        local viewer_rows viewer_cols
+        read -r viewer_rows viewer_cols <<< "$(_tui_term_size)"
+        viewer_rows=$((viewer_rows - 2))
+        viewer_cols=$((viewer_cols - 4))
+        [ "$viewer_rows" -le 40 ] || viewer_rows=40
+        [ "$viewer_cols" -le 140 ] || viewer_cols=140
+        whiptail --title "$title" --textbox "$view_file" "$viewer_rows" "$viewer_cols" 3>&1 1>&2 2>&3 || rc=$?
     fi
 
     [ -n "$tmp_file" ] && rm -f "$tmp_file"
@@ -2332,7 +2705,7 @@ tui_inputbox() {
 # ==============================================================================
 
 cleanup_temp_files() {
-    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+    if [ -n "${TEMP_DIR:-}" ] && [ -d "$TEMP_DIR" ]; then
         rm -rf "$TEMP_DIR"
         log_info "清理臨時文件: $TEMP_DIR"
     fi
@@ -2467,6 +2840,38 @@ init_common_env() {
     log_info "共用環境初始化完成（並行任務: $PARALLEL_JOBS）"
 }
 
+# 取得 GitHub 最新發行版，優先使用網頁轉址以避免 API 配額限制。
+github_latest_release_tag() {
+    local repo="$1" url tag payload
+    if url=$(curl -fsSLI --connect-timeout 10 --max-time 30 -o /dev/null \
+        -w '%{url_effective}' "https://github.com/$repo/releases/latest" 2>/dev/null); then
+        tag="${url##*/}"
+        if [[ "$url" == */releases/tag/* ]] && [ -n "$tag" ] && [ "$tag" != latest ]; then
+            printf '%s\n' "$tag"
+            return 0
+        fi
+    fi
+    if payload=$(curl -fsSL --connect-timeout 10 --max-time 30 \
+        "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null); then
+        tag=$(printf '%s\n' "$payload" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p') || return 1
+        if [ -n "$tag" ] && [ "$tag" != latest ]; then
+            printf '%s\n' "$tag"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+linux_release_arch() {
+    local arch
+    arch=$(uname -m) || return 1
+    case "$arch" in
+        x86_64|amd64) printf '%s\n' x86_64 ;;
+        aarch64|arm64) printf '%s\n' aarch64 ;;
+        *) printf '%s\n' "$arch" ;;
+    esac
+}
+
 # ==============================================================================
 # 導出所有函數
 # ==============================================================================
@@ -2477,14 +2882,18 @@ func_list="$func_list check_command check_package_installed check_python_version
 func_list="$func_list check_pip_package_installed check_cargo_package_installed check_npm_package_installed"
 func_list="$func_list install_with_fallback install_with_homebrew_fallback install_package install_apt_package install_apt_packages_parallel install_packages_batch"
 func_list="$func_list install_brew_package install_brew_packages_batch check_brew_package_installed ensure_brew_shell_aliases ensure_homebrew_installed update_system"
+func_list="$func_list ensure_package_index_fresh _pkg_index_needs_update _file_mtime _log_file_writable _pkg_run _root_exec _root_exec_apt _pkg_root_exec"
+func_list="$func_list github_latest_release_tag linux_release_arch"
 func_list="$func_list backup_file safe_append_to_file"
 func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_cache cleanup_cache"
 func_list="$func_list safe_download download_files_parallel get_best_mirror"
 func_list="$func_list optimize_apt_performance cleanup_apt_system select_fastest_apt_mirror"
 func_list="$func_list version_greater_equal check_architecture_compatibility install_arch_specific_package"
 func_list="$func_list ensure_tui_available tui_checklist tui_checklist_with_state tui_menu tui_yesno tui_msgbox tui_log_viewer tui_gauge tui_inputbox"
+func_list="$func_list _tui_terminal_too_small"
 func_list="$func_list cleanup_temp_files get_elapsed_time check_sudo_access init_common_env detect_and_inject_tool_paths"
 func_list="$func_list is_non_interactive safe_read ensure_npm_user_prefix"
+func_list="$func_list _tui_expand_text _tui_display_width _tui_max_display_width _tui_term_size _tui_dialog_size _tui_menu_fits_text _tui_fzf_height"
 
 for func in $func_list; do
     if declare -f "$func" > /dev/null 2>&1; then

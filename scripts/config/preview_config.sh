@@ -274,10 +274,10 @@ show_full_preview() {
     
     # 可用的管理命令
     echo "🛠️  可用的管理命令："
-    echo "  - ./scripts/health_check.sh     # 系統健康檢查"
-    echo "  - ./scripts/update_tools.sh     # 更新所有工具"
-    echo "  - ./install.sh --update         # 快速更新模式"
-    echo "  - ./tests/test_scripts.sh       # 運行測試套件"
+    echo "  - ./scripts/maintenance/health_check.sh  # 系統健康檢查"
+    echo "  - ./scripts/maintenance/update_tools.sh  # 更新所有工具"
+    echo "  - ./install.sh --update                  # 快速更新模式"
+    echo "  - ./tests/test_scripts.sh                # 運行測試套件"
     echo ""
     
     echo "########################################"

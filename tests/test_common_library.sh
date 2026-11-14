@@ -154,6 +154,72 @@ test_architecture_compatibility() {
     esac
 }
 
+# 發行版工具測試只使用假的系統指令，不連線也不安裝套件。
+test_linux_release_arch() {
+    local input expected actual
+    for input in x86_64 amd64 aarch64 arm64 armv7l i686 riscv64; do
+        case "$input" in
+            x86_64|amd64) expected=x86_64 ;;
+            aarch64|arm64) expected=aarch64 ;;
+            *) expected="$input" ;;
+        esac
+        actual=$(uname() { printf '%s\n' "$input"; }; linux_release_arch)
+        assert_equals "$expected" "$actual" "linux_release_arch 對應 $input"
+    done
+}
+
+test_github_latest_release_tag() {
+    local mode result rc tmp
+    tmp=$(mktemp -d)
+    for mode in redirect api failed latest empty malformed; do
+        : > "$tmp/calls"
+        rc=0
+        result=$(
+            set -euo pipefail
+            curl() {
+                printf '%s\n' "$*" >> "$tmp/calls"
+                case "$*" in
+                    (*--connect-timeout*--max-time*) ;;
+                    (*) return 99 ;;
+                esac
+                case "$*" in
+                    (*api.github.com*)
+                        case "$mode" in
+                            (failed) printf '不應輸出的錯誤'; return 22 ;;
+                            (malformed) printf '{"message":"not found"}' ;;
+                            (*) printf '{"tag_name" : "v2.0.0"}' ;;
+                        esac
+                        ;;
+                    (*)
+                        case "$mode" in
+                            (redirect) printf 'https://github.com/owner/repo/releases/tag/v1.2.0' ;;
+                            (latest) printf 'https://github.com/owner/repo/releases/latest' ;;
+                            (empty) return 0 ;;
+                            (*) return 22 ;;
+                        esac
+                        ;;
+                esac
+            }
+            github_latest_release_tag owner/repo
+        ) || rc=$?
+        case "$mode" in
+            redirect)
+                assert_equals v1.2.0 "$result" "轉址成功取得 tag"
+                assert_equals 1 "$(wc -l < "$tmp/calls" | tr -d ' ')" "轉址成功不呼叫 API"
+                ;;
+            failed|malformed)
+                assert_equals 1 "$rc" "GitHub $mode 回傳失敗"
+                assert_equals "" "$result" "GitHub $mode 不輸出內容"
+                ;;
+            *)
+                assert_equals v2.0.0 "$result" "轉址 $mode 時由 API 取得 tag"
+                assert_equals 2 "$(wc -l < "$tmp/calls" | tr -d ' ')" "轉址 $mode 會改走 API"
+                ;;
+        esac
+    done
+    rm -rf "$tmp"
+}
+
 # ==============================================================================
 # Tests for String Operations
 # ==============================================================================
@@ -204,6 +270,288 @@ test_install_with_homebrew_fallback_no_brew() {
 }
 
 # ==============================================================================
+# Tests for TUI dialog sizing
+# ==============================================================================
+
+test_tui_dialog_size() {
+    local out h w lh sc
+
+    # 單行短訊息：使用最小寬度與最小高度，不捲動
+    out=$(TUI_TERM_ROWS=40 TUI_TERM_COLS=120 _tui_dialog_size yesno "短訊息" 0 0 4)
+    read -r h w lh sc <<< "$out"
+    assert_equals "9 60 0 0" "$h $w $lh $sc" "yesno 單行訊息使用最小尺寸"
+
+    # 多行訊息（\n 表示換行）：高度隨行數增加，且足以容納所有行
+    out=$(TUI_TERM_ROWS=40 TUI_TERM_COLS=120 _tui_dialog_size yesno "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl" 0 0 4)
+    read -r h w lh sc <<< "$out"
+    assert_equals "19 0" "$h $sc" "yesno 12 行訊息高度為行數 + 7 且不捲動"
+
+    # 長行：寬度放寬到內容寬度，受終端機欄數上限限制
+    local longline
+    longline="$(printf 'x%.0s' $(seq 1 90))"
+    out=$(TUI_TERM_ROWS=40 TUI_TERM_COLS=120 _tui_dialog_size yesno "$longline" 0 0 4)
+    read -r h w lh sc <<< "$out"
+    assert_equals "98" "$w" "長行會放寬對話框寬度"
+
+    # 終端機較窄：寬度被限制在欄數 - 4，長行折成多行使高度增加
+    local veryl
+    veryl="$(printf 'x%.0s' $(seq 1 200))"
+    out=$(TUI_TERM_ROWS=40 TUI_TERM_COLS=60 _tui_dialog_size yesno "$veryl" 0 0 4)
+    read -r h w lh sc <<< "$out"
+    assert_equals "56 11" "$w $h" "窄終端機限制寬度為欄數 - 4，200 字長行折成 4 行（高度 11）"
+
+    # 中文為雙寬字元：40 個中文字（80 欄）不可被當成 40 欄
+    local zh
+    zh="$(printf '測試中文寬度%.0s' $(seq 1 7))"
+    local zw
+    zw=$(_tui_display_width "$zh")
+    assert_true "[ '$zw' -ge 70 ]" "中文顯示寬度以雙寬估計（42 字 >= 70 欄）"
+    assert_equals "5" "$(_tui_display_width abcde)" "ASCII 顯示寬度等於字元數"
+
+    # 內容超過終端機高度：高度被限制在列數 - 2，並要求捲動
+    local many="" i
+    for i in $(seq 1 60); do many="${many}line $i\n"; done
+    out=$(TUI_TERM_ROWS=32 TUI_TERM_COLS=100 _tui_dialog_size msgbox "$many" 0 0 4)
+    read -r h w lh sc <<< "$out"
+    assert_equals "30 1" "$h $sc" "超長訊息限制在終端機高度內並啟用捲動"
+
+    # menu：提示文字多行時清單高度要跟著留位置，且不超出終端機
+    out=$(TUI_TERM_ROWS=32 TUI_TERM_COLS=100 _tui_dialog_size menu "a\nb\nc\nd\ne" 3 20 4)
+    read -r h w lh sc <<< "$out"
+    assert_equals "15 3" "$h $lh" "menu 高度包含提示文字行數與項目數"
+
+    # menu：提示文字過長時清單至少保留 3 列，整體仍不超過終端機高度
+    out=$(TUI_TERM_ROWS=24 TUI_TERM_COLS=100 _tui_dialog_size checklist "$many" 10 20 4)
+    read -r h w lh sc <<< "$out"
+    assert_equals "3" "$lh" "checklist 提示過長時仍保留至少 3 列清單"
+    assert_true "[ '$h' -le 22 ]" "checklist 高度不超過終端機高度"
+}
+
+test_tui_yesno_whiptail_args() {
+    local tmp
+    tmp=$(mktemp -d)
+    cat > "$tmp/whiptail" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "${FAKE_ARGS_FILE:?}"
+exit 0
+FAKE
+    chmod +x "$tmp/whiptail"
+
+    local many="" i
+    for i in $(seq 1 60); do many="${many}line $i\n"; done
+
+    (
+        PATH="$tmp:$PATH" FAKE_ARGS_FILE="$tmp/args_long" USE_TUI=true TUI_BACKEND=whiptail \
+        TUI_TERM_ROWS=32 TUI_TERM_COLS=100 tui_yesno "T" "$many" yes
+    )
+    (
+        PATH="$tmp:$PATH" FAKE_ARGS_FILE="$tmp/args_short" USE_TUI=true TUI_BACKEND=whiptail \
+        TUI_TERM_ROWS=32 TUI_TERM_COLS=100 tui_yesno "T" "第一行\n第二行\n第三行" no
+    )
+    local long_args short_args
+    long_args=$(cat "$tmp/args_long")
+    short_args=$(cat "$tmp/args_short")
+    rm -rf "$tmp"
+
+    assert_true "echo \"\$long_args\" | grep -qx -- '--scrolltext'" "超長 yesno 對話框加上 --scrolltext"
+    assert_true "echo \"\$short_args\" | grep -qx -- '--defaultno'" "預設 no 時使用 --defaultno"
+    assert_false "echo \"\$short_args\" | grep -qx -- '--scrolltext'" "短 yesno 對話框不使用 --scrolltext"
+    assert_true "echo \"\$short_args\" | grep -q '第三行'" "yesno 內容完整交給 whiptail"
+    assert_true "echo \"\$short_args\" | grep -qx '10'" "三行 yesno 高度為 10（行數 + 7）"
+}
+
+test_tui_fzf_expands_newlines() {
+    local tmp
+    tmp=$(mktemp -d)
+    cat > "$tmp/fzf" <<'FAKE'
+#!/usr/bin/env bash
+cat >/dev/null
+for a in "$@"; do
+    case "$a" in --header=*) printf '%s' "${a#--header=}" > "${FAKE_HEADER_FILE:?}" ;; esac
+done
+printf 'Yes\n'
+FAKE
+    chmod +x "$tmp/fzf"
+
+    (
+        PATH="$tmp:$PATH" FAKE_HEADER_FILE="$tmp/header" USE_TUI=true TUI_BACKEND=fzf \
+        tui_yesno "T" "第一行\n第二行" yes
+    )
+    local header
+    header=$(cat "$tmp/header")
+    rm -rf "$tmp"
+
+    assert_false "echo \"\$header\" | grep -qF '\\n'" "fzf header 不含字面 \\n"
+    assert_equals "2" "$(printf '%s\n' "$header" | wc -l | tr -d ' ')" "fzf header 多行提示正確換行"
+}
+
+# ==============================================================================
+# Tests for package index handling and quiet-mode logging
+# ==============================================================================
+
+test_ensure_package_index_fresh_once() {
+    local tmp
+    tmp=$(mktemp -d)
+
+    # 空的 apt lists：第一次呼叫要更新，同一行程第二次呼叫不可再更新
+    local count
+    count=$(
+        unset LINUX_SETTING_PKG_INDEX_UPDATED LINUX_SETTING_PKG_INDEX_CHECKED
+        PKG_MANAGER=apt
+        APT_LISTS_DIR="$tmp/lists"; mkdir -p "$APT_LISTS_DIR"
+        APT_PKGCACHE_FILE="$tmp/none1"; APT_UPDATE_STAMP_FILE="$tmp/none2"
+        n=0
+        update_system() { n=$((n + 1)); return 0; }
+        ensure_package_index_fresh >/dev/null 2>&1
+        ensure_package_index_fresh >/dev/null 2>&1
+        ensure_package_index_fresh >/dev/null 2>&1
+        echo "$n"
+    )
+    assert_equals "1" "$count" "ensure_package_index_fresh 同一行程只更新一次"
+
+    # 索引新鮮：完全不更新
+    mkdir -p "$tmp/fresh"
+    echo "pkg" > "$tmp/fresh/archive.ubuntu.com_dists_jammy_main_binary-amd64_Packages"
+    count=$(
+        unset LINUX_SETTING_PKG_INDEX_UPDATED LINUX_SETTING_PKG_INDEX_CHECKED
+        PKG_MANAGER=apt
+        APT_LISTS_DIR="$tmp/fresh"
+        APT_PKGCACHE_FILE="$tmp/none1"; APT_UPDATE_STAMP_FILE="$tmp/none2"
+        n=0
+        update_system() { n=$((n + 1)); return 0; }
+        ensure_package_index_fresh >/dev/null 2>&1
+        echo "$n"
+    )
+    assert_equals "0" "$count" "索引新鮮時不更新"
+
+    # 索引過舊：更新（把檔案時間改成很久以前）
+    touch -t 200001010000 "$tmp/fresh/archive.ubuntu.com_dists_jammy_main_binary-amd64_Packages"
+    count=$(
+        unset LINUX_SETTING_PKG_INDEX_UPDATED LINUX_SETTING_PKG_INDEX_CHECKED
+        PKG_MANAGER=apt
+        APT_LISTS_DIR="$tmp/fresh"
+        APT_PKGCACHE_FILE="$tmp/none1"; APT_UPDATE_STAMP_FILE="$tmp/none2"
+        n=0
+        update_system() { n=$((n + 1)); return 0; }
+        ensure_package_index_fresh >/dev/null 2>&1
+        echo "$n"
+    )
+    assert_equals "1" "$count" "索引過舊時更新"
+
+    # 更新失敗只警告，不中斷（回傳 0）
+    (
+        unset LINUX_SETTING_PKG_INDEX_UPDATED LINUX_SETTING_PKG_INDEX_CHECKED
+        PKG_MANAGER=apt
+        APT_LISTS_DIR="$tmp/lists"
+        APT_PKGCACHE_FILE="$tmp/none1"; APT_UPDATE_STAMP_FILE="$tmp/none2"
+        update_system() { return 1; }
+        ensure_package_index_fresh >/dev/null 2>&1
+    )
+    assert_equals "0" "$?" "套件索引更新失敗不會中斷"
+
+    rm -rf "$tmp"
+}
+
+test_update_system_skips_when_already_updated() {
+    local tmp
+    tmp=$(mktemp -d)
+    cat > "$tmp/apt-get" <<'FAKE'
+#!/usr/bin/env bash
+echo "$*" >> "${FAKE_APT_CALLS:?}"
+exit 0
+FAKE
+    chmod +x "$tmp/apt-get"
+
+    local calls
+    calls=$(
+        unset LINUX_SETTING_PKG_INDEX_UPDATED LINUX_SETTING_PKG_INDEX_CHECKED
+        export PATH="$tmp:$PATH" FAKE_APT_CALLS="$tmp/calls"
+        PKG_MANAGER=apt TUI_MODE=quiet LOG_FILE=""
+        sudo() { env "$@"; }
+        update_system >/dev/null 2>&1
+        update_system >/dev/null 2>&1
+        update_system force >/dev/null 2>&1
+        grep -c '^update' "$tmp/calls"
+    )
+    rm -rf "$tmp"
+    assert_equals "2" "$calls" "update_system 第二次略過、force 才會重新更新"
+}
+
+test_update_system_rpm_exit_codes() {
+    local manager code out
+    for manager in dnf yum; do
+        for code in 0 100 1 42; do
+            out=$(
+                set -euo pipefail
+                unset LINUX_SETTING_PKG_INDEX_UPDATED
+                PKG_MANAGER="$manager"
+                log_info() { :; }
+                _pkg_root_exec() {
+                    [ "$2" = "$manager" ] && [ "$3" = check-update ] || return 99
+                    return "$code"
+                }
+                rc=0; update_system || rc=$?
+                printf '%s:%s' "$rc" "${LINUX_SETTING_PKG_INDEX_UPDATED:-未設定}"
+            )
+            case "$code" in
+                0|100) assert_equals "0:1" "$out" "$manager check-update $code 視為成功並標記更新" ;;
+                *) assert_equals "$code:未設定" "$out" "$manager check-update $code 保留失敗且不標記更新" ;;
+            esac
+        done
+    done
+}
+
+test_tui_actual_terminal_minimum() {
+    local size rows cols rc
+    for size in '14 80' '24 49' '14 49' '15 50' '24 80' '0 0' '未知 未知'; do
+        read -r rows cols <<< "$size"
+        rc=0
+        _tui_terminal_too_small "$rows" "$cols" || rc=$?
+        case "$size" in
+            '14 80'|'24 49'|'14 49'|'0 0') assert_equals 0 "$rc" "實際尺寸 $size 改用命令行模式" ;;
+            *) assert_equals 1 "$rc" "實際尺寸 $size 不觸發過小判斷" ;;
+        esac
+    done
+}
+
+test_install_package_quiet_logs_failure_output() {
+    local tmp
+    tmp=$(mktemp -d)
+    cat > "$tmp/apt-get" <<'FAKE'
+#!/usr/bin/env bash
+echo "E: Unable to locate package $*" >&2
+echo "some stdout noise"
+exit 100
+FAKE
+    chmod +x "$tmp/apt-get"
+
+    local rc terminal
+    terminal=$(
+        export PATH="$tmp:$PATH"
+        PKG_MANAGER=apt TUI_MODE=quiet LOG_FILE="$tmp/test.log"
+        sudo() { env "$@"; }
+        install_package "zz-no-such-package-zz" 2>&1
+        echo "rc=$?"
+    )
+    rc="${terminal##*rc=}"
+    assert_equals "1" "$rc" "安裝失敗時 install_package 回傳 1"
+    assert_true "grep -q 'Unable to locate package' '$tmp/test.log'" "quiet 模式的 apt 錯誤輸出寫入日誌"
+    assert_true "grep -q 'some stdout noise' '$tmp/test.log'" "quiet 模式的 stdout 也寫入日誌"
+    assert_false "echo \"\$terminal\" | grep -q 'Unable to locate package'" "quiet 模式終端機不顯示 apt 輸出"
+
+    # LOG_FILE 未設定時丟棄輸出，且不報錯
+    terminal=$(
+        export PATH="$tmp:$PATH"
+        PKG_MANAGER=apt TUI_MODE=quiet LOG_FILE=""
+        sudo() { env "$@"; }
+        install_package "zz-no-such-package-zz" 2>&1
+        echo "rc=$?"
+    )
+    assert_false "echo \"\$terminal\" | grep -q 'Unable to locate package'" "未設定 LOG_FILE 時 quiet 模式丟棄輸出"
+    rm -rf "$tmp"
+}
+
+# ==============================================================================
 # Test Runner
 # ==============================================================================
 
@@ -231,6 +579,8 @@ run_all_tests() {
 
     echo "Testing Architecture Detection..."
     test_architecture_compatibility
+    test_linux_release_arch
+    test_github_latest_release_tag
     echo ""
 
     echo "Testing String Operations..."
@@ -243,6 +593,20 @@ run_all_tests() {
 
     echo "Testing Homebrew Fallback..."
     test_install_with_homebrew_fallback_no_brew
+    echo ""
+
+    echo "Testing TUI Dialog Sizing..."
+    test_tui_actual_terminal_minimum
+    test_tui_dialog_size
+    test_tui_yesno_whiptail_args
+    test_tui_fzf_expands_newlines
+    echo ""
+
+    echo "Testing Package Index and Quiet-mode Logging..."
+    test_ensure_package_index_fresh_once
+    test_update_system_skips_when_already_updated
+    test_update_system_rpm_exit_codes
+    test_install_package_quiet_logs_failure_output
     echo ""
 
     # Print summary

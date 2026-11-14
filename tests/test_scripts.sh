@@ -149,6 +149,69 @@ test_argument_parsing() {
     fi
 }
 
+# 檢查 install.sh --config 未帶值時印出明確錯誤，而非 set -u 的 unbound variable
+test_install_config_requires_path() {
+    log_test "檢查 install.sh --config 未帶值的錯誤訊息..."
+
+    # 前面的 test_common_library 會把 common.sh 的 set -e 帶進這個 shell，
+    # 預期失敗的指令必須用 || 接住，否則整支測試會在此中止。
+    local out exit_code=0
+    out="$(bash "$SCRIPT_DIR/install.sh" --config 2>&1)" || exit_code=$?
+
+    if [ "$exit_code" -ne 0 ] && \
+       [[ "$out" == *"--config requires a file path"* ]] && \
+       [[ "$out" != *"unbound variable"* ]]; then
+        log_pass "--config 未帶值會回報明確錯誤"
+    else
+        log_fail "--config 未帶值行為不正確 (exit=$exit_code): $out"
+    fi
+}
+
+# 靜態檢查：sudo 防護區塊內不得有未被單引號保護的 $(curl
+test_install_sudo_guard_no_command_substitution() {
+    log_test "靜態檢查 sudo 防護區塊不執行 curl..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    local block bad
+    block="$(awk '/\$\{SUDO_USER:-\}/ && /ALLOW_ROOT/ {f=1} f {print} f && /^fi$/ {exit}' "$installer")"
+    if [ -z "$block" ]; then
+        log_fail "找不到 sudo 防護區塊"
+        return
+    fi
+
+    # 逐行移除單引號字串後，不得再出現 $(curl
+    bad="$(printf '%s\n' "$block" | sed "s/'[^']*'//g" | grep -F '$(curl' || true)"
+    if [ -z "$bad" ] && \
+       ! printf '%s\n' "$block" | grep -qE '\$\{(YELLOW|GREEN|CYAN|NC)\}'; then
+        log_pass "sudo 防護區塊不會執行 curl 且不依賴 common.sh 顏色變數"
+    else
+        log_fail "sudo 防護區塊含未保護的 \$(curl 或使用尚未定義的顏色變數"
+    fi
+}
+
+# 行為測試：sudo 執行 install.sh 時應顯示提示並結束（僅 CI 且免密 sudo 時執行）
+test_install_sudo_guard_behavior() {
+    log_test "檢查 sudo 防護的實際行為..."
+
+    if [ "${CI:-}" != "true" ] || ! command -v sudo >/dev/null 2>&1 || ! sudo -n true >/dev/null 2>&1; then
+        log_warn "略過：需要 CI=true 且 sudo -n 可用"
+        return
+    fi
+
+    # 同上：以 || 接住預期的非 0 結束碼，避免被 set -e 中止
+    local out exit_code=0
+    out="$(env -u ALLOW_ROOT sudo -n env -u ALLOW_ROOT bash "$SCRIPT_DIR/install.sh" --dry-run 2>&1)" || exit_code=$?
+
+    if [ "$exit_code" -ne 0 ] && \
+       [[ "$out" == *"請改用一般使用者執行"* ]] && \
+       [[ "$out" != *"unbound variable"* ]] && \
+       [[ "$out" != *"#!/usr/bin/env bash"* ]]; then
+        log_pass "sudo 防護會顯示提示並以非 0 結束"
+    else
+        log_fail "sudo 防護行為不正確 (exit=$exit_code): $out"
+    fi
+}
+
 # 檢查顯示版本與共用版本常數同步
 test_script_version_bumped() {
     log_test "檢查腳本版本已更新..."
@@ -374,6 +437,7 @@ test_common_tui_quiet_status_logs_are_log_only() {
     tmp_log="$(mktemp)"
     local tui_output
     tui_output=$(
+        NON_INTERACTIVE=false \
         USE_TUI=true \
         TUI_MODE=quiet \
         ENABLE_LOGGING=true \
@@ -383,6 +447,7 @@ test_common_tui_quiet_status_logs_are_log_only() {
 
     local cli_output
     cli_output=$(
+        NON_INTERACTIVE=false \
         USE_TUI=false \
         TUI_MODE=quiet \
         ENABLE_LOGGING=false \
@@ -485,8 +550,12 @@ test_install_module_prompt_backend_neutral() {
         return
     fi
 
+    # fzf 後端的 checklist 自帶按鍵說明，install.sh 只對其他後端補「空白鍵勾選」提示；
+    # 舊的「[✓]=已安裝 [◐]=部分安裝」圖例會和勾選框混淆，不應再出現。
     if ! search_literal '請使用空格鍵選擇要安裝的模組' "$installer" && \
-       search_literal '請勾選要安裝的模組，完成後確認：' "$installer"; then
+       search_literal '請勾選要安裝的模組（已安裝的預設不勾選）：' "$installer" && \
+       search_literal 'fzf) key_hint="" ;;' "$installer" && \
+       ! search_literal '[✓]=已安裝 [◐]=部分安裝' "$installer"; then
         log_pass "install.sh 模組選擇提示未綁定單一 TUI backend"
     else
         log_fail "install.sh 模組選擇提示仍綁定 whiptail 空格鍵操作"
@@ -508,14 +577,19 @@ test_install_tui_log_flow() {
        search_literal '"查看安裝日誌"' "$installer" && \
        search_literal 'show_install_log_dialog' "$installer" && \
        search_literal 'run_install_with_tui' "$installer" && \
-       search_literal 'tui_log_viewer "安裝日誌" "$LOG_FILE"' "$installer"; then
+       search_literal 'tui_log_viewer "安裝日誌" "$LOG_FILE"' "$installer" && \
+       ! search_literal 'tui_msgbox "開始安裝"' "$installer" && \
+       ! search_literal 'tui_yesno "查看安裝日誌"' "$installer" && \
+       ! search_literal 'tui_log_viewer "安裝日誌" "$LOG_FILE" "$tail_lines" 2>/dev/null' "$installer"; then
+        # 確認摘要後不再跳「開始安裝」；安裝後不再多問一次「是否查看日誌」；
+        # 日誌檢視器不可把 stderr 丟進 /dev/null（whiptail 在 fd 交換後會畫在 stderr 上）
         log_pass "install.sh 已將安裝狀態與日誌入口包進 TUI"
     else
         log_fail "install.sh 缺少 TUI 安裝狀態或日誌入口"
     fi
 }
 
-# 檢查 TUI 主流程改為導覽式：模式 → 模組 → 摘要 → 安裝 → 結果
+# 檢查 TUI 主流程改為導覽式：模組勾選（含進階列）→ 摘要 → 安裝 → 合併結果畫面（可重試）
 test_install_guided_tui_flow() {
     log_test "檢查 install.sh 使用導覽式 TUI 安裝流程..."
 
@@ -526,21 +600,22 @@ test_install_guided_tui_flow() {
     fi
 
     if search_literal 'run_guided_tui_flow()' "$installer" && \
-       search_literal 'choose_install_mode_tui()' "$installer" && \
        search_literal 'select_modules_tui()' "$installer" && \
        search_literal 'confirm_install_summary_tui()' "$installer" && \
        search_literal 'show_install_result_tui()' "$installer" && \
-       search_literal 'run_guided_tui_flow' "$installer" && \
-       search_literal 'choose_install_mode_tui || return 0' "$installer" && \
        search_literal 'select_modules_tui || return 0' "$installer" && \
-       search_literal 'confirm_install_summary_tui || return 0' "$installer" && \
+       search_literal 'confirm_install_summary_tui || continue' "$installer" && \
+       search_literal 'offer_homebrew_if_needed' "$installer" && \
        search_literal 'run_install_with_tui' "$installer" && \
-       search_literal 'show_install_result_tui "$install_rc"' "$installer" && \
+       search_literal 'show_install_result_tui || result_action=$?' "$installer" && \
+       search_literal 'prepare_package_index "$use_progress"' "$installer" && \
+       ! search_literal 'choose_install_mode_tui' "$installer" && \
+       [ -n "$(awk '/^run_guided_tui_flow\(\) \{/{f=1} f && /select_modules_tui \|\| return 0/{s=NR} f && /offer_homebrew_if_needed/{if (s) print NR} f && /^}$/{exit}' "$installer")" ] && \
        ! search_literal 'while true; do' "$installer" && \
        ! search_literal '"選擇模組安裝" "$advanced_label" "查看模組詳情" "查看安裝日誌" "退出"' "$installer"; then
-        log_pass "install.sh 已使用導覽式 TUI 安裝流程"
+        log_pass "install.sh 已使用導覽式 TUI 安裝流程（無獨立安裝模式選單）"
     else
-        log_fail "install.sh 仍是主選單優先，尚未改為導覽式流程"
+        log_fail "install.sh 導覽式流程不符合預期"
     fi
 }
 
@@ -996,6 +1071,758 @@ test_install_non_interactive_mode() {
     fi
 }
 
+# 從 install.sh 取出指定的頂層函式定義（不執行主流程），供行為測試在子 shell 中 eval
+extract_install_functions() {
+    local installer="$SCRIPT_DIR/install.sh"
+    local fn
+    for fn in "$@"; do
+        awk -v fn="$fn" '
+            index($0, fn "() {") == 1 { f = 1 }
+            f { print }
+            f && /^}$/ { exit }
+        ' "$installer"
+    done
+}
+
+# 從 common.sh 取出指定函式（供子 shell 測試）
+extract_common_functions() {
+    local common="$SCRIPT_DIR/scripts/core/common.sh"
+    local fn
+    for fn in "$@"; do
+        awk -v fn="$fn" '
+            index($0, fn "() {") == 1 { f = 1 }
+            f { print }
+            f && /^}$/ { exit }
+        ' "$common"
+    done
+}
+
+INSTALL_REPORT_FUNCS="module_display_name module_result_status module_result_succeeded install_results_overall install_report_title module_failure_packages count_words build_install_report_text record_module_result reset_install_results install_result_counts install_result_summary_line install_result_menu_text"
+
+# 行為測試：安裝報告依每個模組的實際結果產生標題、清單與提示
+test_install_report_reflects_results() {
+    log_test "檢查安裝報告反映實際模組結果..."
+
+    local funcs
+    # shellcheck disable=SC2086
+    funcs="$(extract_install_functions $INSTALL_REPORT_FUNCS)"
+    local fake_home
+    fake_home="$(mktemp -d)"
+    touch "$fake_home/.zshrc" "$fake_home/.p10k.zsh"
+
+    local runner='eval "$1"; shift; reset_install_results; while [ $# -ge 2 ]; do record_module_result "$1" "$2" "${3:-}"; shift 3; done; install_report_title; printf "|"; build_install_report_text; printf "|"; install_result_menu_text'
+
+    local ok_out mixed_out failed_out aborted_out rc=0
+    ok_out="$(HOME="$fake_home" LOG_FILE=/tmp/fake.log bash -c "$runner" _ "$funcs" base ok "" terminal ok "")" || rc=$?
+    mixed_out="$(HOME="$fake_home" LOG_FILE=/tmp/fake.log bash -c "$runner" _ "$funcs" base ok "" dev partial "apt:neovim brew:lazygit" terminal failed "")" || rc=$?
+    failed_out="$(HOME="$fake_home" LOG_FILE=/tmp/fake.log bash -c "$runner" _ "$funcs" base failed "" terminal failed "")" || rc=$?
+    aborted_out="$(HOME="$fake_home" LOG_FILE=/tmp/fake.log INSTALL_ABORTED=true bash -c 'eval "$1"; reset_install_results; INSTALL_ABORTED=true; record_module_result base ok ""; record_module_result dev failed ""; record_module_result terminal not_run ""; install_report_title; printf "|"; build_install_report_text' _ "$funcs")" || rc=$?
+    rm -rf "$fake_home"
+
+    if [ "$rc" -eq 0 ] && \
+       [[ "$ok_out" == "安裝完成|"* ]] && \
+       [[ "$ok_out" == *"全部 2 個模組安裝成功"* ]] && \
+       [[ "$ok_out" == *"✓ 基礎工具"* ]] && \
+       [[ "$ok_out" == *"✓ 終端設定"* ]] && \
+       [[ "$ok_out" == *"zsh 設定：~/.zshrc"* ]] && \
+       [[ "$ok_out" == *"exec zsh -l"* ]] && \
+       [[ "$ok_out" == *"日誌：/tmp/fake.log"* ]] && \
+       [[ "$ok_out" == *"全部 2 個模組安裝完成"* ]] && \
+       [[ "$mixed_out" == "安裝完成（部分失敗）|"* ]] && \
+       [[ "$mixed_out" == *"⚠ 開發工具 — 2 個套件失敗：apt:neovim brew:lazygit"* ]] && \
+       [[ "$mixed_out" == *"✗ 終端設定 — 安裝失敗"* ]] && \
+       [[ "$mixed_out" != *"zsh 設定"* ]] && \
+       [[ "$mixed_out" != *"exec zsh -l"* ]] && \
+       [[ "$mixed_out" == *"成功 1 個、部分失敗 1 個、失敗 1 個"* ]] && \
+       [[ "$failed_out" == "安裝失敗|"* ]] && \
+       [[ "$failed_out" == *"失敗 2 個"* ]] && \
+       [[ "$failed_out" != *"下一步"* ]] && \
+       [[ "$failed_out" != *"安裝流程已完成"* ]] && \
+       [[ "$aborted_out" == "安裝已中止|"* ]] && \
+       [[ "$aborted_out" == *"- 終端設定 — 未執行（安裝已中止）"* ]]; then
+        log_pass "安裝報告依模組結果顯示標題、狀態與對應提示"
+    else
+        log_fail "安裝報告未正確反映模組結果 (rc=$rc)"
+        printf '%s\n---\n%s\n---\n%s\n---\n%s\n' "$ok_out" "$mixed_out" "$failed_out" "$aborted_out"
+    fi
+}
+
+# 行為測試：進度行的日誌清理、寬度截斷與組行不會超過終端寬度
+test_install_progress_text_helpers() {
+    log_test "檢查安裝進度行的文字處理..."
+
+    local funcs
+    funcs="$(extract_install_functions _progress_clean_log_line progress_clean_log_line _progress_fit_text progress_fit_text progress_text_width _progress_fmt_elapsed _progress_compose_line)"
+
+    local out rc=0
+    out="$(LC_ALL=C.UTF-8 bash -c '
+        eval "$1"
+        progress_clean_log_line "$(printf "2026-11-13T17:22:15+00:00 [INFO] [123] \033[0;36m安裝 htop\033[0m")"; printf "|"
+        progress_clean_log_line "$(printf "Progress 10%%\rProgress 50%%\r")"; printf "|"
+        progress_clean_log_line "$(printf "\033[0;33mWARNING: 套件安裝失敗: foo\033[0m")"; printf "|"
+        progress_text_width "$(progress_fit_text "監控工具安裝中文字很長的一行訊息abcdef" 10)"; printf "|"
+        progress_fit_text "short" 10; printf "|"
+        _progress_compose_line "x" "[2/5]" "開發工具" 83 "正在設定 Neovim 與 LazyVim 外掛，這一行非常非常長會超過寬度限制" 40
+        progress_text_width "$PROGRESS_FIT"; printf "|"
+        printf "%s" "$PROGRESS_FIT"; printf "|"
+        _progress_fmt_elapsed 3725
+    ' _ "$funcs")" || rc=$?
+
+    local -a parts=()
+    IFS='|' read -r -d '' -a parts < <(printf '%s' "$out") || true
+
+    if [ "$rc" -eq 0 ] && \
+       [ "${parts[0]:-}" = "安裝 htop" ] && \
+       [ "${parts[1]:-}" = "Progress 50%" ] && \
+       [ "${parts[2]:-}" = "套件安裝失敗: foo" ] && \
+       [ "${parts[3]:-99}" -le 10 ] 2>/dev/null && \
+       [ "${parts[4]:-}" = "short" ] && \
+       [ "${parts[5]:-99}" -le 39 ] 2>/dev/null && \
+       [[ "${parts[6]:-}" == "  x [2/5] 開發工具  01:23"* ]] && \
+       [[ "${parts[6]:-}" == *"…" ]] && \
+       [ "${parts[7]:-}" = "62:05" ]; then
+        log_pass "進度行會清除色碼/時間戳並依顯示寬度保守截斷"
+    else
+        log_fail "進度行文字處理不正確 (rc=$rc): $out"
+    fi
+}
+
+# 行為測試：非 tty 時 progress_run 不啟動動畫、回傳原指令結束碼、不留背景行程
+test_install_progress_run_non_tty() {
+    log_test "檢查非 tty 時的安裝進度輸出..."
+
+    local funcs
+    funcs="$(extract_install_functions _ansi _progress_fmt_elapsed _progress_fit_text _progress_term_cols progress_can_animate _progress_stop_spinner _progress_pid_alive _progress_out _progress_tty_is_terminal progress_run progress_finish_line)"
+
+    local out rc=0
+    out="$(bash -c '
+        eval "$1"
+        PROGRESS_LINES=()
+        PROGRESS_TTY_OPEN=false
+        PROGRESS_SPINNER_PID=""
+        rc=0
+        progress_run "[1/2]" "測試模組" bash -c "exit 7" || rc=$?
+        printf "rc=%s\n" "$rc"
+        printf "pid=[%s]\n" "$PROGRESS_SPINNER_PID"
+        progress_finish_line "[2/5]" "開發工具" partial "部分套件失敗（2 個）" 83
+        printf "jobs=[%s]\n" "$(jobs -p)"
+    ' _ "$funcs" < /dev/null 2>&1 | cat)" || rc=$?
+
+    if [ "$rc" -eq 0 ] && \
+       [[ "$out" == *"[1/2] 測試模組 安裝中"* ]] && \
+       [[ "$out" == *"rc=7"* ]] && \
+       [[ "$out" == *"pid=[]"* ]] && \
+       [[ "$out" == *"! [2/5] 開發工具  部分套件失敗（2 個）  01:23"* ]] && \
+       [[ "$out" == *"jobs=[]"* ]] && \
+       [[ "$out" != *$'\r'* ]]; then
+        log_pass "非 tty 時改用靜態進度行並正確回傳結束碼"
+    else
+        log_fail "非 tty 進度輸出不正確 (rc=$rc): $out"
+    fi
+}
+
+# 行為測試：確認摘要使用顯示名稱、顯示實際套件統計；勾選清單標籤不使用方括號狀態
+test_install_summary_and_checklist_labels() {
+    log_test "檢查確認摘要與模組勾選標籤..."
+
+    if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+        log_warn "略過確認摘要行為測試：需要 bash 4+（關聯陣列）"
+        return
+    fi
+
+    local funcs
+    funcs="$(extract_install_functions module_display_name module_install_plan_text build_install_summary_text module_checklist_label)"
+
+    local out rc=0
+    out="$(bash -c '
+        eval "$1"
+        declare -A MODULE_NAMES=([base]="基礎工具" [dev]="開發工具" [monitoring]="監控工具" [docker]="Docker 工具" [python]="Python 開發環境" [term]="終端設定")
+        declare -A MODULE_PACKAGES=([base]="a b c d e" [dev]="x" [monitoring]="m1 m2 m3 m4 m5" [docker]="" [python]="p1 p2" [term]="")
+        declare -A MODULE_APT_FALLBACK=([base]="b f")
+        declare -A MODULE_BREW_PACKAGES=([dev]="y z")
+        declare -A MODULE_PIP_PACKAGES=([python]="pipx1")
+        declare -A MODULE_CARGO_PACKAGES=() MODULE_NPM_PACKAGES=()
+        declare -A MODULE_SCRIPTS=([monitoring]="monitoring_tools.sh" [docker]="docker_setup.sh" [python]="python_setup.sh")
+        _module_pkg_is_installed() { case " a b m1 x y z p1 p2 pipx1 " in *" $2 "*) return 0 ;; esac; return 1; }
+        selected_modules="base dev monitoring docker python term"
+        INSTALL_MODE=full
+        ADVANCED_MODE=false
+        HOMEBREW_DECISION=yes
+        LOG_FILE=/tmp/fake.log
+        build_install_summary_text; printf "|"
+        ADVANCED_MODE=true; selected_modules="dev"; build_install_summary_text; printf "|"
+        module_checklist_label "Python 開發環境" "python3, pip, uv, ranger" partial; printf "|"
+        module_checklist_label "Docker 工具" "docker-ce, lazydocker" not_installed
+    ' _ "$funcs")" || rc=$?
+
+    local -a parts=()
+    IFS='|' read -r -d '' -a parts < <(printf '%s' "$out") || true
+
+    # base：a b c d e + f（b 與 fallback 重複只算一次）= 6 個、已裝 a b、待裝 4
+    # monitoring：5 個、已裝 1、待裝 4，有腳本
+    if [ "$rc" -eq 0 ] && \
+       [[ "${parts[0]}" == "模組："* ]] && \
+       [[ "${parts[0]}" != *"模式"* ]] && \
+       [[ "${parts[0]}" == *"• 基礎工具：安裝 4 個套件、略過 2 個已安裝\n"* ]] && \
+       [[ "${parts[0]}" == *"• 開發工具：套件皆已安裝\n"* ]] && \
+       [[ "${parts[0]}" == *"• 監控工具：安裝 4 個套件、略過 1 個已安裝，並執行設定腳本\n"* ]] && \
+       [[ "${parts[0]}" == *"• Docker 工具：只執行設定腳本\n"* ]] && \
+       [[ "${parts[0]}" == *"• Python 開發環境：套件皆已安裝，只執行設定腳本\n"* ]] && \
+       [[ "${parts[0]}" == *"• 終端設定：沒有宣告套件"* ]] && \
+       [[ "${parts[0]}" == *"Homebrew：會先安裝"* ]] && \
+       [[ "${parts[0]}" == *"日誌：/tmp/fake.log"* ]] && \
+       [[ "${parts[0]}" != *"預估時間"* ]] && \
+       [[ "${parts[1]}" == "模組：\n  • 開發工具：套件皆已安裝"*"進階模式：確認後會逐模組挑選"* ]] && \
+       [[ "${parts[2]}" == "Python 開發環境 — python3, pip, uv, ranger（部分安裝）" ]] && \
+       [[ "${parts[3]}" == "Docker 工具 — docker-ce, lazydocker" ]]; then
+        log_pass "確認摘要顯示每個模組的套件統計與設定腳本說明"
+    else
+        log_fail "確認摘要或勾選標籤不正確 (rc=$rc): $out"
+    fi
+
+    # 沒有模組管理器資料時只列名稱
+    local plain
+    plain="$(bash -c '
+        eval "$1"
+        selected_modules="base dev"
+        INSTALL_MODE=full; ADVANCED_MODE=false; LOG_FILE=/tmp/fake.log
+        build_install_summary_text
+    ' _ "$funcs")" || true
+    if [[ "$plain" == *"• 基礎工具\n"* ]] && [[ "$plain" != *"：安裝"* ]] && \
+       ! search_literal '預估時間：10-15 分鐘' "$SCRIPT_DIR/install.sh"; then
+        log_pass "沒有模組管理器時確認摘要只列模組名稱"
+    else
+        log_fail "沒有模組管理器時確認摘要不正確: $plain"
+    fi
+}
+
+# 行為測試：精簡報告、合併／兩步判斷、重試清單、結果畫面流程
+test_install_result_screen_behavior() {
+    log_test "檢查合併結果畫面（精簡報告、是否合併、重試清單）..."
+
+    local funcs cfuncs
+    # shellcheck disable=SC2086
+    funcs="$(extract_install_functions $INSTALL_REPORT_FUNCS build_install_report_compact_text install_retry_modules install_result_fits_one_screen show_install_result_tui)"
+    cfuncs="$(extract_common_functions _tui_expand_text _tui_display_width _tui_term_size _tui_menu_fits_text)"
+
+    local fake_home tmp rc=0
+    fake_home="$(mktemp -d)"
+    tmp="$(mktemp -d)"
+
+    # 精簡報告與重試清單
+    local out
+    out="$(HOME="$fake_home" LOG_FILE="$fake_home/x.log" BACKUP_DIR="$fake_home/bk" bash -c '
+        eval "$1"; eval "$2"
+        reset_install_results
+        record_module_result base ok ""
+        record_module_result dev partial "apt:neovim brew:lazygit"
+        record_module_result terminal failed "x"
+        record_module_result docker not_run ""
+        build_install_report_compact_text; printf "|"
+        install_retry_modules; printf "|"
+        reset_install_results
+        record_module_result base ok ""
+        install_retry_modules; printf "|"
+        build_install_report_compact_text
+    ' _ "$funcs" "$cfuncs")" || rc=$?
+    local -a parts=()
+    IFS='|' read -r -d '' -a parts < <(printf '%s' "$out") || true
+    local compact="${parts[0]:-}"
+    if [ "$rc" -eq 0 ] && \
+       [[ "$compact" == "成功 1 個、部分失敗 1 個、失敗 1 個、未執行 1 個。"* ]] && \
+       [[ "$compact" == *"✓ 基礎工具"* ]] && \
+       [[ "$compact" == *"⚠ 開發工具 — 2 個套件失敗"* ]] && \
+       [[ "$compact" == *"✗ 終端設定 — 安裝失敗"* ]] && \
+       [[ "$compact" == *"- Docker 工具 — 未執行"* ]] && \
+       [[ "$compact" == *"日誌：~/x.log" ]] && \
+       [[ "$compact" != *"備份"* ]] && [[ "$compact" != *"建議"* ]] && [[ "$compact" != *"apt:neovim"* ]] && \
+       [ "${parts[1]:-}" = "dev terminal docker" ] && \
+       [ -z "${parts[2]:-}" ] && \
+       [[ "${parts[3]:-}" == "全部 1 個模組安裝完成。"* ]]; then
+        log_pass "精簡報告只含總結、逐模組狀態與日誌；重試清單包含失敗／部分／未執行"
+    else
+        log_fail "精簡報告或重試清單不正確 (rc=$rc): $out"
+    fi
+
+    # 是否合併：依終端機列數（精簡報告 + 選項 + 邊框 <= 列數 - 2）
+    out="$(HOME="$fake_home" LOG_FILE="$fake_home/x.log" bash -c '
+        eval "$1"; eval "$2"
+        reset_install_results
+        for m in base dev python terminal monitoring docker; do record_module_result "$m" ok ""; done
+        chk() { if install_result_fits_one_screen "$1"; then printf "Y"; else printf "N"; fi; }
+        TUI_TERM_COLS=80
+        TUI_TERM_ROWS=40 chk 4; TUI_TERM_ROWS=24 chk 4; TUI_TERM_ROWS=24 chk 3; TUI_TERM_ROWS=20 chk 4
+        TUI_TERM_ROWS=24
+        for m in a b c; do record_module_result "$m" failed ""; done
+        chk 4
+    ' _ "$funcs" "$cfuncs")" || rc=$?
+    # 6 個模組：總結 1 + 空 1 + 6 + 空 1 + 日誌 1 = 10 列；24 列終端機可用 22 列，需 10 + 選項 + 7
+    # 9 個模組：13 列 + 4 + 7 = 24 > 22 → 退回兩步
+    if [ "$rc" -eq 0 ] && [ "$out" = "YYYNN" ]; then
+        log_pass "合併判斷依終端機列數與選項數量決定"
+    else
+        log_fail "合併判斷不正確 (rc=$rc): $out（預期 YYYNN）"
+    fi
+
+    # 結果畫面流程：以假的 tui_menu／tui_msgbox 記錄呼叫（每個情境用獨立目錄）
+    local flow='
+        eval "$1"; eval "$2"
+        tui_menu() { printf "%s\n---\n" "$2" > "$T/menu_prompt"; shift 2; printf "%s\n" "$@" > "$T/menu_items"; printf "%s" "$PICK"; }
+        tui_msgbox() { printf "x" >> "$T/msgbox"; }
+        show_install_log_dialog() { printf "x" >> "$T/logdlg"; }
+        reset_install_results
+        for spec in $SPECS; do record_module_result "${spec%%=*}" "${spec#*=}" ""; done
+        rc=0; show_install_result_tui || rc=$?; printf "%s" "$rc"
+    '
+    local d1="$tmp/1" d2="$tmp/2" d3="$tmp/3" d4="$tmp/4"
+    mkdir -p "$d1" "$d2" "$d3" "$d4"
+    local r_merged r_two r_retry r_ok
+    r_merged="$(T="$d1" PICK="退出" SPECS="base=ok dev=failed" TUI_TERM_ROWS=40 TUI_TERM_COLS=80 HOME="$fake_home" LOG_FILE="$fake_home/x.log" bash -c "$flow" _ "$funcs" "$cfuncs")" || rc=$?
+    local merged_prompt merged_items msgbox_calls=""
+    merged_prompt="$(cat "$d1/menu_prompt")"; merged_items="$(tr '\n' ',' < "$d1/menu_items")"
+    if [ -f "$d1/msgbox" ]; then msgbox_calls="$(cat "$d1/msgbox")"; fi
+    r_two="$(T="$d2" PICK="重新選擇" SPECS="a=ok b=ok c=ok d=failed e=ok f=ok" TUI_TERM_ROWS=20 TUI_TERM_COLS=80 HOME="$fake_home" LOG_FILE="$fake_home/x.log" bash -c "$flow" _ "$funcs" "$cfuncs")" || rc=$?
+    local two_prompt two_msgbox=""
+    two_prompt="$(cat "$d2/menu_prompt")"
+    if [ -f "$d2/msgbox" ]; then two_msgbox="$(cat "$d2/msgbox")"; fi
+    r_retry="$(T="$d3" PICK="重試失敗的模組" SPECS="base=ok dev=partial" TUI_TERM_ROWS=40 TUI_TERM_COLS=80 HOME="$fake_home" LOG_FILE="$fake_home/x.log" bash -c "$flow" _ "$funcs" "$cfuncs")" || rc=$?
+    r_ok="$(T="$d4" PICK="退出" SPECS="base=ok terminal=ok" TUI_TERM_ROWS=40 TUI_TERM_COLS=80 HOME="$fake_home" LOG_FILE="$fake_home/x.log" bash -c "$flow" _ "$funcs" "$cfuncs")" || rc=$?
+    local ok_items
+    ok_items="$(tr '\n' ',' < "$d4/menu_items")"
+    rm -rf "$tmp" "$fake_home"
+
+    if [ "$r_merged" = "0" ] && [ -z "$msgbox_calls" ] && \
+       [[ "$merged_prompt" == *"✗ 開發工具 — 安裝失敗"* ]] && \
+       [ "$merged_items" = "重試失敗的模組,查看安裝日誌,重新選擇,退出," ] && \
+       [ "$r_two" = "2" ] && [ "$two_msgbox" = "x" ] && \
+       [[ "$two_prompt" != *"✓"* ]] && [[ "$two_prompt" == *"成功 5 個"*"日誌："* ]] && \
+       [ "$r_retry" = "3" ] && \
+       [ "$r_ok" = "0" ] && [ "$ok_items" = "查看安裝日誌,重新選擇,退出," ]; then
+        log_pass "結果畫面：放得下時合併、放不下退回兩步；失敗時第一個選項為重試；全成功沒有重試"
+    else
+        log_fail "結果畫面流程不正確: merged=$r_merged/[$msgbox_calls]/$merged_items two=$r_two/[$two_msgbox] retry=$r_retry ok=$r_ok/$ok_items rc=$rc"
+        printf '%s\n%s\n' "$merged_prompt" "$two_prompt"
+    fi
+}
+
+# 行為測試：勾選清單預設狀態、虛擬進階項目與解析、選模組流程
+test_install_module_checklist_behavior() {
+    log_test "檢查模組勾選預設狀態與進階虛擬項目..."
+
+    if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+        log_warn "略過勾選清單行為測試：需要 bash 4+（關聯陣列）"
+        return
+    fi
+
+    local funcs tag_def
+    funcs="$(extract_install_functions module_checklist_label build_module_checklist_items parse_module_selection parse_checklist_selection select_modules_tui module_display_names module_display_name)"
+    tag_def="$(grep -E '^ADVANCED_CHECKLIST_(TAG|LABEL)=' "$SCRIPT_DIR/install.sh")"
+
+    local rc=0 out
+    # 預設狀態：已安裝 OFF、部分安裝／未安裝 ON；模組管理器不可用時全 ON
+    out="$(bash -c '
+        eval "$1"; eval "$2"
+        declare -A MODULE_NAMES=([base]="基礎工具" [dev]="開發工具" [term]="終端設定")
+        declare -A MODULE_DESCRIPTIONS=([base]="git" [dev]="nvim" [term]="zsh")
+        MODULE_LIST=(base dev term)
+        USE_MODULE_MANAGER=true
+        check_module_status() { case "$1" in base) echo installed ;; dev) echo partial ;; *) echo not_installed ;; esac; }
+        checklist_items=(); checklist_states=()
+        build_module_checklist_items
+        echo "${checklist_states[*]}"; echo "${checklist_items[1]}"
+        USE_MODULE_MANAGER=false
+        build_module_checklist_items
+        echo "${checklist_states[*]}"; echo "${#checklist_items[@]}"
+    ' _ "$funcs" "$tag_def")" || rc=$?
+    if [ "$rc" -eq 0 ] && \
+       [[ "$out" == "OFF ON ON"$'\n'"基礎工具 — git（已安裝）"$'\n'"ON ON ON ON ON ON"$'\n'"12" ]]; then
+        log_pass "已安裝的模組預設不勾選，其餘預設勾選（標籤仍顯示已安裝）"
+    else
+        log_fail "勾選預設狀態不正確 (rc=$rc): $out"
+    fi
+
+    # 解析：進階列剔除並設定 ADVANCED_MODE；只勾進階視為未選擇
+    out="$(bash -c '
+        eval "$1"; eval "$2"
+        r() { local rc=0; ADVANCED_MODE=${2:-false}; parse_checklist_selection "$1" || rc=$?; printf "[%s|%s|%s]" "$rc" "$selected_modules" "$ADVANCED_MODE"; }
+        r "python base +advanced"
+        r "\"python\" \"base\""
+        r "+advanced"
+        r ""
+        r "dev" true
+        r "dev +advanced dev"
+    ' _ "$funcs" "$tag_def")" || rc=$?
+    if [ "$rc" -eq 0 ] && \
+       [ "$out" = "[0|python base|true][0|python base|false][1||true][1||false][0|dev|false][0|dev|true]" ]; then
+        log_pass "進階虛擬項目從模組清單剔除並設定 ADVANCED_MODE；只勾進階視為未選擇"
+    else
+        log_fail "勾選結果解析不正確 (rc=$rc): $out"
+    fi
+
+    # 選模組流程：whiptail 傳入預設狀態與進階列；空選擇會提示並重問；取消即退出；其他後端退回 tui_checklist
+    local tmp
+    tmp="$(mktemp -d)"
+    local flow='
+        eval "$1"; eval "$2"
+        declare -A MODULE_NAMES=([base]="基礎工具" [dev]="開發工具")
+        declare -A MODULE_DESCRIPTIONS=([base]="git" [dev]="nvim")
+        MODULE_LIST=(base dev); USE_MODULE_MANAGER=true; INSTALL_MODE=full
+        check_module_status() { [ "$1" = base ] && echo installed || echo not_installed; }
+        _tui_backend_supports_state_checklist() { [ "$STATE_BACKEND" = yes ]; }
+        next_result() { local n; n=$(cat "$T/n" 2>/dev/null || echo 0); echo $((n + 1)) > "$T/n"; sed -n "$((n + 1))p" "$T/results"; }
+        tui_checklist_with_state() { shift 2; printf "%s\n" "$@" > "$T/args_state"; local r; r="$(next_result)"; [ "$r" = CANCEL ] && return 1; printf "%s" "$r"; }
+        tui_checklist() { shift 2; printf "%s\n" "$@" > "$T/args_plain"; local r; r="$(next_result)"; [ "$r" = CANCEL ] && return 1; printf "%s" "$r"; }
+        tui_msgbox() { printf "x" >> "$T/msgbox"; }
+        rc=0; select_modules_tui || rc=$?
+        printf "[%s|%s|%s]" "$rc" "$selected_modules" "$ADVANCED_MODE"
+    '
+    local d1="$tmp/1" d2="$tmp/2" d3="$tmp/3" d4="$tmp/4"
+    mkdir -p "$d1" "$d2" "$d3" "$d4"
+    local o1 o2 o3 o4
+    printf 'dev +advanced\n' > "$d1/results"
+    o1="$(T="$d1" STATE_BACKEND=yes ADVANCED_MODE=false bash -c "$flow" _ "$funcs" "$tag_def")" || rc=$?
+    local state_args
+    state_args="$(tr '\n' ',' < "$d1/args_state")"
+    printf '+advanced\ndev\n' > "$d2/results"
+    o2="$(T="$d2" STATE_BACKEND=yes ADVANCED_MODE=true GUIDED_ADVANCED_DEFAULT=true bash -c "$flow" _ "$funcs" "$tag_def")" || rc=$?
+    local state_args2 msgbox2=""
+    state_args2="$(tr '\n' ',' < "$d2/args_state")"
+    if [ -f "$d2/msgbox" ]; then msgbox2="$(cat "$d2/msgbox")"; fi
+    printf 'CANCEL\n' > "$d3/results"
+    o3="$(T="$d3" STATE_BACKEND=yes ADVANCED_MODE=false bash -c "$flow" _ "$funcs" "$tag_def")" || rc=$?
+    printf 'base\n' > "$d4/results"
+    o4="$(T="$d4" STATE_BACKEND=no ADVANCED_MODE=false bash -c "$flow" _ "$funcs" "$tag_def")" || rc=$?
+    local plain_args
+    plain_args="$(tr '\n' ',' < "$d4/args_plain")"
+    rm -rf "$tmp"
+
+    if [ "$rc" -eq 0 ] && \
+       [ "$o1" = "[0|dev|true]" ] && \
+       [[ "$state_args" == "base,基礎工具 — git（已安裝）,OFF,dev,開發工具 — nvim,ON,+advanced,進階：安裝前逐模組挑選套件,OFF," ]] && \
+       [ "$o2" = "[0|dev|false]" ] && [ "$msgbox2" = "x" ] && [[ "$state_args2" == *",進階：安裝前逐模組挑選套件,ON," ]] && \
+       [ "$o3" = "[1||false]" ] && \
+       [ "$o4" = "[0|base|false]" ] && [[ "$plain_args" == "base,基礎工具 — git（已安裝）,dev,開發工具 — nvim,+advanced,進階：安裝前逐模組挑選套件," ]]; then
+        log_pass "選模組流程：預設狀態、進階列（含 --advanced 預設）、空選擇重問、取消退出、非 whiptail 後端退回"
+    else
+        log_fail "選模組流程不正確 (rc=$rc): o1=$o1 o2=$o2/$msgbox2 o3=$o3 o4=$o4"
+        printf '%s\n%s\n%s\n' "$state_args" "$state_args2" "$plain_args"
+    fi
+}
+
+# 導覽結束碼必須反映每個模組，partial 本身仍可成功離開。
+# 非互動與導覽流程共用的結束碼判斷：失敗、未執行、中止 → 1；成功、部分套件失敗、沒有結果 → 0
+test_install_results_exit_code() {
+    log_test "檢查安裝結果對應的結束碼..."
+    local funcs out rc=0
+    funcs="$(extract_install_functions install_results_exit_code)"
+    out="$(LC_ALL=C bash -c '
+        set -euo pipefail; eval "$1"
+        for statuses in "ok ok" "ok partial" "ok failed" "ok not_run" "failed" ""; do
+            INSTALL_ABORTED=false; INSTALL_RESULT_STATUS=($statuses)
+            printf "%s " "$(install_results_exit_code)"
+        done
+        INSTALL_ABORTED=true; INSTALL_RESULT_STATUS=(ok ok)
+        printf "%s " "$(install_results_exit_code)"
+        unset INSTALL_RESULT_STATUS INSTALL_ABORTED
+        printf "%s" "$(install_results_exit_code)"
+    ' _ "$funcs")" || rc=$?
+    local installer="$SCRIPT_DIR/install.sh"
+    if [ "$rc" -eq 0 ] && [ "$out" = "0 0 1 1 1 0 1 0" ] && \
+       search_literal 'exit "$(install_results_exit_code)"' "$installer" && \
+       search_literal 'ni_rc="$(install_results_exit_code)"' "$installer"; then
+        log_pass "失敗、未執行與中止回傳 1；非互動與非 tty 路徑都採用同一判斷"
+    else
+        log_fail "結束碼判斷不正確 (rc=$rc): $out"
+    fi
+}
+
+test_guided_exit_status() {
+    log_test "檢查導覽流程結束碼..."
+    local funcs out rc=0
+    funcs="$(extract_install_functions run_guided_tui_flow install_results_exit_code)"
+    out="$(LC_ALL=C bash -c '
+        set -euo pipefail; eval "$1"
+        select_modules_tui() { :; }
+        offer_homebrew_if_needed() { :; }
+        confirm_install_summary_tui() { :; }
+        log_info() { :; }
+        show_install_result_tui() { :; }
+        print_installation_report_plain() { :; }
+        run_install_with_tui() { INSTALL_RESULT_IDS=(base dev); INSTALL_RESULT_STATUS=($statuses); INSTALL_ABORTED=$aborted; }
+        for statuses in "ok ok" "ok partial" "ok failed" "ok not_run"; do
+            aborted=false; GUIDED_EXIT_CODE=9
+            run_guided_tui_flow
+            printf "%s " "$GUIDED_EXIT_CODE"
+        done
+        statuses="ok ok"; aborted=true
+        run_guided_tui_flow; printf "%s" "$GUIDED_EXIT_CODE"
+    ' _ "$funcs")" || rc=$?
+    if [ "$rc" -eq 0 ] && [ "$out" = "0 0 1 1 1" ]; then
+        log_pass "failed、not_run 與中止回傳失敗，partial 與成功回傳成功"
+    else
+        log_fail "導覽結束碼不正確 (rc=$rc): $out"
+    fi
+}
+
+test_guided_override_lifecycle() {
+    log_test "檢查進階覆寫重新選擇清除、重試保留..."
+    if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+        log_warn "略過覆寫生命週期測試：需要 bash 4+（關聯陣列）"
+        return
+    fi
+    local funcs rc=0
+    funcs="$(extract_install_functions run_guided_tui_flow install_selected_modules reset_install_results install_results_exit_code)"
+    LC_ALL=C bash -c '
+        set -euo pipefail; source "$2/scripts/core/module_manager.sh"; eval "$1"
+        names="MODULE_HAS_OVERRIDE MODULE_PKG_OVERRIDE_APT MODULE_PKG_OVERRIDE_BREW MODULE_PKG_OVERRIDE_APT_FALLBACK MODULE_PKG_OVERRIDE_PIP MODULE_PKG_OVERRIDE_CARGO MODULE_PKG_OVERRIDE_NPM MODULE_RUN_SCRIPT"
+        seed() { local name; for name in $names; do eval "$name[base]=saved"; done; }
+        empty() { local name; for name in $names; do eval "[ \"\${#$name[@]}\" -eq 0 ]" || exit 91; done; }
+        seed; reset_module_overrides; empty
+        # 清空後仍須保有關聯陣列型別。
+        for name in $names; do [[ "$(declare -p "$name")" == "declare -A"* ]]; done
+        seed; selections=0; installs=0; screens=0
+        select_modules_tui() { empty; selections=$((selections + 1)); selected_modules=base; seed; }
+        offer_homebrew_if_needed() { :; }; confirm_install_summary_tui() { :; }
+        log_info() { :; }; print_installation_report_plain() { :; }
+        install_retry_modules() { echo base; }
+        run_install_with_tui() {
+            local name
+            for name in $names; do eval "[ \"\${$name[base]}\" = saved ]" || exit 92; done
+            installs=$((installs + 1)); INSTALL_RESULT_IDS=(base); INSTALL_RESULT_STATUS=(partial)
+        }
+        show_install_result_tui() { screens=$((screens + 1)); case "$screens" in 1) return 3 ;; 2) return 2 ;; esac; }
+        run_guided_tui_flow
+        [ "$selections/$installs/$screens" = 2/3/3 ]
+        # CLI 完成後也清除覆寫；使用無對應模組的清單及 stub，避免任何安裝。
+        (
+            GUIDED_RESULT_SCREEN=false; selected_modules=unknown
+            USE_MODULE_MANAGER=true; MODULE_LIST=(base); DRY_RUN=false; ADVANCED_MODE=false
+            CYAN=""; NC=""
+            installer_tui_quiet() { return 1; }
+            prepare_package_index() { :; }; install_homebrew_if_requested() { :; }
+            show_installation_report() { :; }
+            seed
+            trap "empty; [ -z \"\$selected_modules\" ] || exit 93" EXIT
+            install_selected_modules >/dev/null
+        )
+    ' _ "$funcs" "$SCRIPT_DIR" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        log_pass "8 個覆寫陣列清空後保留型別；重試保留，重新選擇清除"
+    else
+        log_fail "覆寫生命週期不正確 (rc=$rc)"
+    fi
+}
+
+test_guided_cancel_all_results() {
+    log_test "檢查全部取消會清除舊結果並返回選擇..."
+    local funcs rc=0
+    funcs="$(extract_install_functions run_guided_tui_flow install_selected_modules reset_install_results install_results_exit_code)"
+    LC_ALL=C bash -c '
+        set -euo pipefail; eval "$1"
+        RED=""; NC=""; USE_MODULE_MANAGER=true; MODULE_LIST=(base); DRY_RUN=false
+        ADVANCED_MODE=true; NON_INTERACTIVE=false
+        log_info() { :; }; log_warning() { :; }
+        module_interactive_package_filter() { return 1; }
+        INSTALL_RESULT_IDS=(old); INSTALL_RESULT_STATUS=(failed); INSTALL_RESULT_DETAIL=(old); INSTALL_ABORTED=true
+        selected_modules=base; install_selected_modules
+        [ "${#INSTALL_RESULT_IDS[@]}" -eq 0 ]; [ "$INSTALL_ABORTED" = false ]
+        INSTALL_RESULT_IDS=(old); selected_modules=""; install_selected_modules >/dev/null
+        [ "${#INSTALL_RESULT_IDS[@]}" -eq 0 ]
+        selections=0
+        select_modules_tui() { selections=$((selections + 1)); [ "$selections" -eq 1 ] || return 1; selected_modules=base; ADVANCED_MODE=true; }
+        offer_homebrew_if_needed() { :; }; confirm_install_summary_tui() { :; }
+        run_install_with_tui() { install_selected_modules; }
+        show_install_result_tui() { echo "不應顯示結果" >&2; exit 99; }
+        run_guided_tui_flow
+        [ "$selections" -eq 2 ]
+    ' _ "$funcs" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        log_pass "未選擇與全部取消均清除舊結果；空結果返回模組選擇"
+    else
+        log_fail "全部取消流程不正確 (rc=$rc)"
+    fi
+}
+
+test_guided_advanced_stateless_backend() {
+    log_test "檢查 fzf／gum 保留 --advanced..."
+    local funcs rc=0
+    funcs="$(extract_install_functions select_modules_tui parse_checklist_selection parse_module_selection)"
+    LC_ALL=C bash -c '
+        set -euo pipefail; eval "$1"
+        INSTALL_MODE=full; GUIDED_ADVANCED_DEFAULT=true
+        ADVANCED_CHECKLIST_TAG=+advanced; ADVANCED_CHECKLIST_LABEL=進階
+        build_module_checklist_items() { checklist_items=(base 基礎工具); checklist_states=(ON); }
+        _tui_backend_supports_state_checklist() { return 1; }
+        tui_checklist() {
+            [[ "$2" == *"進階模式已由 --advanced 啟用"* ]] || exit 91
+            [ "$#" -eq 4 ] || exit 92
+            [ "$3" = base ] || exit 93
+            printf base
+        }
+        for TUI_BACKEND in fzf gum; do
+            ADVANCED_MODE=true
+            select_modules_tui
+            [ "$selected_modules" = base ]; [ "$ADVANCED_MODE" = true ]
+        done
+    ' _ "$funcs" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        log_pass "fzf／gum 隱藏進階列、顯示 --advanced 提示並保留進階模式"
+    else
+        log_fail "無狀態勾選後端的進階模式不正確 (rc=$rc)"
+    fi
+}
+
+# 行為測試：套件索引更新獨立成一行進度；只在會用到套件管理器時執行
+test_install_package_index_step() {
+    log_test "檢查套件索引更新進度行..."
+
+    if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+        log_warn "略過套件索引行為測試：需要 bash 4+（關聯陣列）"
+        return
+    fi
+
+    local funcs
+    funcs="$(extract_install_functions selected_modules_need_package_index prepare_package_index)"
+
+    local out rc=0
+    out="$(bash -c '
+        eval "$1"
+        declare -A MODULE_SCRIPTS=([withscript]="x.sh" [noscript]="")
+        declare -A MODULE_PACKAGES=([withscript]="" [noscript]="a b" [allin]="a" [partial]="a zz")
+        declare -A MODULE_APT_FALLBACK=() MODULE_BREW_PACKAGES=()
+        _module_pkg_is_installed() { [ "$2" = a ] || [ "$2" = b ]; }
+        USE_MODULE_MANAGER=true; FORCE_REINSTALL=false
+        need() { if selected_modules_need_package_index "$1"; then printf "Y"; else printf "N"; fi; }
+        need allin; need withscript; need partial; need "allin noscript"
+        FORCE_REINSTALL=true; need allin; FORCE_REINSTALL=false
+        USE_MODULE_MANAGER=false; need allin; USE_MODULE_MANAGER=true
+        printf "|\n"
+
+        # prepare_package_index：以假函式觀察行為
+        calls=""
+        progress_run() { local tag="$1" label="$2"; shift 2; calls+="run($label);"; "$@"; }
+        progress_finish_line() { calls+="finish($3:$4);"; }
+        run_logged_command() { "$@"; }
+        ensure_package_index_fresh() { calls+="ensure;"; export LINUX_SETTING_PKG_INDEX_CHECKED=1; if [ "$IDX_OK" = yes ]; then export LINUX_SETTING_PKG_INDEX_UPDATED=1; fi; return 0; }
+        _pkg_index_needs_update() { [ "$IDX_STALE" = yes ]; }
+        selected_modules="withscript"
+        t() { calls=""; unset LINUX_SETTING_PKG_INDEX_CHECKED LINUX_SETTING_PKG_INDEX_UPDATED; prepare_package_index "$1"; printf "%s\n" "$calls"; }
+        IDX_STALE=yes IDX_OK=yes t true
+        IDX_STALE=yes IDX_OK=no t true
+        IDX_STALE=no IDX_OK=yes t true
+        IDX_STALE=yes IDX_OK=yes t false
+        selected_modules="allin"; IDX_STALE=yes IDX_OK=yes t true
+        selected_modules="withscript"; calls=""; export LINUX_SETTING_PKG_INDEX_CHECKED=1; prepare_package_index true; printf "[%s]" "$calls"
+    ' _ "$funcs")" || rc=$?
+
+    local expected
+    expected="NYYNYY|"$'\n'"run(更新套件索引);ensure;finish(ok:);"$'\n'"run(更新套件索引);ensure;finish(partial:更新失敗，繼續安裝);"$'\n'"ensure;"$'\n'"ensure;"$'\n'$'\n'"[]"
+    if [ "$rc" -eq 0 ] && [ "$out" = "$expected" ]; then
+        log_pass "套件索引更新在第一個模組前以獨立進度行顯示，失敗為警示並繼續，且只在需要時執行"
+    else
+        log_fail "套件索引步驟不正確 (rc=$rc): $out"
+    fi
+}
+
+# 行為測試：Homebrew 只在所選模組宣告 brew_packages 時才詢問，且不在環境檢查階段詢問
+test_install_homebrew_offer_conditions() {
+    log_test "檢查 Homebrew 詢問時機..."
+
+    local installer="$SCRIPT_DIR/install.sh"
+    local env_block
+    env_block="$(awk '/^check_environment\(\) \{/{f=1} f{print} f && /^}$/{exit}' "$installer")"
+    if [ -z "$env_block" ] || [[ "$env_block" == *"tui_yesno"* ]] || [[ "$env_block" == *"read -r install_brew_answer"* ]]; then
+        log_fail "check_environment 仍在環境檢查階段詢問 Homebrew"
+        return
+    fi
+    if [[ "$env_block" != *'shellenv'* ]]; then
+        log_fail "check_environment 缺少既有 Homebrew 偵測與 PATH 注入"
+        return
+    fi
+
+    if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
+        log_warn "略過 Homebrew 條件行為測試：需要 bash 4+（關聯陣列）"
+        return
+    fi
+    if [ "${EUID:-$(id -u)}" -eq 0 ]; then
+        log_warn "略過 Homebrew 條件行為測試：root 下設計上不詢問 Homebrew"
+        log_pass "Homebrew 詢問已移出環境檢查階段"
+        return
+    fi
+
+    local funcs
+    funcs="$(extract_install_functions selected_modules_need_homebrew homebrew_offer_needed)"
+    local out rc=0
+    out="$(PATH="/usr/bin:/bin" bash -c '
+        eval "$1"
+        declare -A MODULE_BREW_PACKAGES=([base]="lsd bat" [python]="" [monitoring]="btop")
+        check() { if homebrew_offer_needed "$1"; then printf "Y"; else printf "N"; fi; }
+        NON_INTERACTIVE=false INSTALL_MODE=full DRY_RUN=false HOMEBREW_DECISION=""
+        check "python"; check "base python"; check "monitoring"
+        NON_INTERACTIVE=true; check "base"; NON_INTERACTIVE=false
+        INSTALL_MODE=minimal; check "base"; INSTALL_MODE=full
+        DRY_RUN=true; check "base"; DRY_RUN=false
+        HOMEBREW_DECISION=no; check "base"
+    ' _ "$funcs")" || rc=$?
+
+    if [ "$rc" -eq 0 ] && [ "$out" = "NYYNNNN" ]; then
+        log_pass "Homebrew 只在所選模組需要且尚未安裝時詢問"
+    else
+        log_fail "Homebrew 詢問條件不正確 (rc=$rc): $out（預期 NYYNNNN）"
+    fi
+}
+
+# 行為測試：錯誤畫面顯示實際日誌路徑、依套件管理器給建議、沒有假的重試選項
+test_install_error_summary() {
+    log_test "檢查安裝失敗畫面內容..."
+
+    local funcs
+    funcs="$(extract_install_functions _ansi package_index_update_hint print_error_summary)"
+    local tmp_log
+    tmp_log="$(mktemp)"
+
+    local apt_out dnf_out rc=0
+    apt_out="$(LOG_FILE="$tmp_log" PKG_MANAGER=apt bash -c 'eval "$1"; print_error_summary 2 123 "apt-get install foo"' _ "$funcs")" || rc=$?
+    dnf_out="$(LOG_FILE="$tmp_log" PKG_MANAGER=dnf bash -c 'eval "$1"; print_error_summary 1 45 ""' _ "$funcs")" || rc=$?
+    rm -f "$tmp_log"
+
+    if [ "$rc" -eq 0 ] && \
+       [[ "$apt_out" == *"日誌：$tmp_log"* ]] && \
+       [[ "$apt_out" == *"tail -n 50 $tmp_log"* ]] && \
+       [[ "$apt_out" == *"sudo apt update"* ]] && \
+       [[ "$apt_out" == *"第 123 行（結束碼 2）"* ]] && \
+       [[ "$apt_out" != *'$LOG_FILE'* ]] && \
+       [[ "$dnf_out" == *"sudo dnf makecache"* ]] && \
+       [[ "$dnf_out" != *"apt update"* ]] && \
+       ! search_literal '[r]${NC} 重試' "$SCRIPT_DIR/install.sh" && \
+       ! search_literal '請重新執行安裝腳本' "$SCRIPT_DIR/install.sh"; then
+        log_pass "錯誤畫面顯示實際日誌路徑與對應套件管理器的建議"
+    else
+        log_fail "錯誤畫面內容不正確 (rc=$rc): $apt_out / $dnf_out"
+    fi
+}
+
+# 行為測試：--help 不印橫幅；橫幅保留版本字串但不再列出 ./install.sh 快速開始
+test_install_help_without_banner() {
+    log_test "檢查 --help 不顯示橫幅..."
+
+    local out rc=0
+    out="$(bash "$SCRIPT_DIR/install.sh" --help 2>&1)" || rc=$?
+    local banner
+    banner="$(awk '/^show_welcome\(\) \{/{f=1} f{print} f && /^}$/{exit}' "$SCRIPT_DIR/install.sh")"
+
+    if [ "$rc" -eq 0 ] && \
+       [[ "$out" == *"Linux Setting Scripts - 自動安裝腳本 v2.2.9"* ]] && \
+       [[ "$out" != *"自動化開發環境配置工具"* ]] && \
+       [[ "$out" != *"╔"* ]] && \
+       [[ "$banner" == *"Linux Setting Scripts  v2.2.9"* ]] && \
+       [[ "$banner" != *"快速開始"* ]]; then
+        log_pass "--help 只顯示說明，橫幅已精簡"
+    else
+        log_fail "--help 仍顯示橫幅或橫幅未精簡 (rc=$rc)"
+    fi
+}
+
 # 測試網路依賴（可選）
 test_network_dependencies() {
     log_test "測試網路依賴..."
@@ -1030,6 +1857,12 @@ run_all_tests() {
     test_common_library
     echo
     test_argument_parsing
+    echo
+    test_install_config_requires_path
+    echo
+    test_install_sudo_guard_no_command_substitution
+    echo
+    test_install_sudo_guard_behavior
     echo
     test_script_version_bumped
     echo
@@ -1114,6 +1947,32 @@ run_all_tests() {
     test_common_sudo_count_numeric
     echo
     test_install_non_interactive_mode
+    echo
+    test_install_report_reflects_results
+    echo
+    test_install_progress_text_helpers
+    echo
+    test_install_progress_run_non_tty
+    echo
+    test_install_summary_and_checklist_labels
+    echo
+    test_install_result_screen_behavior
+    echo
+    test_install_results_exit_code
+    echo
+    test_guided_exit_status
+    test_guided_override_lifecycle
+    test_guided_cancel_all_results
+    test_guided_advanced_stateless_backend
+    test_install_module_checklist_behavior
+    echo
+    test_install_package_index_step
+    echo
+    test_install_homebrew_offer_conditions
+    echo
+    test_install_error_summary
+    echo
+    test_install_help_without_banner
     echo
     test_network_dependencies
     echo
