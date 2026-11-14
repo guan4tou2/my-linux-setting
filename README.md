@@ -102,6 +102,8 @@ PARALLEL_JOBS=8 ./install.sh
 ./tests/run_all_tests.sh            # 測試入口（依賴/功能測試僅 Linux CI 預設執行）
 ./tests/test_dependencies.sh        # 依賴檢查
 ./tests/test_functionality.sh       # 功能測試
+./tests/run_shellcheck.sh           # 受版控腳本：錯誤阻擋 CI，警告僅摘要
+./tests/verify_install.sh python base terminal dev monitoring  # 安裝成果斷言
 ./scripts/config/preview_config.sh  # 預覽配置
 ```
 
@@ -114,7 +116,9 @@ FORCE_LINUX_TESTS=true ./tests/run_all_tests.sh   # 本機強制執行 Linux-onl
 ```bash
 ./docker-test.sh build && ./docker-test.sh test    # 快速測試
 docker-compose -f docker-compose.test.yml up ubuntu-test    # 多系統測試
-./tests/test_full_simulation.sh                             # 完整模擬測試
+./tests/test_full_simulation.sh                             # 新容器內 HTTP 遠端安裝與成果驗證
+./docker-test.sh run "CI=true bash tests/test_tui_smoke.sh"    # whiptail 成功／失敗操作流程
+# tests/simulate_remote_install.sh 在 Linux 容器內服務專案並從空目錄安裝
 ```
 
 ---

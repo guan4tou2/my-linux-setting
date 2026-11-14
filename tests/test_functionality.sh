@@ -298,7 +298,14 @@ test_logging_and_backup() {
     if declare -f backup_file >/dev/null 2>&1; then
         BACKUP_DIR="$test_dir/backup"
         if backup_file "$test_dir/test_config" >/dev/null 2>&1; then
-            if [ -f "$BACKUP_DIR"/*.backup.* ]; then
+            local backup_found=false backup_path
+            for backup_path in "$BACKUP_DIR"/*.backup.*; do
+                if [ -f "$backup_path" ]; then
+                    backup_found=true
+                    break
+                fi
+            done
+            if [ "$backup_found" = true ]; then
                 log_pass "備份功能正常"
             else
                 log_fail "備份功能異常"

@@ -35,6 +35,11 @@ jobs:
                           -not -path "./.git/*" -not -path "./node_modules/*")
           exit $fail
 
+      - name: ShellCheck errors gate
+        env:
+          CI: true
+        run: bash tests/run_shellcheck.sh
+
       - name: Run unit-style script tests (test_scripts.sh)
         env:
           CI: true
@@ -69,7 +74,7 @@ jobs:
     name: Install simulation (docker)
     runs-on: ubuntu-latest
     needs: lint
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -79,7 +84,8 @@ jobs:
       - name: Run basic script tests inside docker
         run: ./docker-test.sh test
 
-      - name: Run full installation simulation
-        run: |
-          export HOST_FOR_CONTAINER=$(hostname -I | awk '{print $1}')
-          bash tests/test_full_simulation.sh
+      - name: Run TUI smoke tests in a fresh container
+        run: CONTAINER_NAME=ci-tui-smoke ./docker-test.sh run "CI=true bash tests/test_tui_smoke.sh"
+
+      - name: Run full installation simulation in a fresh container
+        run: CONTAINER_NAME=ci-remote-install bash tests/test_full_simulation.sh

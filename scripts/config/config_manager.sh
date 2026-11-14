@@ -418,7 +418,7 @@ persist_config_value() {
     # 更新或添加配置值
     local updated=false
     while IFS= read -r line; do
-        if [[ "$line" =~ ^[[:space:]]*$key[[:space:]]*= ]]; then
+        if [[ "$line" =~ ^[[:space:]]*${key}[[:space:]]*= ]]; then
             echo "$key = $value"
             updated=true
         else
@@ -659,7 +659,7 @@ case "${1:-help}" in
         fi
         ;;
     "template")
-        local template_file="${2:-$USER_CONFIG_FILE}"
+        template_file="${2:-$USER_CONFIG_FILE}"
         create_config_template "$template_file" user
         ;;
     "export")
