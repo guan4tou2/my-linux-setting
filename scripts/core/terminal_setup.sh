@@ -10,11 +10,16 @@ source "$SCRIPT_DIR/common.sh" || {
 # 如果未定義 URL，使用默認值
 P10K_CONFIG_URL="${P10K_CONFIG_URL:-https://raw.githubusercontent.com/guan4tou2/my-linux-setting/main/.p10k.zsh}"
 
+# thefuck 固定在 requirements.txt 釘選的 commit；兩處必須保持一致（測試會比對）
+THEFUCK_PINNED_COMMIT="c7e7e1d884d3bb241ea6448f72a989434c2a35ec"
+THEFUCK_SPEC="git+https://github.com/nvbn/thefuck.git@${THEFUCK_PINNED_COMMIT}"
+
 log_info "########## 設定終端機環境 ##########"
 
 # 將登入 shell 改為 zsh（與是否「首次」安裝 Oh My Zsh 無關；舊版只在新裝 omz 時 chsh，已存在 ~/.oh-my-zsh 時會永遠跳過）
 ensure_login_shell_zsh() {
-    local target_user="${USER:-$(id -un 2>/dev/null || whoami)}"
+    local target_user
+    target_user="$(id -un)"
     local target_shell
     target_shell="$(command -v zsh 2>/dev/null)" || true
     if [ -z "$target_shell" ] || [ ! -x "$target_shell" ]; then
@@ -69,7 +74,9 @@ log_success "Zsh 版本檢查通過: $ZSH_VERSION"
 
 # 安裝 oh-my-zsh
 show_progress "安裝 Oh-my-zsh"
+OMZ_PREEXISTING=true
 if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    OMZ_PREEXISTING=false
     log_info "安裝 oh-my-zsh"
     if [ -f "$HOME/.zshrc" ]; then
         backup_file "$HOME/.zshrc"
@@ -87,6 +94,9 @@ if [ ! -d "$HOME/.oh-my-zsh" ]; then
         sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
     fi
     log_success "Oh-my-zsh 安裝完成"
+    if [ -d "$HOME/.oh-my-zsh" ]; then
+        manifest_record path "$HOME/.oh-my-zsh"
+    fi
 else
     log_info "Oh-my-zsh 已安裝"
 fi
@@ -116,7 +126,14 @@ _clone_or_pull() {
     elif [ -d "$dest" ]; then
         log_warning "$dest 已存在但不是 git repo，跳過（可手動刪除後重裝）"
     else
-        git clone --depth=1 "$url" "$dest" 2>/dev/null || log_warning "安裝 $(basename "$dest") 失敗"
+        if git clone --depth=1 "$url" "$dest" 2>/dev/null; then
+            # ~/.oh-my-zsh 是本次新建時，卸載會整個移除，不必另外記錄
+            if [ "$OMZ_PREEXISTING" = "true" ]; then
+                manifest_record path "$dest"
+            fi
+        else
+            log_warning "安裝 $(basename "$dest") 失敗"
+        fi
     fi
 }
 _clone_or_pull https://github.com/zsh-users/zsh-autosuggestions                  "$_zsh_plugins_dir/zsh-autosuggestions"
@@ -179,6 +196,9 @@ else
             git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
             "$P10K_THEME_DIR" 2>&1; then
         log_success "Powerlevel10k 主題安裝成功"
+        if [ "$OMZ_PREEXISTING" = "true" ]; then
+            manifest_record path "$P10K_THEME_DIR"
+        fi
     else
         log_warning "Powerlevel10k 主題安裝失敗，請檢查網路後手動執行："
         log_warning "    git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \"$P10K_THEME_DIR\""
@@ -192,6 +212,7 @@ if [ ! -f ~/.p10k.zsh ]; then
             && [ -s ~/.p10k.zsh.tmp ]; then
         mv ~/.p10k.zsh.tmp ~/.p10k.zsh
         log_success ".p10k.zsh 已下載"
+        manifest_record path "$HOME/.p10k.zsh"
     else
         rm -f ~/.p10k.zsh.tmp
         log_warning ".p10k.zsh 下載失敗，將沿用 powerlevel10k 預設並啟用首次設定精靈"
@@ -244,26 +265,33 @@ if ! command -v thefuck > /dev/null 2>&1; then
     if command -v uv > /dev/null 2>&1; then
         if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
             uv pip install --python "$HOME/.local/venv/system-tools/bin/python" \
-                git+https://github.com/nvbn/thefuck >/dev/null 2>&1 || \
-                pip install git+https://github.com/nvbn/thefuck >/dev/null 2>&1
+                "$THEFUCK_SPEC" >/dev/null 2>&1 || \
+                pip install "$THEFUCK_SPEC" >/dev/null 2>&1
         else
             uv pip install --python "$HOME/.local/venv/system-tools/bin/python" \
-                git+https://github.com/nvbn/thefuck || \
-                pip install git+https://github.com/nvbn/thefuck
+                "$THEFUCK_SPEC" || \
+                pip install "$THEFUCK_SPEC"
         fi
     else
         printf "\033[33muv 未找到，使用 pip 安裝 thefuck\033[0m\n"
         if [ "${TUI_MODE:-quiet}" = "quiet" ]; then
-            pip install git+https://github.com/nvbn/thefuck >/dev/null 2>&1
+            pip install "$THEFUCK_SPEC" >/dev/null 2>&1
         else
-            pip install git+https://github.com/nvbn/thefuck
+            pip install "$THEFUCK_SPEC"
         fi
     fi
 
     # 創建軟連結到 ~/.local/bin（無論安裝方式為何）
     if [ -f "$HOME/.local/venv/system-tools/bin/thefuck" ]; then
         mkdir -p "$HOME/.local/bin"
+        thefuck_link_preexisting=false
+        if [ -e "$HOME/.local/bin/thefuck" ] || [ -L "$HOME/.local/bin/thefuck" ]; then
+            thefuck_link_preexisting=true
+        fi
         ln -sf "$HOME/.local/venv/system-tools/bin/thefuck" "$HOME/.local/bin/thefuck"
+        if [ "$thefuck_link_preexisting" != "true" ]; then
+            manifest_record path "$HOME/.local/bin/thefuck"
+        fi
     fi
 fi
 

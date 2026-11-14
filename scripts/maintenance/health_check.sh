@@ -4,7 +4,8 @@
 
 # 載入共用函數庫
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/common.sh" || {
+# common.sh 位於 scripts/core/；舊寫法從本目錄載入，腳本一啟動就會失敗
+source "$SCRIPT_DIR/../core/common.sh" || {
     echo "錯誤: 無法載入共用函數庫"
     exit 1
 }

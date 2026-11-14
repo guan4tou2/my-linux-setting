@@ -742,6 +742,33 @@ test_requirements_setuptools_pin() {
     fi
 }
 
+# 維護腳本必須能載入 scripts/core/common.sh。
+# 過去它們從自己所在的 scripts/maintenance/ 載入，一啟動就失敗，
+# 連帶 `install.sh --update` 與健康檢查都不能用，卻因呼叫端的 `|| true` 而沒人發現。
+test_maintenance_scripts_load_common() {
+    log_test "檢查維護腳本能載入共用函數庫..."
+
+    local script out rc ok=true
+    for script in scripts/maintenance/health_check.sh scripts/maintenance/update_tools.sh; do
+        if ! search_literal 'source "$SCRIPT_DIR/../core/common.sh"' "$SCRIPT_DIR/$script"; then
+            log_fail "$script 沒有從 scripts/core 載入 common.sh"
+            ok=false
+        fi
+    done
+
+    # health_check.sh 不帶參數只印用法，不會改動系統，可以實際執行
+    rc=0
+    out="$(bash "$SCRIPT_DIR/scripts/maintenance/health_check.sh" 2>&1)" || rc=$?
+    if [ "$rc" -ne 0 ] || [[ "$out" == *"無法載入共用函數庫"* ]] || [[ "$out" == *"No such file"* ]]; then
+        log_fail "health_check.sh 無法啟動 (rc=$rc): ${out:0:200}"
+        ok=false
+    fi
+
+    if [ "$ok" = true ]; then
+        log_pass "維護腳本可載入 common.sh，health_check.sh 可啟動"
+    fi
+}
+
 # 檢查 update_tools.sh 使用 repo root 的 requirements.txt 路徑
 test_update_tools_requirements_path() {
     log_test "檢查 update_tools.sh 的 requirements 路徑..."
@@ -773,7 +800,7 @@ test_update_tools_venv_pip_fallback() {
 
     if search_literal '"$VENV_DIR/bin/python" -m ensurepip --upgrade' "$update_tools" && \
        search_literal '"$VENV_DIR/bin/python" -m pip install --upgrade pip' "$update_tools" && \
-       search_literal '"$VENV_DIR/bin/python" -m pip install --upgrade thefuck ranger-fm s-tui' "$update_tools"; then
+       search_literal '"$VENV_DIR/bin/python" -m pip install --upgrade ranger-fm s-tui "git+https://github.com/nvbn/thefuck.git@$THEFUCK_PINNED_COMMIT"' "$update_tools"; then
         log_pass "update_tools.sh 已使用 python -m pip 作為 venv 後備"
     else
         log_fail "update_tools.sh 仍依賴固定的 venv pip 路徑"
@@ -1031,24 +1058,6 @@ test_common_idempotent_source_guard() {
         log_pass "common.sh 已有重複載入保護"
     else
         log_fail "common.sh 缺少重複載入保護，可能觸發 readonly 變數錯誤"
-    fi
-}
-
-# 檢查 common.sh 的 sudo 次數統計不會產生 0\n0 造成整數比較錯誤
-test_common_sudo_count_numeric() {
-    log_test "檢查 common.sh 的 sudo 計數數值穩定性..."
-
-    local common_sh="$SCRIPT_DIR/scripts/core/common.sh"
-    if [ ! -f "$common_sh" ]; then
-        log_fail "找不到 common.sh"
-        return
-    fi
-
-    if search_literal 'sudo_count=$(grep -cE "^\s*(sudo|su)\s" "$script_file" 2>/dev/null || true)' "$common_sh" && \
-       search_literal 'sudo_count="${sudo_count:-0}"' "$common_sh"; then
-        log_pass "common.sh 已避免 sudo_count 非數值輸出"
-    else
-        log_fail "common.sh 的 sudo_count 仍可能造成 integer expression expected"
     fi
 }
 
@@ -1600,7 +1609,7 @@ test_guided_override_lifecycle() {
             CYAN=""; NC=""
             installer_tui_quiet() { return 1; }
             prepare_package_index() { :; }; install_homebrew_if_requested() { :; }
-            show_installation_report() { :; }
+            show_installation_report() { :; }; record_created_configs() { :; }
             seed
             trap "empty; [ -z \"\$selected_modules\" ] || exit 93" EXIT
             install_selected_modules >/dev/null
@@ -1912,6 +1921,8 @@ run_all_tests() {
     echo
     test_requirements_setuptools_pin
     echo
+    test_maintenance_scripts_load_common
+    echo
     test_update_tools_requirements_path
     echo
     test_update_tools_venv_pip_fallback
@@ -1943,8 +1954,6 @@ run_all_tests() {
     test_docker_compose_no_obsolete_version_field
     echo
     test_common_idempotent_source_guard
-    echo
-    test_common_sudo_count_numeric
     echo
     test_install_non_interactive_mode
     echo

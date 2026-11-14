@@ -24,7 +24,7 @@ jobs:
     name: Lint & syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: bash -n on every shell script
         run: |
@@ -51,6 +51,11 @@ jobs:
           NON_INTERACTIVE: true
         run: bash tests/test_scripts.sh
 
+      - name: Run uninstall / rollback / hardening tests
+        env:
+          CI: true
+        run: bash tests/test_uninstall.sh
+
   # ---------------------------------------------------------------------------
   # 2. Functional tests (Linux runner, vanilla ubuntu)
   #    跑 test_dependencies + test_functionality；測試本身對 CI 環境友善
@@ -73,7 +78,7 @@ jobs:
       NON_INTERACTIVE: true
       FORCE_LINUX_TESTS: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Run unified test suite
         run: bash tests/run_all_tests.sh
@@ -88,7 +93,7 @@ jobs:
     name: Install (${{ matrix.distro }}, ${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     needs: lint
-    timeout-minutes: 40
+    timeout-minutes: 60
     continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
@@ -122,7 +127,7 @@ jobs:
     env:
       BASE_IMAGE: ${{ matrix.base_image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Build docker image
         run: ./docker-test.sh build

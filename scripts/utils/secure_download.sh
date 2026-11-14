@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# 安全下載與執行腳本工具
-# 用於替換直接執行遠程腳本的危險做法
+# 下載並執行官方安裝程式的輔助工具
+# 提供 https、網域白名單、大小上限與（有提供時）雜湊比對；不替上游內容背書
 
 # 載入共用函數庫
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,7 +15,7 @@ source "$COMMON_SH" || {
     exit 1
 }
 
-# 安全配置
+# 下載限制與網域白名單
 readonly SECURE_DOWNLOAD_TIMEOUT=30
 readonly SECURE_MAX_SCRIPT_SIZE=1048576  # 1MB
 readonly SECURE_ALLOWED_DOMAINS=(
@@ -25,59 +25,47 @@ readonly SECURE_ALLOWED_DOMAINS=(
     "superfile.netlify.app"
 )
 
-# 驗證域名是否在允許列表中
+# 驗證網址：只接受 https，且主機必須「完全等於」允許清單中的網域。
+# 以純 bash 解析授權段（scheme 之後、第一個 / ? # 之前），含 userinfo（@）、
+# 反斜線或空白的網址一律拒絕，避免 https://allowed.example@evil.example/ 之類的繞過；
+# 埠號只接受預設的 443。
 verify_domain() {
-    local url="$1"
-    local domain
-    domain=$(echo "$url" | sed -e 's/[^/]*\/\/\([^@]*@\)\?\([^:/]*\).*/\2/')
-    
+    local url="${1:-}"
+
+    case "$url" in
+        https://*) ;;
+        *)
+            log_error "只允許 https 網址: $url"
+            return 1
+            ;;
+    esac
+
+    local rest="${url#https://}"
+    local authority="${rest%%[/?#]*}"
+    case "$authority" in
+        ""|*[@\\[:space:]]*)
+            log_error "網址格式不被接受: $url"
+            return 1
+            ;;
+    esac
+    authority="${authority%:443}"
+    case "$authority" in
+        *:*)
+            log_error "不接受自訂埠號: $url"
+            return 1
+            ;;
+    esac
+
+    local domain allowed_domain
+    domain=$(printf '%s' "$authority" | tr '[:upper:]' '[:lower:]')
     for allowed_domain in "${SECURE_ALLOWED_DOMAINS[@]}"; do
         if [[ "$domain" == "$allowed_domain" ]]; then
             return 0
         fi
     done
-    
+
     log_error "不被信任的域名: $domain"
     return 1
-}
-
-# 檢查腳本內容安全性
-check_script_safety() {
-    local script_file="$1"
-    local suspicious_patterns=(
-        "rm -rf /"
-        "dd if="
-        "mkfs\."
-        "> /etc/passwd"
-        "> /etc/shadow"
-        "wget.*|.*sh"
-        "curl.*|.*sh"
-        "nc -l"
-        "backdoor"
-        "reverse shell"
-    )
-    
-    for pattern in "${suspicious_patterns[@]}"; do
-        # 允許在特定受信任情境下出現 curl ... | sh（例如 uv / oh-my-zsh 官方安裝腳本）
-        if [ "$pattern" = "curl.*|.*sh" ] && [ "${SECURE_DOWNLOAD_ALLOW_PIPE:-0}" = "1" ]; then
-            continue
-        fi
-        if grep -qi "$pattern" "$script_file"; then
-            log_warning "發現可疑內容: $pattern"
-            return 1
-        fi
-    done
-    
-    # 檢查是否包含過多的權限提升操作
-    local sudo_count
-    sudo_count=$(grep -c "sudo\|su " "$script_file" 2>/dev/null || echo 0)
-    # 對受信任腳本（例如 uv / oh-my-zsh 官方安裝腳本）放寬 sudo 次數限制
-    if [ "${SECURE_DOWNLOAD_ALLOW_PIPE:-0}" != "1" ] && [ "$sudo_count" -gt 10 ]; then
-        log_warning "腳本包含過多 sudo 操作 ($sudo_count 次)"
-        return 1
-    fi
-    
-    return 0
 }
 
 # 計算文件 checksum
@@ -93,7 +81,10 @@ calculate_checksum() {
     fi
 }
 
-# 安全下載並執行腳本
+# 下載並執行官方安裝程式。
+# 網域白名單只檢查最初的網址；上游安裝程式會轉址，所以允許轉址但限制只能轉到 https。
+# 保護僅限於：只允許 https、網域白名單、大小上限、私有暫存檔，以及（有提供時）雜湊比對。
+# checksum 為 skip 時不驗證內容，實際信任的是 TLS 與上游網站本身。
 # 用法: secure_download_and_execute <url> <checksum|skip> <description> [額外參數...]
 #       額外參數會原樣傳給下載回來的腳本，例如 "--unattended"。
 secure_download_and_execute() {
@@ -101,27 +92,42 @@ secure_download_and_execute() {
     local expected_checksum="$2"
     local description="$3"
     shift 3 || true
-    local script_args=("$@")
-    local temp_script
 
-    log_info "安全下載: $description"
-    
-    # 驗證域名
+    if [ -n "$expected_checksum" ] && [ "$expected_checksum" != "skip" ]; then
+        log_info "下載並執行: $description（TLS、網域白名單與 SHA-256 驗證）"
+    else
+        log_info "下載並執行官方安裝程式: $description（僅以 TLS 與網域白名單保護，未驗證雜湊）"
+    fi
+
+    # 驗證網址（https 與網域白名單）
     if ! verify_domain "$url"; then
         return 1
     fi
-    
-    # 創建臨時文件
-    temp_script=$(mktemp)
-    trap "rm -f '$temp_script'" EXIT
-    
+
+    # 私有暫存檔（mktemp 預設權限 0600）；不設 trap，以免覆蓋呼叫端的 EXIT trap，
+    # 改在這裡明確清理。
+    local temp_script rc=0
+    if ! temp_script=$(mktemp); then
+        log_error "無法建立暫存檔"
+        return 1
+    fi
+    _secure_download_run "$temp_script" "$url" "$expected_checksum" "$description" "$@" || rc=$?
+    rm -f "$temp_script"
+    return "$rc"
+}
+
+_secure_download_run() {
+    local temp_script="$1" url="$2" expected_checksum="$3" description="$4"
+    shift 4
+    local script_args=("$@")
+
     # 下載腳本
     log_info "正在下載腳本..."
-    if ! timeout "$SECURE_DOWNLOAD_TIMEOUT" curl -fsSL --max-filesize "$SECURE_MAX_SCRIPT_SIZE" "$url" -o "$temp_script"; then
+    if ! timeout "$SECURE_DOWNLOAD_TIMEOUT" curl -fsSL --proto '=https' --proto-redir '=https' --max-filesize "$SECURE_MAX_SCRIPT_SIZE" "$url" -o "$temp_script"; then
         log_error "下載失敗: $url"
         return 1
     fi
-    
+
     # 檢查文件大小
     local file_size
     file_size=$(stat -f%z "$temp_script" 2>/dev/null || stat -c%s "$temp_script" 2>/dev/null)
@@ -129,7 +135,7 @@ secure_download_and_execute() {
         log_error "腳本文件過大: ${file_size} bytes"
         return 1
     fi
-    
+
     # 驗證 checksum（如果提供）
     if [ -n "$expected_checksum" ] && [ "$expected_checksum" != "skip" ]; then
         local actual_checksum
@@ -142,33 +148,14 @@ secure_download_and_execute() {
         fi
         log_success "Checksum 驗證通過"
     fi
-    
-    # 檢查腳本安全性
-    log_info "檢查腳本安全性..."
-    if ! check_script_safety "$temp_script"; then
-        log_error "腳本安全檢查失敗"
-        
-        # 詢問用戶是否繼續（僅在互動模式下）
-        if [ "${NON_INTERACTIVE:-false}" = "true" ] || [ ! -t 0 ]; then
-            log_error "非互動模式下不執行可疑腳本"
-            return 1
-        fi
-        echo ""
-        log_warning "腳本可能包含危險操作，是否仍要執行？"
-        read -p "輸入 'yes' 繼續執行，其他任意鍵取消: " -r
-        if [ "$REPLY" != "yes" ]; then
-            log_info "用戶取消執行"
-            return 1
-        fi
-    fi
-    
+
     # 顯示腳本預覽
     if [ "${VERBOSE:-false}" = "true" ]; then
         log_info "腳本內容預覽（前20行）:"
         head -20 "$temp_script" | sed 's/^/  | /'
         echo ""
     fi
-    
+
     # 執行腳本（把額外參數傳給下載的腳本）
     log_info "執行腳本: $description${script_args[*]:+ (args: ${script_args[*]})}"
     # 使用 ${arr[@]+"${arr[@]}"} 慣用法避免 set -u 下空陣列報錯
@@ -193,16 +180,16 @@ secure_download_and_execute() {
     fi
 }
 
-# 預定義的安全安裝函數
+# 預定義的安裝函數（皆來自上游官方安裝程式，未驗證雜湊）
 install_docker() {
-    SECURE_DOWNLOAD_ALLOW_PIPE=1 SECURE_DOWNLOAD_RUN_AS_ROOT=1 secure_download_and_execute \
+    SECURE_DOWNLOAD_RUN_AS_ROOT=1 secure_download_and_execute \
         "https://get.docker.com" \
         "skip" \
         "Docker 安裝腳本"
 }
 
 install_uv() {
-    SECURE_DOWNLOAD_ALLOW_PIPE=1 secure_download_and_execute \
+    secure_download_and_execute \
         "https://astral.sh/uv/install.sh" \
         "skip" \
         "UV Python 包管理器"
@@ -215,36 +202,72 @@ install_superfile() {
         "Superfile 文件管理器"
 }
 
+# lazydocker：從 GitHub releases 下載對應架構的壓縮檔，
+# 以同一版本的 checksums.txt 驗證 SHA-256 後才安裝到 /usr/local/bin。
 install_lazydocker() {
-    # lazydocker 使用更安全的 GitHub releases 安裝方式
     log_info "安裝 lazydocker"
+
+    local arch
+    arch=$(linux_release_arch) || arch=""
+    case "$arch" in
+        x86_64) arch=x86_64 ;;
+        aarch64) arch=arm64 ;;
+        armv7l) arch=armv7 ;;
+        armv6l) arch=armv6 ;;
+        *)
+            log_error "lazydocker 不支援架構: $arch"
+            return 1
+            ;;
+    esac
+
     local version
-    version=$(curl -s --connect-timeout 10 --max-time 30 \
-        https://api.github.com/repos/jesseduffield/lazydocker/releases/latest \
-        | grep tag_name | cut -d '"' -f 4)
-    
-    if [ -n "$version" ]; then
-        local url="https://github.com/jesseduffield/lazydocker/releases/download/$version/lazydocker_${version#v}_Linux_x86_64.tar.gz"
-        local temp_file
-        temp_file=$(mktemp)
-        
-        if curl -fsSL "$url" -o "$temp_file"; then
-            tar -xzf "$temp_file" -C /tmp/
-            sudo mv /tmp/lazydocker /usr/local/bin/
-            chmod +x /usr/local/bin/lazydocker
-            log_success "lazydocker 安裝成功"
-        else
-            log_error "lazydocker 下載失敗"
-        fi
-        
-        rm -f "$temp_file"
-    else
+    if ! version=$(github_latest_release_tag jesseduffield/lazydocker); then
         log_error "無法獲取 lazydocker 版本信息"
+        return 1
     fi
+
+    local asset="lazydocker_${version#v}_Linux_${arch}.tar.gz"
+    local base="https://github.com/jesseduffield/lazydocker/releases/download/$version"
+    local tmp_dir rc=0
+    if ! tmp_dir=$(mktemp -d); then
+        log_error "無法建立暫存目錄"
+        return 1
+    fi
+
+    if ! curl -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 120 -o "$tmp_dir/$asset" "$base/$asset"; then
+        log_error "lazydocker 下載失敗"
+        rc=1
+    elif ! curl -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 60 -o "$tmp_dir/checksums.txt" "$base/checksums.txt"; then
+        log_error "lazydocker checksums.txt 下載失敗，不安裝未驗證的執行檔"
+        rc=1
+    elif ! verify_sha256_in_list "$tmp_dir/$asset" "$tmp_dir/checksums.txt" "$asset"; then
+        log_error "lazydocker 雜湊驗證失敗，不安裝"
+        rc=1
+    elif ! tar -xzf "$tmp_dir/$asset" -C "$tmp_dir" lazydocker; then
+        log_error "lazydocker 解壓縮失敗"
+        rc=1
+    else
+        local preexisting=false
+        if [ -e /usr/local/bin/lazydocker ] || [ -L /usr/local/bin/lazydocker ]; then
+            preexisting=true
+        fi
+        if sudo install -m 0755 "$tmp_dir/lazydocker" /usr/local/bin/lazydocker; then
+            log_success "lazydocker 安裝成功（雜湊驗證通過）"
+            if [ "$preexisting" != "true" ]; then
+                manifest_record path /usr/local/bin/lazydocker
+            fi
+        else
+            log_error "lazydocker 安裝失敗"
+            rc=1
+        fi
+    fi
+
+    rm -rf "$tmp_dir" || log_warning "無法清除 lazydocker 暫存目錄"
+    return "$rc"
 }
 
 install_oh_my_zsh() {
-    SECURE_DOWNLOAD_ALLOW_PIPE=1 secure_download_and_execute \
+    secure_download_and_execute \
         "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh" \
         "skip" \
         "Oh My Zsh shell 框架" \
@@ -280,11 +303,11 @@ main() {
             echo "用法: $0 <command>"
             echo ""
             echo "命令:"
-            echo "  docker      安全安裝 Docker"
-            echo "  uv          安全安裝 UV"
-            echo "  superfile   安全安裝 Superfile"
-            echo "  lazydocker  安全安裝 Lazydocker"
-            echo "  oh-my-zsh   安全安裝 Oh My Zsh"
+            echo "  docker      下載並安裝 Docker"
+            echo "  uv          下載並安裝 UV"
+            echo "  superfile   下載並安裝 Superfile"
+            echo "  lazydocker  下載並安裝 Lazydocker"
+            echo "  oh-my-zsh   下載並安裝 Oh My Zsh"
             echo "  test-download <url>  測試下載指定 URL"
             ;;
     esac

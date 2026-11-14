@@ -32,6 +32,8 @@ declare -A MODULE_CARGO_PACKAGES
 declare -A MODULE_NPM_PACKAGES
 declare -A MODULE_SCRIPTS
 declare -A MODULE_POST_INSTALL
+# 設定檔中不合法的套件名稱（以 - 開頭，可能被當成套件管理器的選項）：略過並在安裝時記為失敗
+declare -A MODULE_INVALID_PKGS
 
 # 模組列表（保持順序）
 MODULE_LIST=()
@@ -72,7 +74,6 @@ reset_module_overrides() {
 find_modules_conf() {
     local search_paths=(
         "$MODULES_CONF"
-        "$PWD/config/modules.conf"
         "$SCRIPT_DIR/../config/modules.conf"
         "$SCRIPT_DIR/../../config/modules.conf"
         "$HOME/.config/linux-setting/modules.conf"
@@ -91,6 +92,22 @@ find_modules_conf() {
 # ==============================================================================
 # 配置文件解析
 # ==============================================================================
+
+# 過濾套件清單：以 - 開頭的名稱不採用（避免被當成 apt 等的選項），記入 MODULE_INVALID_PKGS
+# 用法: _sanitize_pkg_list <模組> <原始清單>；結果放在 SANITIZED_PKGS
+# （不用命令替換，才能保留 MODULE_INVALID_PKGS 的寫入）
+_sanitize_pkg_list() {
+    local module="$1" raw="$2" token kept=""
+    for token in $raw; do
+        if [[ "$token" == -* ]]; then
+            MODULE_INVALID_PKGS["$module"]="${MODULE_INVALID_PKGS[$module]:-} $token"
+            log_warning "模組 $module 的套件名稱不合法（不可以 - 開頭），已略過: $token"
+        else
+            kept="${kept:+$kept }$token"
+        fi
+    done
+    SANITIZED_PKGS="$kept"
+}
 
 parse_modules_conf() {
     local conf_file
@@ -134,25 +151,36 @@ parse_modules_conf() {
                     MODULE_DESCRIPTIONS["$current_module"]="$value"
                     ;;
                 packages)
-                    MODULE_PACKAGES["$current_module"]="$value"
+                    _sanitize_pkg_list "$current_module" "$value"
+                    MODULE_PACKAGES["$current_module"]="$SANITIZED_PKGS"
                     ;;
                 brew_packages)
-                    MODULE_BREW_PACKAGES["$current_module"]="$value"
+                    _sanitize_pkg_list "$current_module" "$value"
+                    MODULE_BREW_PACKAGES["$current_module"]="$SANITIZED_PKGS"
                     ;;
                 apt_fallback)
-                    MODULE_APT_FALLBACK["$current_module"]="$value"
+                    _sanitize_pkg_list "$current_module" "$value"
+                    MODULE_APT_FALLBACK["$current_module"]="$SANITIZED_PKGS"
                     ;;
                 pip_packages)
-                    MODULE_PIP_PACKAGES["$current_module"]="$value"
+                    _sanitize_pkg_list "$current_module" "$value"
+                    MODULE_PIP_PACKAGES["$current_module"]="$SANITIZED_PKGS"
                     ;;
                 cargo_packages)
-                    MODULE_CARGO_PACKAGES["$current_module"]="$value"
+                    _sanitize_pkg_list "$current_module" "$value"
+                    MODULE_CARGO_PACKAGES["$current_module"]="$SANITIZED_PKGS"
                     ;;
                 npm_packages)
-                    MODULE_NPM_PACKAGES["$current_module"]="$value"
+                    _sanitize_pkg_list "$current_module" "$value"
+                    MODULE_NPM_PACKAGES["$current_module"]="$SANITIZED_PKGS"
                     ;;
                 script)
-                    MODULE_SCRIPTS["$current_module"]="$value"
+                    # 只接受單純的檔名（腳本固定在 scripts/core/ 底下），不可含路徑分隔
+                    if [[ "$value" =~ ^[A-Za-z0-9_.-]+$ && "$value" != "." && "$value" != ".." ]]; then
+                        MODULE_SCRIPTS["$current_module"]="$value"
+                    else
+                        log_warning "模組 $current_module 的 script= 不合法（只接受單純檔名），已略過: $value"
+                    fi
                     ;;
                 post_install)
                     MODULE_POST_INSTALL["$current_module"]="$value"
@@ -850,7 +878,10 @@ install_module() {
     log_info "安裝模組: $name"
 
     # 累計每個模組的整體失敗（非單純 log warning），最後回報給 caller
-    local module_failures=()
+    local module_failures=() invalid_pkg
+    for invalid_pkg in ${MODULE_INVALID_PKGS[$module_id]:-}; do
+        module_failures+=("invalid:$invalid_pkg")
+    done
 
     if [ "$module_status" = "installed" ]; then
         log_info "模組 $name 套件已全部安裝，跳過套件安裝步驟（仍會執行設定腳本）"

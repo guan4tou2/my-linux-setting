@@ -39,7 +39,6 @@ set -euo pipefail
 : "${ENABLE_PARALLEL_INSTALL:=false}"
 : "${PREFER_HOMEBREW:=false}"
 : "${PREFER_UV:=true}"
-: "${SECURE_DOWNLOAD_ALLOW_PIPE:=0}"
 : "${SKIP_NETWORK_TESTS:=false}"
 
 # ==============================================================================
@@ -69,6 +68,10 @@ readonly NC='\033[0m'
 readonly MAX_SCRIPT_SIZE="${MAX_SCRIPT_SIZE:-1048576}"
 readonly DOWNLOAD_TIMEOUT="${DOWNLOAD_TIMEOUT:-30}"
 readonly DOWNLOAD_RETRIES="${DOWNLOAD_RETRIES:-3}"
+
+# 安裝清單：記錄本工具實際新增的套件、路徑與被修改的設定檔，供 uninstall.sh 使用。
+# 以 export 傳給子行程，讓各模組腳本寫入同一份清單。
+export INSTALL_MANIFEST_FILE="${INSTALL_MANIFEST_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/linux-setting/installed.manifest}"
 
 # Logging constants
 readonly LOG_DIR="${LOG_DIR:-$HOME/.local/log/linux-setting}"
@@ -184,6 +187,7 @@ init_logging() {
 
     # Create log directory
     mkdir -p "$LOG_DIR" 2>/dev/null || true
+    chmod 0700 "$LOG_DIR" 2>/dev/null || true
 
     # Set log file path
     LOG_FILE="${LOG_FILE:-$LOG_DIR/$log_prefix}"
@@ -534,6 +538,14 @@ install_apt_packages_parallel() {
 
     log_info "批次安裝 ${#packages[@]} 個 APT 套件: ${packages[*]}"
 
+    # 只有「安裝前尚未存在」的套件才記入安裝清單（呼叫端通常已先過濾，這裡再確認一次）
+    local new_packages=() pkg
+    for pkg in "${packages[@]}"; do
+        if ! check_package_installed "$pkg" 2>/dev/null; then
+            new_packages+=("$pkg")
+        fi
+    done
+
     local apt_opts=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
     local mode="normal"
     [ "${TUI_MODE:-normal}" = "quiet" ] && mode="quiet" || true
@@ -541,6 +553,9 @@ install_apt_packages_parallel() {
     # 步驟 1：嘗試一次性批次安裝（quiet 模式輸出寫入日誌）
     if _pkg_root_exec "$mode" apt-get install "${apt_opts[@]}" "${packages[@]}"; then
         log_success "批次安裝完成: ${#packages[@]}/${#packages[@]} 成功"
+        for pkg in ${new_packages[@]+"${new_packages[@]}"}; do
+            manifest_record package "$pkg"
+        done
         return 0
     fi
 
@@ -552,6 +567,9 @@ install_apt_packages_parallel() {
         if _pkg_root_exec quiet apt-get install "${apt_opts[@]}" "$package"; then
             success_count=$((success_count + 1))
             log_success "✓ $package"
+            if [[ " ${new_packages[*]:-} " == *" $package "* ]]; then
+                manifest_record package "$package"
+            fi
         else
             failed_packages+=("$package")
             log_error "✗ $package" || true
@@ -785,6 +803,12 @@ install_package() {
         return 0
     fi
 
+    # 強制重裝時，安裝前就存在的套件不算「本工具新安裝」，不記入安裝清單
+    local pre_installed=false
+    if [ "$force" != "false" ] && check_package_installed "$package" 2>/dev/null; then
+        pre_installed=true
+    fi
+
     log_info "安裝 $package (使用 ${PKG_MANAGER:-apt})"
 
     # 根據包管理器選擇安裝命令（一律經 _pkg_root_exec：已是 root 時不依賴 sudo，
@@ -819,6 +843,9 @@ install_package() {
 
     if _pkg_root_exec "$mode" "${install_cmd[@]}" "$package"; then
         log_success "$package 安裝成功"
+        if [ "$pre_installed" != "true" ]; then
+            manifest_record package "$package"
+        fi
         return 0
     else
         log_error "$package 安裝失敗" || true
@@ -1339,6 +1366,33 @@ install_brew_packages_batch() {
     return 0
 }
 
+# 追加一筆安裝記錄到安裝清單（只追加、不重複）。
+# 用法: manifest_record <package|path|file|backup> <值>
+# 任何失敗都安靜略過，絕不影響安裝；--dry-run 不寫入。
+manifest_record() {
+    local kind="${1:-}" value="${2:-}"
+    [ "${DRY_RUN:-false}" != "true" ] || return 0
+    case "$kind" in package|path|file|backup) ;; *) return 0 ;; esac
+    [ -n "$value" ] || return 0
+    case "$value" in *$'\n'*|*$'\r'*) return 0 ;; esac
+    case "$kind" in
+        path|file|backup) case "$value" in /*) ;; *) return 0 ;; esac ;;
+    esac
+    local manifest="${INSTALL_MANIFEST_FILE:-}"
+    [ -n "$manifest" ] || return 0
+    (
+        umask 077
+        mkdir -p "$(dirname "$manifest")" || exit 0
+        chmod 0700 "$(dirname "$manifest")" || true
+        [ -f "$manifest" ] || : > "$manifest" || exit 0
+        chmod 0600 "$manifest" || true
+        if ! grep -qxF -- "$kind:$value" "$manifest"; then
+            printf '%s:%s\n' "$kind" "$value" >> "$manifest"
+        fi
+    ) 2>/dev/null || true
+    return 0
+}
+
 # ==============================================================================
 # 文件操作函數
 # ==============================================================================
@@ -1357,6 +1411,7 @@ backup_file() {
             backup_dir="$HOME/.config/linux-setting-backup/$ts"
         fi
         mkdir -p "$backup_dir"
+        chmod 0700 "$backup_dir" 2>/dev/null || true
         cp -r "$file" "$backup_dir/$backup_name"
         log_info "已備份 $file 到 $backup_dir/$backup_name"
         return 0
@@ -1551,91 +1606,31 @@ cleanup_cache() {
 # Security Functions
 # ==============================================================================
 
-# Verify GPG signature of a file
-verify_gpg_signature() {
-    local file="$1"
-    local sig_file="${2:-$file.sig}"
-    local keyring="${3:-$HOME/.cache/linux-setting/trusted.gpg}"
+# 驗證檔案的 SHA-256 是否與 checksums 清單（每行「sha256␠␠檔名」）中指定資產一致。
+# 用法: verify_sha256_in_list <檔案> <checksums 檔> <資產檔名>
+# 找不到該檔名、清單格式不合或無法計算雜湊都視為失敗（回傳 1）。
+verify_sha256_in_list() {
+    local file="${1:-}" list="${2:-}" asset="${3:-}"
+    [ -f "$file" ] && [ -f "$list" ] && [ -n "$asset" ] || return 1
 
-    [ "${ENABLE_GPG_VERIFY:-true}" != "true" ] && return 0 || true
-    [ ! -f "$file" ] && { log_error "File not found: $file"; return 1; } || true
+    local expected
+    expected=$(awk -v name="$asset" '
+        { n = $2; sub(/^\*/, "", n) }
+        n == name && $1 ~ /^[0-9A-Fa-f]{64}$/ { print tolower($1); exit }
+    ' "$list" 2>/dev/null) || return 1
+    [ -n "$expected" ] || return 1
 
-    # Import key if keyring doesn't exist
-    if [ ! -f "$keyring" ] && [ -n "${GPG_KEY:-}" ]; then
-        log_info "Importing GPG key..."
-        echo "$GPG_KEY" | gpg --dearmor > "$keyring" 2>/dev/null || {
-            log_warning "Failed to import GPG key, skipping verification"
-            return 0
-        }
-    fi
-
-    # Verify signature if available
-    if [ -f "$sig_file" ]; then
-        if gpg --verify --keyring "$keyring" "$sig_file" "$file" >/dev/null 2>&1; then
-            log_success "GPG signature verified"
-            return 0
-        else
-            log_error "GPG signature verification failed"
-            return 1
-        fi
-    fi
-
-    # No signature file, warn but continue
-    log_warning "No signature file found for $file, skipping GPG verification"
-    return 0
-}
-
-# Validate script content safely
-validate_script_content() {
-    local script_file="$1"
-    local max_size="${2:-$MAX_SCRIPT_SIZE}"
-
-    # Check file size
-    [ ! -f "$script_file" ] && return 1 || true
-
-    local file_size
-    file_size=$(stat -c%s "$script_file" 2>/dev/null || stat -f%z "$script_file" 2>/dev/null || echo 0)
-
-    if [ "$file_size" -gt "$max_size" ]; then
-        log_error "Script too large: $file_size bytes (max: $max_size)"
+    local actual=""
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual=$(sha256sum "$file" 2>/dev/null) || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        actual=$(shasum -a 256 "$file" 2>/dev/null) || return 1
+    else
         return 1
     fi
-
-    # Check for dangerous patterns
-    local dangerous_patterns=(
-        "rm[[:space:]]+-rf[[:space:]]+/"
-        "dd[[:space:]]+if="
-        "mkfs\."
-        "echo[[:space:]]*>[[:space:]]*/etc/passwd"
-        "echo[[:space:]]*>[[:space:]]*/etc/shadow"
-        ":(){ :|:& };:"
-        ">[[:space:]]*\$(command)"
-    )
-
-    for pattern in "${dangerous_patterns[@]}"; do
-        if grep -qE "$pattern" "$script_file" 2>/dev/null; then
-            log_error "Dangerous pattern detected: $pattern"
-            return 1
-        fi
-    done
-
-    # Check for excessive sudo operations
-    local sudo_count
-    sudo_count=$(grep -cE "^\s*(sudo|su)\s" "$script_file" 2>/dev/null || true)
-    sudo_count="${sudo_count:-0}"
-
-    if [ "$sudo_count" -gt 20 ]; then
-        log_warning "Script contains excessive sudo operations: $sudo_count"
-        # Ask in interactive mode
-        if [ -t 0 ] && [ -z "${SKIP_SECURITY_PROMPT:-}" ]; then
-            printf "${YELLOW}This script makes $sudo_count sudo operations. Continue? (y/N): ${NC}"
-            read -r -n 1 -p "" answer
-            echo
-            [[ ! "$answer" =~ ^[Yy]$ ]] && return 1
-        fi
-    fi
-
-    return 0
+    actual="${actual%% *}"
+    actual=$(printf '%s' "$actual" | tr '[:upper:]' '[:lower:]')
+    [ -n "$actual" ] && [ "$actual" = "$expected" ]
 }
 
 # ==============================================================================
@@ -1647,7 +1642,6 @@ safe_download() {
     local output="$2"
     local max_retries="${3:-$DOWNLOAD_RETRIES}"
     local use_cache="${4:-true}"
-    local verify_gpg="${5:-true}"
 
     log_debug "Downloading: $url"
 
@@ -1659,42 +1653,34 @@ safe_download() {
         fi
     fi
 
-    # Download with retries
+    # Download with retries（只做大小上限與重試；內容是否可信取決於來源與 TLS）
     local retry=0
     local temp_output
     temp_output="${output}.tmp.$$"
 
+    # https 網址：跟隨轉址時也只允許 https；本機測試用的 http://127.0.0.1 不加限制
+    local proto_opts=()
+    case "$url" in
+        https://*) proto_opts=(--proto '=https' --proto-redir '=https') ;;
+    esac
+
     while [ $retry -lt $max_retries ]; do
-        if curl -fsSL \
+        if curl -fsSL ${proto_opts[@]+"${proto_opts[@]}"} \
             --max-time "$DOWNLOAD_TIMEOUT" \
             --connect-timeout "${CONNECTION_TIMEOUT:-10}" \
             --max-filesize "$MAX_SCRIPT_SIZE" \
             "$url" -o "$temp_output" 2>/dev/null; then
 
-            # Validate downloaded content
-            if ! validate_script_content "$temp_output"; then
+            # --max-filesize 在伺服器未提供長度時不一定生效，下載後再檢查一次
+            local file_size
+            file_size=$(stat -c%s "$temp_output" 2>/dev/null || stat -f%z "$temp_output" 2>/dev/null || echo 0)
+            if [ "$file_size" -gt "$MAX_SCRIPT_SIZE" ]; then
                 rm -f "$temp_output"
-                retry=$((retry + 1))
-                log_warning "Validation failed, retry $retry/$max_retries"
-                sleep 2
-                continue
+                log_error "Download too large: $file_size bytes (max: $MAX_SCRIPT_SIZE)"
+                return 1
             fi
 
-            # Move to final location
             mv "$temp_output" "$output"
-
-            # Verify GPG signature if enabled and available
-            if [ "$verify_gpg" = "true" ]; then
-                local sig_file
-                sig_file="${url}.sig"
-                if curl -fsSL "$sig_file" -o "${output}.sig" 2>/dev/null; then
-                    verify_gpg_signature "$output" "${output}.sig" || {
-                        rm -f "$output" "${output}.sig"
-                        return 1
-                    }
-                    rm -f "${output}.sig"
-                fi
-            fi
 
             # Save to cache
             if [ "$use_cache" = "true" ] && [ "$CACHE_ENABLED" = "true" ]; then
@@ -1720,7 +1706,13 @@ safe_download() {
 # ==============================================================================
 
 # 優化 APT 配置以提高性能
+# 會用 sudo 在 /etc/apt/apt.conf.d/ 新增三個設定檔；--dry-run 時絕不執行。
+# 這次新建立的檔案會記入安裝清單，卸載時移除。
 optimize_apt_performance() {
+    if [ "${DRY_RUN:-false}" = "true" ]; then
+        log_info "--dry-run：略過 APT 性能配置"
+        return 0
+    fi
     log_info "優化 APT 性能配置..."
     
     # 創建 APT 配置目錄
@@ -1737,6 +1729,7 @@ APT::Acquire::Max-Default-Sec "10";
 Acquire::Retries "3";
 EOF
         log_success "APT 並行下載配置已啟用"
+        manifest_record path "$apt_config"
     fi
     
     # 配置快取優化
@@ -1751,6 +1744,7 @@ APT::Cache-Grow "2097152";
 APT::Cache-Limit "134217728";
 EOF
         log_success "APT 快取優化配置已啟用"
+        manifest_record path "$cache_config"
     fi
     
     # 配置網絡超時
@@ -1763,6 +1757,7 @@ Acquire::https::Timeout "10";
 Acquire::ftp::Timeout "10";
 EOF
         log_success "APT 網絡超時配置已啟用"
+        manifest_record path "$timeout_config"
     fi
     
     log_success "APT 性能優化配置完成"
@@ -2884,6 +2879,7 @@ func_list="$func_list install_with_fallback install_with_homebrew_fallback insta
 func_list="$func_list install_brew_package install_brew_packages_batch check_brew_package_installed ensure_brew_shell_aliases ensure_homebrew_installed update_system"
 func_list="$func_list ensure_package_index_fresh _pkg_index_needs_update _file_mtime _log_file_writable _pkg_run _root_exec _root_exec_apt _pkg_root_exec"
 func_list="$func_list github_latest_release_tag linux_release_arch"
+func_list="$func_list verify_sha256_in_list manifest_record"
 func_list="$func_list backup_file safe_append_to_file"
 func_list="$func_list init_cache_system is_cache_valid get_from_cache save_to_cache cleanup_cache"
 func_list="$func_list safe_download download_files_parallel get_best_mirror"

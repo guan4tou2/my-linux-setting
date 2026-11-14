@@ -133,6 +133,8 @@ if [ ! -d ~/.config/nvim ] || [ -z "$(ls -A ~/.config/nvim 2>/dev/null)" ]; then
     printf "\033[36m安裝 LazyVim 配置\033[0m\n"
     git clone https://github.com/LazyVim/starter ~/.config/nvim
     rm -rf ~/.config/nvim/.git
+    # 這個目錄原本不存在（或是空的），是本次新建的
+    manifest_record path "$HOME/.config/nvim"
 elif [ -f ~/.config/nvim/lazy-lock.json ] || [ -f ~/.config/nvim/lua/config/lazy.lua ]; then
     log_info "~/.config/nvim 已是 LazyVim 或相容配置，跳過"
 else
@@ -216,14 +218,46 @@ if ! command -v lazygit > /dev/null 2>&1; then
         esac
         if [ -n "$lazygit_arch" ]; then
             lazygit_tmp_dir=""
+            lazygit_installed=false
             if LAZYGIT_VERSION=$(github_latest_release_tag jesseduffield/lazygit) && \
-               lazygit_tmp_dir="$(mktemp -d)" && \
-               curl -fsSL --connect-timeout 15 --max-time 120 \
-                   -o "$lazygit_tmp_dir/lazygit.tar.gz" \
-                   "https://github.com/jesseduffield/lazygit/releases/download/$LAZYGIT_VERSION/lazygit_${LAZYGIT_VERSION#v}_Linux_${lazygit_arch}.tar.gz" && \
-               tar -xzf "$lazygit_tmp_dir/lazygit.tar.gz" -C "$lazygit_tmp_dir" lazygit && \
-               sudo install -m 0755 "$lazygit_tmp_dir/lazygit" /usr/local/bin/lazygit; then
-                log_success "Lazygit 安裝成功 (GitHub)"
+               lazygit_tmp_dir="$(mktemp -d)"; then
+                lazygit_base="https://github.com/jesseduffield/lazygit/releases/download/$LAZYGIT_VERSION"
+                lazygit_asset=""
+                if ! curl -fsSL --connect-timeout 15 --max-time 60 \
+                        -o "$lazygit_tmp_dir/checksums.txt" "$lazygit_base/checksums.txt"; then
+                    log_warning "Lazygit checksums.txt 下載失敗，不安裝未驗證的執行檔"
+                else
+                    # 發行版檔名的 OS 部分大小寫隨版本而異（Linux_ / linux_），以 checksums.txt 實際列出的為準
+                    for lazygit_os in linux Linux; do
+                        lazygit_candidate="lazygit_${LAZYGIT_VERSION#v}_${lazygit_os}_${lazygit_arch}.tar.gz"
+                        if awk '{print $2}' "$lazygit_tmp_dir/checksums.txt" | grep -qxF "$lazygit_candidate"; then
+                            lazygit_asset="$lazygit_candidate"
+                            break
+                        fi
+                    done
+                    if [ -z "$lazygit_asset" ]; then
+                        log_warning "Lazygit checksums.txt 中找不到對應架構的檔案"
+                    elif ! curl -fsSL --connect-timeout 15 --max-time 120 \
+                            -o "$lazygit_tmp_dir/lazygit.tar.gz" "$lazygit_base/$lazygit_asset"; then
+                        log_warning "Lazygit 下載失敗"
+                    elif ! verify_sha256_in_list "$lazygit_tmp_dir/lazygit.tar.gz" "$lazygit_tmp_dir/checksums.txt" "$lazygit_asset"; then
+                        log_warning "Lazygit 雜湊驗證失敗，不安裝"
+                    elif tar -xzf "$lazygit_tmp_dir/lazygit.tar.gz" -C "$lazygit_tmp_dir" lazygit; then
+                        lazygit_preexisting=false
+                        if [ -e /usr/local/bin/lazygit ] || [ -L /usr/local/bin/lazygit ]; then
+                            lazygit_preexisting=true
+                        fi
+                        if sudo install -m 0755 "$lazygit_tmp_dir/lazygit" /usr/local/bin/lazygit; then
+                            lazygit_installed=true
+                            if [ "$lazygit_preexisting" != "true" ]; then
+                                manifest_record path /usr/local/bin/lazygit
+                            fi
+                        fi
+                    fi
+                fi
+            fi
+            if [ "$lazygit_installed" = "true" ]; then
+                log_success "Lazygit 安裝成功 (GitHub，雜湊驗證通過)"
             else
                 log_warning "Lazygit GitHub 備援安裝失敗，將繼續安裝流程"
             fi

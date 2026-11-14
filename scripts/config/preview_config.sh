@@ -54,7 +54,7 @@ show_config_preview() {
   - uv (現代 Python 包管理器)
 
 🐍 Python 工具：
-  - thefuck==3.32 (命令糾錯工具)
+  - thefuck (固定 commit c7e7e1d，命令糾錯工具)
   - ranger-fm==1.9.3 (終端文件管理器)
   - s-tui==1.1.4 (系統壓力測試工具)
 
@@ -261,7 +261,7 @@ show_full_preview() {
     echo "💾 備份與日誌："
     echo "  - 配置備份: ~/.config/linux-setting-backup/$(date +%Y%m%d_%H%M%S)/"
     echo "  - 安裝日誌: ~/.local/log/linux-setting/install_$(date +%Y%m%d_%H%M%S).log"
-    echo "  - 自動回滾: 安裝失敗時可選擇回滾"
+    echo "  - 還原設定檔: ./install.sh --rollback；移除: ./uninstall.sh"
     echo ""
     
     # 安裝後配置
