@@ -136,7 +136,7 @@ if [ ! -d ~/.config/nvim ] || [ -z "$(ls -A ~/.config/nvim 2>/dev/null)" ]; then
     # 這個目錄原本不存在（或是空的），是本次新建的
     manifest_record path "$HOME/.config/nvim"
 elif [ -f ~/.config/nvim/lazy-lock.json ] || [ -f ~/.config/nvim/lua/config/lazy.lua ]; then
-    log_info "~/.config/nvim 已是 LazyVim 或相容配置，跳過"
+    log_info "$HOME/.config/nvim 已是 LazyVim 或相容配置，跳過"
 else
     local_backup="$HOME/.config/nvim.bak.$(date +%Y%m%d_%H%M%S)"
     printf "\033[33m發現既有 nvim 配置，先備份到 %s 再安裝 LazyVim\033[0m\n" "$local_backup"

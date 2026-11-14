@@ -3,7 +3,9 @@
 # 進階系統健康檢查與監控系統
 
 # 載入共用函數庫
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR=${BASH_SOURCE[0]%/*}
+[ "$SCRIPT_DIR" != "${BASH_SOURCE[0]}" ] || SCRIPT_DIR=.
+SCRIPT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
 # common.sh 位於 scripts/core/；舊寫法從本目錄載入，腳本一啟動就會失敗
 source "$SCRIPT_DIR/../core/common.sh" || {
     echo "錯誤: 無法載入共用函數庫"
@@ -19,15 +21,27 @@ readonly ALERT_THRESHOLD_CPU=80
 readonly ALERT_THRESHOLD_MEMORY=85
 readonly ALERT_THRESHOLD_DISK=90
 
-# 確保目錄存在
-mkdir -p "$(dirname "$HEALTH_CHECK_LOG")"
-mkdir -p "$HEALTH_CHECK_CACHE"
+# 日誌不可用時仍完成檢查；不要求極簡系統一定能寫入 HOME。
+health_log_available=false
+if command -v mkdir >/dev/null 2>&1; then
+    if mkdir -p "${HEALTH_CHECK_LOG%/*}" "$HEALTH_CHECK_CACHE" 2>/dev/null; then
+        health_log_available=true
+    else
+        log_warning "無法建立健康檢查目錄，僅顯示檢查結果"
+    fi
+else
+    log_warning "無法檢查日誌目錄（缺少指令 mkdir）"
+fi
+if ! command -v date >/dev/null 2>&1; then
+    log_warning "無法檢查時間（缺少指令 date）"
+fi
 
 # 檢查結果計數
 total_checks=0
 passed_checks=0
 failed_checks=0
 warning_checks=0
+unavailable_checks=0
 
 # 健康檢查狀態
 HEALTH_STATUS_OK=0
@@ -42,113 +56,164 @@ log_health_result() {
     local details="${4:-}"
     
     local timestamp
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    timestamp=$(health_timestamp '+%Y-%m-%d %H:%M:%S')
     
     local status_text
     case "$status" in
-        $HEALTH_STATUS_OK) status_text="OK" ;;
-        $HEALTH_STATUS_WARNING) status_text="WARNING" ;;
-        $HEALTH_STATUS_CRITICAL) status_text="CRITICAL" ;;
+        "$HEALTH_STATUS_OK") status_text="OK" ;;
+        "$HEALTH_STATUS_WARNING") status_text="WARNING" ;;
+        "$HEALTH_STATUS_CRITICAL") status_text="CRITICAL" ;;
         *) status_text="UNKNOWN" ;;
     esac
     
-    {
-        echo "[$timestamp] [$status_text] [$category] $message"
-        if [ -n "$details" ]; then
-            echo "    詳情: $details"
-        fi
-    } >> "$HEALTH_CHECK_LOG"
+    if [ "$health_log_available" = true ]; then
+        {
+            echo "[$timestamp] [$status_text] [$category] $message"
+            if [ -n "$details" ]; then
+                echo "    詳情: $details"
+            fi
+        } >> "$HEALTH_CHECK_LOG" || health_log_available=false
+    else
+        printf '[%s] [%s] %s\n' "$status_text" "$category" "$message"
+    fi
     
     # 更新檢查計數
     total_checks=$((total_checks + 1))
     case "$status" in
-        $HEALTH_STATUS_OK) passed_checks=$((passed_checks + 1)) ;;
-        $HEALTH_STATUS_WARNING) warning_checks=$((warning_checks + 1)) ;;
-        $HEALTH_STATUS_CRITICAL) failed_checks=$((failed_checks + 1)) ;;
+        "$HEALTH_STATUS_OK") passed_checks=$((passed_checks + 1)) ;;
+        "$HEALTH_STATUS_WARNING") warning_checks=$((warning_checks + 1)) ;;
+        "$HEALTH_STATUS_CRITICAL") failed_checks=$((failed_checks + 1)) ;;
     esac
+}
+
+# 無法取得觀測資料不代表系統故障；計入警告但不影響 quick/full 結束碼。
+health_unavailable() {
+    local category="$1" message="無法檢查（$2）"
+    log_health_result "$HEALTH_STATUS_WARNING" "$category" "$message"
+    unavailable_checks=$((unavailable_checks + 1))
+    log_warning "$message"
+}
+
+health_require_commands() {
+    local category="$1" cmd missing=""
+    shift
+    for cmd in "$@"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing="${missing:+${missing}、}$cmd"
+        fi
+    done
+    if [ -n "$missing" ]; then
+        health_unavailable "$category" "缺少指令 $missing"
+        return 1
+    fi
+}
+
+health_timestamp() {
+    if command -v date >/dev/null 2>&1; then
+        date "${1:-+%Y-%m-%d %H:%M:%S}" 2>/dev/null || printf '%s' unknown
+    else
+        printf '%s' unknown
+    fi
+}
+
+health_is_integer() {
+    [[ "$1" =~ ^[0-9]+$ ]]
 }
 
 # 系統資源健康檢查
 check_system_resources() {
     log_info "檢查系統資源使用情況..."
-    
-    # CPU 使用率檢查
-    local cpu_usage
-    cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | sed 's/%us,//' 2>/dev/null || echo "0")
-    cpu_usage=${cpu_usage%.*}  # 去除小數點
-    
-    if [ "$cpu_usage" -gt "$ALERT_THRESHOLD_CPU" ]; then
-        log_health_result $HEALTH_STATUS_CRITICAL "SYSTEM" "CPU 使用率過高: ${cpu_usage}%" "建議檢查高CPU使用的進程"
-    elif [ "$cpu_usage" -gt 60 ]; then
-        log_health_result $HEALTH_STATUS_WARNING "SYSTEM" "CPU 使用率偏高: ${cpu_usage}%" "正常範圍內，但需要監控"
-    else
-        log_health_result $HEALTH_STATUS_OK "SYSTEM" "CPU 使用率正常: ${cpu_usage}%"
-    fi
-    
-    # 記憶體使用檢查
-    local mem_info
-    mem_info=$(free | awk 'NR==2{printf "%.0f %.0f", $3*100/$2, ($2-$3-$6)*100/$2}')
-    local mem_used_percent=${mem_info%% *}
-    local mem_available_percent=${mem_info##* }
-    
-    if [ "$mem_used_percent" -gt "$ALERT_THRESHOLD_MEMORY" ]; then
-        log_health_result $HEALTH_STATUS_CRITICAL "MEMORY" "記憶體使用率過高: ${mem_used_percent}%" "可用記憶體: ${mem_available_percent}%"
-    elif [ "$mem_used_percent" -gt 70 ]; then
-        log_health_result $HEALTH_STATUS_WARNING "MEMORY" "記憶體使用率偏高: ${mem_used_percent}%" "可用記憶體: ${mem_available_percent}%"
-    else
-        log_health_result $HEALTH_STATUS_OK "MEMORY" "記憶體使用率正常: ${mem_used_percent}%" "可用記憶體: ${mem_available_percent}%"
-    fi
-    
-    # 磁盤空間檢查
-    while read -r filesystem size used available use_percent mount; do
-        use_num=${use_percent%?}  # 移除 % 符號
-        
-        if [ "$use_num" -gt "$ALERT_THRESHOLD_DISK" ]; then
-            log_health_result $HEALTH_STATUS_CRITICAL "DISK" "磁盤空間不足: $mount ($use_percent)" "可用空間: $available"
-        elif [ "$use_num" -gt 80 ]; then
-            log_health_result $HEALTH_STATUS_WARNING "DISK" "磁盤空間告警: $mount ($use_percent)" "可用空間: $available"
+    local cpu_usage mem_info mem_used_percent mem_available_percent
+    if health_require_commands SYSTEM top grep awk sed; then
+        cpu_usage=$(top -bn1 2>/dev/null | grep "Cpu(s)" | awk '{print $2}' | sed 's/%us,//') || true
+        cpu_usage=${cpu_usage%.*}
+        if ! health_is_integer "$cpu_usage"; then
+            health_unavailable SYSTEM "無法取得 CPU 使用率"
+        elif [ "$cpu_usage" -gt "$ALERT_THRESHOLD_CPU" ]; then
+            log_health_result "$HEALTH_STATUS_CRITICAL" SYSTEM "CPU 使用率過高: ${cpu_usage}%" "建議檢查高CPU使用的進程"
+        elif [ "$cpu_usage" -gt 60 ]; then
+            log_health_result "$HEALTH_STATUS_WARNING" SYSTEM "CPU 使用率偏高: ${cpu_usage}%" "正常範圍內，但需要監控"
         else
-            log_health_result $HEALTH_STATUS_OK "DISK" "磁盤空間正常: $mount ($use_percent)" "可用空間: $available"
+            log_health_result "$HEALTH_STATUS_OK" SYSTEM "CPU 使用率正常: ${cpu_usage}%"
         fi
-    done < <(df -h | grep -vE '^Filesystem|tmpfs|cdrom' | awk '{print $1 " " $2 " " $3 " " $4 " " $5 " " $6}')
+    fi
+
+    if health_require_commands MEMORY free awk; then
+        mem_info=$(free 2>/dev/null | awk 'NR==2 && $2>0 {printf "%.0f %.0f", $3*100/$2, ($2-$3-$6)*100/$2}') || true
+        mem_used_percent=${mem_info%% *}
+        mem_available_percent=${mem_info##* }
+        if ! health_is_integer "$mem_used_percent" || ! health_is_integer "$mem_available_percent"; then
+            health_unavailable MEMORY "無法取得記憶體使用率"
+        elif [ "$mem_used_percent" -gt "$ALERT_THRESHOLD_MEMORY" ]; then
+            log_health_result "$HEALTH_STATUS_CRITICAL" MEMORY "記憶體使用率過高: ${mem_used_percent}%" "可用記憶體: ${mem_available_percent}%"
+        elif [ "$mem_used_percent" -gt 70 ]; then
+            log_health_result "$HEALTH_STATUS_WARNING" MEMORY "記憶體使用率偏高: ${mem_used_percent}%" "可用記憶體: ${mem_available_percent}%"
+        else
+            log_health_result "$HEALTH_STATUS_OK" MEMORY "記憶體使用率正常: ${mem_used_percent}%" "可用記憶體: ${mem_available_percent}%"
+        fi
+    fi
+
+    local disks available use_percent mount use_num
+    if health_require_commands DISK df awk; then
+        if disks=$(df -Ph 2>/dev/null | awk 'NR>1 && $1 !~ /tmpfs|cdrom/ {print $4, $5, $6}') && [ -n "$disks" ]; then
+            while read -r available use_percent mount; do
+                use_num=${use_percent%\%}
+                if ! health_is_integer "$use_num"; then
+                    health_unavailable DISK "無法取得磁盤使用率: $mount"
+                elif [ "$use_num" -gt "$ALERT_THRESHOLD_DISK" ]; then
+                    log_health_result "$HEALTH_STATUS_CRITICAL" DISK "磁盤空間不足: $mount ($use_percent)" "可用空間: $available"
+                elif [ "$use_num" -gt 80 ]; then
+                    log_health_result "$HEALTH_STATUS_WARNING" DISK "磁盤空間告警: $mount ($use_percent)" "可用空間: $available"
+                else
+                    log_health_result "$HEALTH_STATUS_OK" DISK "磁盤空間正常: $mount ($use_percent)" "可用空間: $available"
+                fi
+            done <<< "$disks"
+        else
+            health_unavailable DISK "無法取得磁盤空間"
+        fi
+    fi
 }
 
 # 網絡健康檢查
 check_network_health() {
     log_info "檢查網絡健康狀態..."
-    
-    # 檢查網絡接口
-    local active_interfaces
-    active_interfaces=$(ip link show up | grep -c "state UP" || echo 0)
-    
-    if [ "$active_interfaces" -eq 0 ]; then
-        log_health_result $HEALTH_STATUS_CRITICAL "NETWORK" "沒有活躍的網絡接口" "檢查網絡配置"
-    else
-        log_health_result $HEALTH_STATUS_OK "NETWORK" "網絡接口正常" "$active_interfaces 個活躍接口"
-    fi
-    
-    # DNS 解析測試
-    if nslookup google.com >/dev/null 2>&1; then
-        log_health_result $HEALTH_STATUS_OK "NETWORK" "DNS 解析正常"
-    else
-        log_health_result $HEALTH_STATUS_CRITICAL "NETWORK" "DNS 解析失敗" "檢查 DNS 設置"
-    fi
-    
-    # 網絡延遲測試
-    local ping_time
-    ping_time=$(ping -c 1 -W 5 8.8.8.8 2>/dev/null | grep "time=" | awk -F"time=" '{print $2}' | awk '{print $1}' | cut -d'=' -f1)
-    
-    if [ -n "$ping_time" ]; then
-        local ping_ms
-        ping_ms=${ping_time%.*}  # 去除小數點
-        
-        if [ "$ping_ms" -gt 200 ]; then
-            log_health_result $HEALTH_STATUS_WARNING "NETWORK" "網絡延遲較高: ${ping_time}ms" "可能影響網絡性能"
+    local interfaces active_interfaces ping_time ping_ms
+    if health_require_commands NETWORK ip grep; then
+        if interfaces=$(ip link show up 2>/dev/null); then
+            # grep -c 無匹配仍會印 0；只忽略狀態，不能再追加第二個 0。
+            active_interfaces=$(printf '%s\n' "$interfaces" | grep -c "state UP") || true
+            if ! health_is_integer "$active_interfaces"; then
+                health_unavailable NETWORK "無法取得網絡接口數量"
+            elif [ "$active_interfaces" -eq 0 ]; then
+                log_health_result "$HEALTH_STATUS_CRITICAL" NETWORK "沒有活躍的網絡接口" "檢查網絡配置"
+            else
+                log_health_result "$HEALTH_STATUS_OK" NETWORK "網絡接口正常" "$active_interfaces 個活躍接口"
+            fi
         else
-            log_health_result $HEALTH_STATUS_OK "NETWORK" "網絡延遲正常: ${ping_time}ms"
+            health_unavailable NETWORK "無法讀取網絡接口"
         fi
-    else
-        log_health_result $HEALTH_STATUS_CRITICAL "NETWORK" "無法連接外部網絡" "檢查網絡連接"
+    fi
+
+    if health_require_commands NETWORK nslookup; then
+        if nslookup google.com >/dev/null 2>&1; then
+            log_health_result "$HEALTH_STATUS_OK" NETWORK "DNS 解析正常"
+        else
+            log_health_result "$HEALTH_STATUS_CRITICAL" NETWORK "DNS 解析失敗" "檢查 DNS 設置"
+        fi
+    fi
+
+    if health_require_commands NETWORK ping awk; then
+        ping_time=$(ping -c 1 -W 5 8.8.8.8 2>/dev/null | awk -F'time=' '/time=/ {split($2, fields, " "); print fields[1]; exit}') || true
+        ping_ms=${ping_time%.*}
+        if [ -z "$ping_time" ]; then
+            log_health_result "$HEALTH_STATUS_CRITICAL" NETWORK "無法連接外部網絡" "檢查網絡連接"
+        elif ! health_is_integer "$ping_ms"; then
+            health_unavailable NETWORK "無法解析網絡延遲"
+        elif [ "$ping_ms" -gt 200 ]; then
+            log_health_result "$HEALTH_STATUS_WARNING" NETWORK "網絡延遲較高: ${ping_time}ms" "可能影響網絡性能"
+        else
+            log_health_result "$HEALTH_STATUS_OK" NETWORK "網絡延遲正常: ${ping_time}ms"
+        fi
     fi
 }
 
@@ -156,12 +221,21 @@ check_network_health() {
 check_services_health() {
     log_info "檢查系統服務狀態..."
     
+    if ! health_require_commands SERVICE systemctl grep; then
+        return 0
+    fi
+    local unit_files service
+    if ! systemctl show --property=Version --value >/dev/null 2>&1 || \
+       ! unit_files=$(systemctl list-unit-files 2>/dev/null); then
+        health_unavailable SERVICE "systemd 不可用"
+        return 0
+    fi
     local critical_services=("systemd-resolved" "systemd-networkd")
     local optional_services=("ssh" "docker" "systemd-timesyncd")
     
     # 檢查關鍵服務
     for service in "${critical_services[@]}"; do
-        if systemctl list-unit-files | grep -q "^$service"; then
+        if grep -q "^$service" <<< "$unit_files"; then
             if systemctl is-active "$service" >/dev/null 2>&1; then
                 log_health_result $HEALTH_STATUS_OK "SERVICE" "關鍵服務 $service 運行正常"
             else
@@ -172,7 +246,7 @@ check_services_health() {
     
     # 檢查可選服務
     for service in "${optional_services[@]}"; do
-        if systemctl list-unit-files | grep -q "^$service"; then
+        if grep -q "^$service" <<< "$unit_files"; then
             if systemctl is-active "$service" >/dev/null 2>&1; then
                 log_health_result $HEALTH_STATUS_OK "SERVICE" "可選服務 $service 運行正常"
             else
@@ -180,6 +254,18 @@ check_services_health() {
             fi
         fi
     done
+}
+
+health_tool_version() {
+    local tool="$1" version
+    # 工具是否存在已由呼叫端檢查；版本子命令失敗不影響可用性判定。
+    if command -v awk >/dev/null 2>&1; then
+        version=$("$tool" --version 2>/dev/null | awk -v tool="$tool" 'NR==1 {if (tool=="git" || tool=="docker") print $3; else if (tool=="python3" || tool=="pip3" || tool=="uv") print $2; else if (tool=="node" || tool=="npm") print $0; else print $NF}') || true
+        [ "$tool" != docker ] || version=${version//,/}
+        printf '%s' "${version:-已安裝}"
+    else
+        printf '%s' '已安裝（缺少指令 awk，無法查詢版本）'
+    fi
 }
 
 # 工具可用性檢查
@@ -193,15 +279,10 @@ check_tools_availability() {
     for tool in "${essential_tools[@]}"; do
         if check_command "$tool"; then
             local version
-            case "$tool" in
-                "python3") version=$(python3 --version 2>/dev/null | cut -d' ' -f2) ;;
-                "pip3") version=$(pip3 --version 2>/dev/null | cut -d' ' -f2) ;;
-                "git") version=$(git --version 2>/dev/null | cut -d' ' -f3) ;;
-                *) version=$($tool --version 2>/dev/null | head -1 | awk '{print $NF}' || echo "已安裝") ;;
-            esac
+            version=$(health_tool_version "$tool")
             log_health_result $HEALTH_STATUS_OK "TOOLS" "必要工具 $tool 可用" "版本: $version"
         else
-            log_health_result $HEALTH_STATUS_CRITICAL "TOOLS" "必要工具 $tool 不可用" "sudo apt install $tool"
+            health_unavailable TOOLS "缺少指令 ${tool}；sudo apt install $tool"
         fi
     done
     
@@ -209,16 +290,10 @@ check_tools_availability() {
     for tool in "${development_tools[@]}"; do
         if check_command "$tool"; then
             local version
-            case "$tool" in
-                "uv") version=$(uv --version 2>/dev/null | cut -d' ' -f2) ;;
-                "docker") version=$(docker --version 2>/dev/null | cut -d' ' -f3 | sed 's/,//') ;;
-                "node") version=$(node --version 2>/dev/null) ;;
-                "npm") version=$(npm --version 2>/dev/null) ;;
-                *) version=$($tool --version 2>/dev/null | head -1 | awk '{print $NF}' || echo "已安裝") ;;
-            esac
+            version=$(health_tool_version "$tool")
             log_health_result $HEALTH_STATUS_OK "TOOLS" "開發工具 $tool 可用" "版本: $version"
         else
-            log_health_result $HEALTH_STATUS_WARNING "TOOLS" "開發工具 $tool 不可用" "可選安裝"
+            health_unavailable TOOLS "缺少指令 ${tool}（可選安裝）"
         fi
     done
 }
@@ -257,12 +332,12 @@ check_configuration_health() {
     fi
     
     # 檢查系統配置管理
-    if get_config "mirror_mode" >/dev/null 2>&1; then
+    if command -v get_config >/dev/null 2>&1 && get_config "mirror_mode" >/dev/null 2>&1; then
         local mirror_mode
-        mirror_mode=$(get_config "mirror_mode" "auto")
+        mirror_mode=$(get_config "mirror_mode" "auto") || true
         log_health_result $HEALTH_STATUS_OK "CONFIG" "配置管理系統可用" "鏡像模式: $mirror_mode"
     else
-        log_health_result $HEALTH_STATUS_WARNING "CONFIG" "配置管理系統不可用" "執行配置初始化"
+        health_unavailable CONFIG "配置管理系統不可用，請執行配置初始化"
     fi
 }
         
@@ -271,13 +346,14 @@ run_comprehensive_health_check() {
     log_info "開始全面健康檢查..."
     
     local start_time
-    start_time=$(date +%s)
+    start_time=$SECONDS
     
     # 重置計數器
     total_checks=0
     passed_checks=0
     failed_checks=0
     warning_checks=0
+    unavailable_checks=0
     
     # 執行各項檢查
     check_system_resources
@@ -290,7 +366,7 @@ run_comprehensive_health_check() {
     generate_health_report
     
     local end_time
-    end_time=$(date +%s)
+    end_time=$SECONDS
     local duration=$((end_time - start_time))
     
     log_success "健康檢查完成，耗時 ${duration} 秒"
@@ -298,7 +374,7 @@ run_comprehensive_health_check() {
     # 返回健康狀態
     if [ $failed_checks -gt 0 ]; then
         return 2  # 嚴重問題
-    elif [ $warning_checks -gt 0 ]; then
+    elif [ "$warning_checks" -gt "$unavailable_checks" ]; then
         return 1  # 警告
     else
         return 0  # 正常
@@ -307,7 +383,18 @@ run_comprehensive_health_check() {
 
 # 生成健康檢查報告
 generate_health_report() {
-    local report_file="$HEALTH_CHECK_CACHE/health_report_$(date +%Y%m%d_%H%M%S).html"
+    local report_file host_name=unknown
+    report_file="$HEALTH_CHECK_CACHE/health_report_$(health_timestamp '+%Y%m%d_%H%M%S').html"
+    if [ "$health_log_available" != true ]; then
+        health_unavailable REPORT "報告目錄不可用"
+        return 0
+    fi
+    if ! health_require_commands REPORT cat; then
+        return 0
+    fi
+    if health_require_commands REPORT hostname; then
+        host_name=$(hostname 2>/dev/null) || host_name=unknown
+    fi
     
     {
         cat << 'EOF'
@@ -332,8 +419,8 @@ EOF
         
         echo "<div class='header'>"
         echo "<h1>系統健康檢查報告</h1>"
-        echo "<p>生成時間: $(date)</p>"
-        echo "<p>主機: $(hostname)</p>"
+        echo "<p>生成時間: $(health_timestamp)</p>"
+        echo "<p>主機: $host_name</p>"
         echo "</div>"
         
         echo "<div class='summary'>"
@@ -351,13 +438,18 @@ EOF
         
         if [ -f "$HEALTH_CHECK_LOG" ]; then
             echo "<pre style='background: #f5f5f5; padding: 10px; overflow-x: auto;'>"
-            tail -100 "$HEALTH_CHECK_LOG"
+            if health_require_commands REPORT tail; then
+                tail -100 "$HEALTH_CHECK_LOG" || true
+            fi
             echo "</pre>"
         fi
         
         echo "</body></html>"
         
-    } > "$report_file"
+    } > "$report_file" || {
+        health_unavailable REPORT "無法寫入報告 $report_file"
+        return 0
+    }
     
     log_success "健康檢查報告已生成: $report_file"
 }
@@ -368,6 +460,9 @@ start_monitoring_mode() {
     
     log_info "啟動監控模式，檢查間隔: ${interval} 秒"
     
+    if ! health_require_commands MONITOR sleep; then
+        return 0
+    fi
     while true; do
         log_info "執行定期健康檢查..."
         
@@ -377,19 +472,20 @@ start_monitoring_mode() {
         
         # 檢查是否有嚴重問題
         if [ $failed_checks -gt 0 ]; then
-            log_error "發現 $failed_checks 個嚴重問題，詳情請查看: $HEALTH_CHECK_LOG"
+            log_error "發現 $failed_checks 個嚴重問題，詳情請查看: $HEALTH_CHECK_LOG" || true
         fi
         
         # 保存監控狀態
-        echo "$(date '+%Y-%m-%d %H:%M:%S'): OK=$passed_checks, WARNING=$warning_checks, CRITICAL=$failed_checks" >> "$HEALTH_CHECK_CACHE/monitoring.log"
+        echo "$(health_timestamp '+%Y-%m-%d %H:%M:%S'): OK=$passed_checks, WARNING=$warning_checks, CRITICAL=$failed_checks" >> "$HEALTH_CHECK_CACHE/monitoring.log" 2>/dev/null || true
         
-        sleep "$interval"
+        sleep "$interval" || return 0
         
         # 重置計數器
         total_checks=0
         passed_checks=0
         failed_checks=0
         warning_checks=0
+        unavailable_checks=0
     done
 }
 
@@ -402,13 +498,17 @@ quick_health_check() {
     passed_checks=0
     failed_checks=0
     warning_checks=0
+    unavailable_checks=0
     
     # 只檢查關鍵項目
     check_system_resources
     check_network_health
     
     # 顯示簡要結果
-    local health_score=$((passed_checks * 100 / total_checks))
+    local health_score=0
+    if [ "$total_checks" -gt 0 ]; then
+        health_score=$((passed_checks * 100 / total_checks))
+    fi
     
     echo ""
     log_info "=== 快速健康檢查結果 ==="
@@ -417,8 +517,12 @@ quick_health_check() {
     echo "⚠️  警告項目: $warning_checks" 
     echo "❌ 失敗項目: $failed_checks"
     
-    if [ $failed_checks -eq 0 ] && [ $warning_checks -eq 0 ]; then
-        echo "🎉 系統健康狀況良好！"
+    if [ $failed_checks -eq 0 ] && [ "$warning_checks" -eq "$unavailable_checks" ]; then
+        if [ "$unavailable_checks" -gt 0 ]; then
+            echo "⚠️  部分項目無法檢查，已完成其餘檢查"
+        else
+            echo "🎉 系統健康狀況良好！"
+        fi
         return 0
     elif [ $failed_checks -eq 0 ]; then
         echo "⚠️  系統基本正常，但有一些警告項目"

@@ -355,7 +355,7 @@ echo "== install.sh 下載網址檢查 =="
 test_url_validation() {
     local fns
     fns="$(awk '/^_download_url_allowed\(\)/,/^}/ {print} /^validate_download_urls\(\)/,/^}/ {print}' "$SCRIPT_DIR/install.sh")"
-    local url ok
+    local url
     for url in \
         "https://raw.githubusercontent.com/x/y/main" \
         "http://127.0.0.1:8000" "http://localhost" "http://localhost:9/a" "http://[::1]:8080/x"; do

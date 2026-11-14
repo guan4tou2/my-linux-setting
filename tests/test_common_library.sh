@@ -349,7 +349,9 @@ FAKE
         TUI_TERM_ROWS=32 TUI_TERM_COLS=100 tui_yesno "T" "第一行\n第二行\n第三行" no
     )
     local long_args short_args
+    # shellcheck disable=SC2034 # long_args 由 assert_true 的 eval 字串間接讀取。
     long_args=$(cat "$tmp/args_long")
+    # shellcheck disable=SC2034 # short_args 由 assert_true/assert_false 的 eval 字串間接讀取。
     short_args=$(cat "$tmp/args_short")
     rm -rf "$tmp"
 

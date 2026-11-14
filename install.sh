@@ -24,9 +24,6 @@ if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
     echo -e "\033[0;33m建議安裝新版 Bash: brew install bash\033[0m"
 fi
 
-# 跟踪最後執行的命令
-LAST_COMMAND=""
-
 # 幫助函數（必須在參數解析之前定義）
 show_help() {
     cat << 'EOF'
@@ -413,6 +410,7 @@ else
     if curl -fsSL --max-time 30 "$COMMON_URL" -o "$COMMON_OUTPUT" 2>/dev/null; then
         # Basic validation before sourcing
         if [ -s "$COMMON_OUTPUT" ] && head -1 "$COMMON_OUTPUT" | grep -q "^#!/"; then
+            # shellcheck source=/dev/null
             source "$COMMON_OUTPUT"
             REMOTE_INSTALL=true
             bootstrap_status "SUCCESS" "Common library loaded"
@@ -577,7 +575,11 @@ print_error_summary() {
     local exit_code="$1"
     local line_number="$2"
     local last_command="${3:-}"
-    local red="$(_ansi "${RED:-}")" yellow="$(_ansi "${YELLOW:-}")" green="$(_ansi "${GREEN:-}")" nc="$(_ansi "${NC:-}")"
+    local red yellow green nc
+    red="$(_ansi "${RED:-}")"
+    yellow="$(_ansi "${YELLOW:-}")"
+    green="$(_ansi "${GREEN:-}")"
+    nc="$(_ansi "${NC:-}")"
 
     printf "\n%s✗ 安裝失敗%s\n\n" "$red" "$nc"
     printf "  位置：install.sh 第 %s 行（結束碼 %s）\n" "$line_number" "$exit_code"
@@ -659,7 +661,10 @@ check_environment() {
         done
         if [ -n "$brew_bin" ]; then
             log_success "檢測到 Homebrew 已安裝於 $brew_bin"
-            eval "$("$brew_bin" shellenv)" 2>/dev/null || export PATH="$(dirname "$brew_bin"):$PATH"
+            eval "$("$brew_bin" shellenv)" 2>/dev/null || {
+                PATH="$(dirname "$brew_bin"):$PATH" || true
+                export PATH
+            }
             log_info "已將 Homebrew 注入當前 session 的 PATH"
         fi
     fi
@@ -839,7 +844,7 @@ backup_config_files() {
                 if [ -n "$dir" ] && _manifest_has backup "$backup_root/$dir"; then
                     continue
                 fi
-                [ -n "$dir" ] && rm -rf "$backup_root/$dir" \
+                [ -n "$dir" ] && rm -rf "${backup_root:?}/$dir" \
                     && log_info "已清理舊備份：$dir"
             done <<< "$old_backups"
         fi
@@ -1242,7 +1247,7 @@ build_install_summary_text() {
         summary+="\n\nHomebrew：會先安裝（APT 裝不到時的備援）"
     fi
     local shown_log="${LOG_FILE:-未設定}"
-    case "$shown_log" in "$HOME"/*) shown_log="~/${shown_log#"$HOME"/}" ;; esac
+    case "$shown_log" in "$HOME"/*) shown_log="~${shown_log#"$HOME"}" ;; esac
     summary+="\n\n日誌：${shown_log}\n\n確認後開始安裝，進度會顯示在終端機。"
     printf '%s' "$summary"
 }
@@ -1293,14 +1298,15 @@ install_result_summary_line() {
 # 結果選單提示文字：只有一行總結與日誌路徑（完整報告放不進選單、先以訊息框顯示時使用）
 install_result_menu_text() {
     local shown_log="${LOG_FILE:-未設定}"
-    case "$shown_log" in "$HOME"/*) shown_log="~/${shown_log#"$HOME"/}" ;; esac
+    case "$shown_log" in "$HOME"/*) shown_log="~${shown_log#"$HOME"}" ;; esac
     printf '%s\n\n日誌：%s' "$(install_result_summary_line)" "$shown_log"
 }
 
 # 精簡報告（合併畫面用）：一行總結、逐模組狀態行、日誌路徑；不含備份路徑與建議文字
 build_install_report_compact_text() {
     local nl=$'\n'
-    local text="$(install_result_summary_line)${nl}"
+    local text
+    text="$(install_result_summary_line)${nl}" || true
     local total=${#INSTALL_RESULT_IDS[@]} i name detail
     if [ "$total" -gt 0 ]; then
         text+="${nl}"
@@ -1316,7 +1322,7 @@ build_install_report_compact_text() {
         done
     fi
     local shown_log="${LOG_FILE:-未設定}"
-    case "$shown_log" in "$HOME"/*) shown_log="~/${shown_log#"$HOME"/}" ;; esac
+    case "$shown_log" in "$HOME"/*) shown_log="~${shown_log#"$HOME"}" ;; esac
     text+="${nl}日誌：${shown_log}"
     printf '%s' "$text"
 }
@@ -1464,6 +1470,7 @@ selected_modules_need_homebrew() {
 }
 
 # 是否該詢問 Homebrew（不含互動本身，方便測試）
+# shellcheck disable=SC2120 # 參數為可選，供測試指定模組清單
 homebrew_offer_needed() {
     [ "${NON_INTERACTIVE:-false}" != "true" ] || return 1
     [ "${INSTALL_MODE:-full}" != "minimal" ] || return 1
@@ -1901,7 +1908,7 @@ show_module_details() {
             fi
 
             local name="${MODULE_NAMES[$module_id]:-$module_id}"
-            local packages="${MODULE_PACKAGES[$module_id]:-}"
+            local system_packages="${MODULE_PACKAGES[$module_id]:-}"
             local brew_packages="${MODULE_BREW_PACKAGES[$module_id]:-}"
             local pip_packages="${MODULE_PIP_PACKAGES[$module_id]:-}"
             local cargo_packages="${MODULE_CARGO_PACKAGES[$module_id]:-}"
@@ -1939,10 +1946,10 @@ show_module_details() {
             fi
 
             # 顯示套件清單（帶狀態標記）
-            if [ -n "$packages" ]; then
+            if [ -n "$system_packages" ]; then
                 printf "    ${BLUE}系統套件:${NC} "
                 local first=true
-                for pkg in $packages; do
+                for pkg in $system_packages; do
                     [ "$first" = true ] || printf ", " || true
                     first=false
                     if _module_pkg_is_installed apt "$pkg"; then
@@ -2074,7 +2081,7 @@ add_module() {
         elif [ "$num" -ge 1 ] && [ "$num" -le "$total" ]; then
             local module_id="${MODULE_LIST[$((num - 1))]}"
             # 避免重複添加
-            if [[ ! " $selected_modules " =~ " $module_id " ]]; then
+            if [[ " $selected_modules " != *" $module_id "* ]]; then
                 selected_modules="$selected_modules $module_id"
             fi
             return
@@ -2298,11 +2305,11 @@ build_install_report_text() {
     report+="${nl}"
     if [ -n "${BACKUP_DIR:-}" ]; then
         local shown_backup="$BACKUP_DIR"
-        case "$shown_backup" in "$HOME"/*) shown_backup="~/${shown_backup#"$HOME"/}" ;; esac
+        case "$shown_backup" in "$HOME"/*) shown_backup="~${shown_backup#"$HOME"}" ;; esac
         report+="備份：${shown_backup}${nl}"
     fi
     local shown_log="${LOG_FILE:-未設定}"
-    case "$shown_log" in "$HOME"/*) shown_log="~/${shown_log#"$HOME"/}" ;; esac
+    case "$shown_log" in "$HOME"/*) shown_log="~${shown_log#"$HOME"}" ;; esac
     report+="日誌：${shown_log}${nl}"
 
     if [ "$failed" -gt 0 ] || [ "$partial" -gt 0 ]; then
@@ -2341,7 +2348,8 @@ show_installation_report() {
 
 # 純文字報告（CLI、無人值守，以及 TUI 結束後留在終端機上的紀錄）
 print_installation_report_plain() {
-    local title color="$(_ansi "${GREEN:-}")"
+    local title color
+    color="$(_ansi "${GREEN:-}")"
     title="$(install_report_title)"
     case "$(install_results_overall)" in
         partial) color="$(_ansi "${YELLOW:-}")" ;;
@@ -2494,6 +2502,7 @@ _progress_term_cols() {
 }
 
 # 日誌最新一則有內容的訊息（已清理）
+# shellcheck disable=SC2120 # 參數為可選，預設讀 LOG_FILE；測試會傳入檔案
 progress_last_log_message() {
     local file="${1:-${LOG_FILE:-}}"
     [ -n "$file" ] && [ -f "$file" ] || return 0
@@ -2511,7 +2520,8 @@ progress_last_log_message() {
 _progress_compose_line() {
     local frame="$1" tag="$2" label="$3" elapsed="$4" msg="$5" cols="$6"
     local max=$((cols - 1))
-    local head="${tag:+$tag }$label  $(_progress_fmt_elapsed "$elapsed")"
+    local head
+    head="${tag:+$tag }$label  $(_progress_fmt_elapsed "$elapsed")" || true
     # 前綴「  X 」佔 4 欄
     _progress_fit_text "$head" $((max - 4))
     local head_fit="$PROGRESS_FIT"
@@ -2539,7 +2549,9 @@ _progress_spinner_loop() {
         *UTF-8*|*utf8*|*UTF8*|*utf-8*) frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏") ;;
         *) frames=("|" "/" "-" "\\") ;;
     esac
-    local cyan="$(_ansi "${CYAN:-}")" nc="$(_ansi "${NC:-}")"
+    local cyan nc
+    cyan="$(_ansi "${CYAN:-}")"
+    nc="$(_ansi "${NC:-}")"
     local tick=0 msg="" cols=80 frame line_body
     while :; do
         kill -0 "$parent_pid" 2>/dev/null || exit 0
@@ -2639,7 +2651,7 @@ _progress_draw_header() {
     fi
     printf '\n  %s正在安裝 %s 個模組%s\n' "$(_ansi "${CYAN:-}")" "$PROGRESS_HEADER_TOTAL" "$(_ansi "${NC:-}")"
     local shown_log="${LOG_FILE:-未設定}"
-    case "$shown_log" in "$HOME"/*) shown_log="~/${shown_log#"$HOME"/}" ;; esac
+    case "$shown_log" in "$HOME"/*) shown_log="~${shown_log#"$HOME"}" ;; esac
     printf '  詳細輸出寫入日誌：%s\n' "$shown_log"
     printf '  按 Ctrl-C 可中斷安裝\n\n'
 }
@@ -2713,7 +2725,8 @@ progress_finish_line() {
         cols="$(_progress_term_cols)"
     fi
     _progress_fit_text "${tag:+$tag }$label  $text  $(_progress_fmt_elapsed "$elapsed")" $((cols - 5))
-    local line="  ${color}${icon}$(_ansi "${NC:-}") ${PROGRESS_FIT}"
+    local line
+    line="  ${color}${icon}$(_ansi "${NC:-}") ${PROGRESS_FIT}"
     PROGRESS_LINES+=("$line")
     printf '%s\n' "$line"
 }
@@ -2749,7 +2762,6 @@ module_fallback_script() {
 run_module_install() {
     local module="$1"
     if [ "$USE_MODULE_MANAGER" = "true" ] && command -v install_module >/dev/null 2>&1; then
-        LAST_COMMAND="install_module \"$module\""
         run_logged_command install_module "$module"
     else
         local script
@@ -2758,7 +2770,6 @@ run_module_install() {
             log_error "未知模組：$module" || true
             return 1
         fi
-        LAST_COMMAND="execute_script \"$script\" \"$module\""
         execute_script "$script" "$module"
     fi
 }
@@ -2814,6 +2825,7 @@ _handle_module_failure() {
 # 保守判斷：有模組管理器資料時，只要所選模組有設定腳本（腳本內常會 apt install）、
 # 有尚未安裝的系統套件（packages／apt_fallback／brew_packages），或使用 --force 就需要；
 # 沒有模組管理器資料時一律需要。
+# shellcheck disable=SC2120 # 參數為可選，預設用 selected_modules；測試會傳入清單
 selected_modules_need_package_index() {
     local modules="${1:-$selected_modules}"
     if [ "${USE_MODULE_MANAGER:-false}" != "true" ] \

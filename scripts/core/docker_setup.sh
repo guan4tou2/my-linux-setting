@@ -24,23 +24,83 @@ log_info "########## 安裝 Docker 相關工具 ##########"
 # 初始化進度
 init_progress 3
 
-# 安全安裝 Docker
-show_progress "安裝 Docker"
-if ! check_command docker; then
-    log_info "安裝 Docker（使用安全下載機制）"
-    install_docker || log_warning "Docker 安裝失敗，將跳過 Docker 相關配置"
+# 列出 apt 來源與金鑰目錄中與 Docker 相關的檔案（每行一個）
+docker_apt_artifacts() {
+    local dir
+    for dir in /etc/apt/sources.list.d /etc/apt/keyrings /etc/apt/trusted.gpg.d; do
+        [ -d "$dir" ] || continue
+        find "$dir" -maxdepth 1 -type f -iname '*docker*' 2>/dev/null || true
+    done
+    return 0
+}
 
-    # get.docker.com 安裝後，同一 shell 內 command -v 有時找不到新二進位；刷新 hash 並補常見路徑
+# 移除「這次執行才新增」的 Docker apt 來源與金鑰（參數：執行前的檔案清單）。
+# 官方安裝程式失敗時可能留下壞掉的來源，使之後每次 apt-get update 都報錯。
+# 清理失敗只警告，不中止。
+remove_new_docker_apt_artifacts() {
+    local before="$1" file removed=false
+    while IFS= read -r file; do
+        [ -n "$file" ] || continue
+        if printf '%s\n' "$before" | grep -qxF -- "$file"; then
+            continue
+        fi
+        if run_as_root rm -f -- "$file"; then
+            log_info "已移除本次新增的 Docker apt 檔案：$file"
+            removed=true
+        else
+            log_warning "無法移除 $file，請手動刪除以免 apt-get update 持續報錯"
+        fi
+    done < <(docker_apt_artifacts)
+    if [ "$removed" = "true" ]; then
+        update_system force || log_warning "移除 Docker apt 來源後更新套件索引失敗"
+    fi
+    return 0
+}
+
+# 從發行版套件庫安裝 docker.io（Kali 官方文件的做法，也是其他發行版的備援）
+install_docker_io() {
+    log_info "改用發行版套件庫的 docker.io"
+    if [ "${PKG_MANAGER:-apt}" = "apt" ]; then
+        update_system || log_warning "套件索引更新失敗，仍嘗試安裝 docker.io"
+    fi
+    install_package "docker.io"
+}
+
+# 安裝後刷新 shell hash，並補上常見路徑（同一 shell 內 command -v 有時找不到新二進位）
+refresh_docker_path() {
     hash -r 2>/dev/null || true
     if ! check_command docker; then
+        local _dp
         for _dp in /usr/bin/docker /usr/local/bin/docker; do
             if [ -x "$_dp" ]; then
                 log_info "偵測到 Docker 於 $_dp，補入 PATH 供本腳本後續檢查"
-                export PATH="$(dirname "$_dp"):$PATH"
+                PATH="$(dirname "$_dp"):$PATH" || true
+                export PATH
                 break
             fi
         done
     fi
+    return 0
+}
+
+# 安全安裝 Docker
+show_progress "安裝 Docker"
+if ! check_command docker; then
+    if [ "${DISTRO:-}" = "kali" ]; then
+        # get.docker.com 不支援 Kali（會留下指向 kali-rolling 的壞來源），直接用發行版套件
+        log_info "Kali 不支援官方安裝程式，使用發行版套件庫的 docker.io"
+        install_docker_io || log_warning "docker.io 安裝失敗"
+    else
+        log_info "安裝 Docker（使用安全下載機制）"
+        docker_artifacts_before="$(docker_apt_artifacts)"
+        install_docker || log_warning "Docker 安裝失敗，將跳過 Docker 相關配置"
+        refresh_docker_path
+        if ! check_command docker; then
+            remove_new_docker_apt_artifacts "$docker_artifacts_before"
+            install_docker_io || log_warning "docker.io 備援安裝失敗"
+        fi
+    fi
+    refresh_docker_path
 
     # 僅在 Docker 安裝成功後處理群組設定
     # 加入 docker 群組等同給予該使用者 root 權限，因此可用 ADD_USER_TO_DOCKER_GROUP=false 關閉
@@ -103,6 +163,12 @@ if ! check_command lazydocker; then
     fi
 else
     log_info "Lazydocker 已安裝"
+fi
+
+# Docker 仍不可用時讓模組失敗，安裝報告才不會誤報成功
+if ! check_command docker; then
+    log_error "Docker 安裝失敗：docker 指令不存在"
+    exit 1
 fi
 
 show_progress "Docker 安裝完成"

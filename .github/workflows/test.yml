@@ -138,5 +138,8 @@ jobs:
       - name: Run TUI smoke tests in a fresh container
         run: CONTAINER_NAME=ci-tui-smoke ./docker-test.sh run "CI=true bash tests/test_tui_smoke.sh"
 
+      - name: Run Docker module install test in a fresh container
+        run: CONTAINER_NAME=ci-docker-module ./docker-test.sh run "CI=true bash tests/test_docker_module.sh"
+
       - name: Run full installation simulation in a fresh container
         run: CONTAINER_NAME=ci-remote-install bash tests/test_full_simulation.sh

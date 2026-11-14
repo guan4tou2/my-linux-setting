@@ -48,6 +48,7 @@ set -euo pipefail
 # Load user configuration file if exists
 CONFIG_FILE="${CONFIG_FILE:-$HOME/.config/linux-setting/config}"
 if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck source=/dev/null
     source "$CONFIG_FILE"
 fi
 
@@ -55,13 +56,13 @@ fi
 # Constants
 # ==============================================================================
 
+# shellcheck disable=SC2034 # SCRIPT_VERSION 由 tests/test_scripts.sh 字面比對以驗證版本一致性。
 readonly SCRIPT_VERSION="2.2.9"
 readonly RED='\033[0;31m'
 readonly GREEN='\033[0;32m'
 readonly BLUE='\033[0;34m'
 readonly CYAN='\033[0;36m'
 readonly YELLOW='\033[0;33m'
-readonly MAGENTA='\033[0;35m'
 readonly NC='\033[0m'
 
 # Security constants
@@ -84,11 +85,12 @@ readonly CACHE_DIR="${CACHE_DIR:-$HOME/.cache/linux-setting}"
 readonly CACHE_TTL="${CACHE_TTL:-86400}"
 
 # Performance constants
-readonly PARALLEL_JOBS="${PARALLEL_JOBS:-$(nproc 2>/dev/null || echo 4)}"
+readonly PARALLEL_JOBS="${PARALLEL_JOBS:-$(command -v nproc >/dev/null 2>&1 && nproc 2>/dev/null || echo 4)}"
 readonly MIN_PACKAGES_FOR_PARALLEL="${MIN_PACKAGES_FOR_PARALLEL:-3}"
 
 # Global variables
-readonly SCRIPT_START_TIME=$(date +%s)
+SCRIPT_START_TIME=$(command -v date >/dev/null 2>&1 && date +%s) || true
+readonly SCRIPT_START_TIME
 TOTAL_STEPS=0
 CURRENT_STEP=0
 
@@ -214,7 +216,8 @@ rotate_logs() {
         file_size_mb=$(du -m "$log_file" 2>/dev/null | cut -f1)
 
         if [ "$file_size_mb" -ge "$MAX_LOG_SIZE" ]; then
-            local new_name="${log_file%.log}.$(date +%Y%m%d_%H%M%S).old"
+            local new_name
+            new_name="${log_file%.log}.$(date +%Y%m%d_%H%M%S).old"
             mv "$log_file" "$new_name" 2>/dev/null || true
         fi
     done
@@ -579,6 +582,7 @@ install_apt_packages_parallel() {
     log_info "安裝完成: $success_count/${#packages[@]} 成功"
 
     if [ ${#failed_packages[@]} -gt 0 ]; then
+        # shellcheck disable=SC2034 # module_manager.sh 的 install_module 讀取失敗套件陣列。
         APT_BATCH_FAILED_PACKAGES=("${failed_packages[@]}")
         log_warning "失敗的套件: ${failed_packages[*]}"
         return 1
@@ -621,20 +625,21 @@ download_files_parallel() {
     # 導出函數供子 shell 使用
     for func in download_single_file safe_download log_info log_success log_error; do
         if declare -f "$func" > /dev/null 2>&1; then
-            export -f "$func" 2>/dev/null || true
+            export -f "${func?}" 2>/dev/null || true
         fi
     done
     
     # 啟動並行下載任務
     for url in "${!url_file_map[@]}"; do
         local output="${url_file_map[$url]}"
-        local log_file="$temp_dir/$(basename "$output").log"
+        local log_file
+        log_file="$temp_dir/$(basename "$output").log" || true
         
         # 等待任務槽位可用
         while [ ${#pids[@]} -ge $max_jobs ]; do
             for i in "${!pids[@]}"; do
                 if ! kill -0 "${pids[i]}" 2>/dev/null; then
-                    unset pids[i]
+                    unset 'pids[i]'
                 fi
             done
             pids=("${pids[@]}") # 重新索引數組
@@ -660,7 +665,8 @@ download_files_parallel() {
     local success_count=0
     for url in "${!url_file_map[@]}"; do
         local output="${url_file_map[$url]}"
-        local log_file="$temp_dir/$(basename "$output").log"
+        local log_file
+        log_file="$temp_dir/$(basename "$output").log" || true
         
         if [ -f "$log_file" ]; then
             local result
@@ -696,7 +702,6 @@ download_files_parallel() {
 install_with_homebrew_fallback() {
     local package="$1"
     local binary_name="${2:-$package}"
-    local fallback_func="${3:-}"
 
     [ "${PREFER_HOMEBREW:-true}" != "true" ] && return 1 || true
 
@@ -725,6 +730,7 @@ try_homebrew_then() {
     local binary_name="${2:-$package}"
     local fallback_function="$3"
     shift 3
+    # shellcheck disable=SC2124 # 既有介面刻意將所有參數以空白串成單一引數傳給 fallback。
     local fallback_args="$@"
 
     if ! install_with_homebrew_fallback "$package" "$binary_name"; then
@@ -744,7 +750,6 @@ try_homebrew_then() {
 install_with_fallback() {
     local package="$1"
     local install_method="${2:-uv,pip,binary}"
-    local success=0
 
     IFS=',' read -ra methods <<< "$install_method"
 
@@ -909,6 +914,7 @@ install_packages_batch() {
 # 通用系統更新函數（更新套件索引）
 # 本次執行（含子行程，透過 export 的環境變數）已成功更新過就直接略過；
 # 傳入 "force" 可強制重新更新。
+# shellcheck disable=SC2120 # 可選參數 "force" 用於強制重新更新，目前由測試與維護情境使用
 update_system() {
     local force="${1:-}"
 
@@ -1120,7 +1126,10 @@ ensure_homebrew_installed() {
         fi
     done
     if [ -n "$brew_bin" ] && [ -x "$brew_bin" ]; then
-        eval "$("$brew_bin" shellenv)" 2>/dev/null || export PATH="$(dirname "$brew_bin"):$PATH"
+        eval "$("$brew_bin" shellenv)" 2>/dev/null || {
+            PATH="$(dirname "$brew_bin"):$PATH" || true
+            export PATH
+        }
         if command -v brew >/dev/null 2>&1; then
             ensure_brew_shell_aliases "$brew_bin" || true
             log_success "Homebrew 已安裝 (從 $brew_bin 注入 PATH): $(brew --version | head -n1)"
@@ -1486,7 +1495,7 @@ safe_read() {
     fi
 
     # 互動模式：照常 read
-    read ${1+"$@"} -p "$prompt" "$var_name"
+    read ${1+"$@"} -p "$prompt" "${var_name?}"
 }
 
 safe_append_to_file() {
@@ -1594,7 +1603,6 @@ cleanup_cache() {
     fi
     
     log_info "清理過期快取..."
-    local cleaned_count=0
     
     find "$CACHE_DIR/downloads" -type f -mtime +1 -exec rm -f {} \; 2>/dev/null
     find "$CACHE_DIR/metadata" -type f -mtime +1 -exec rm -f {} \; 2>/dev/null
@@ -2758,7 +2766,10 @@ detect_and_inject_tool_paths() {
             /opt/homebrew/bin/brew \
             /usr/local/bin/brew; do
             if [ -x "$cand" ]; then
-                eval "$("$cand" shellenv)" 2>/dev/null || export PATH="$(dirname "$cand"):$PATH"
+                eval "$("$cand" shellenv)" 2>/dev/null || {
+                    PATH="$(dirname "$cand"):$PATH" || true
+                    export PATH
+                }
                 injected+=("brew@$cand")
                 break
             fi
@@ -2893,6 +2904,6 @@ func_list="$func_list _tui_expand_text _tui_display_width _tui_max_display_width
 
 for func in $func_list; do
     if declare -f "$func" > /dev/null 2>&1; then
-        export -f "$func" 2>/dev/null || true
+        export -f "${func?}" 2>/dev/null || true
     fi
 done

@@ -10,6 +10,7 @@ if [ ! -f "$COMMON_SH" ]; then
     COMMON_SH="$SCRIPT_DIR/common.sh"
 fi
 
+# shellcheck source=/dev/null
 source "$COMMON_SH" || {
     echo "錯誤: 無法載入共用函數庫"
     exit 1
