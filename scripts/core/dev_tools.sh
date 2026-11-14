@@ -26,15 +26,23 @@ if ! command -v nvim >/dev/null 2>&1; then
         BREW_FAILED=1
     fi
 
-    # 如果 Homebrew 失敗或不可用，使用 PPA
+    # 如果 Homebrew 失敗或不可用，使用 PPA。
+    # PPA 是 Ubuntu（Launchpad）專屬：Debian、Kali 等沒有 add-apt-repository 的 ppa: 來源，
+    # 硬跑會讓整支腳本中止，所以只在 Ubuntu 上使用，其餘發行版改用系統套件庫的 neovim。
     if [ "${BREW_FAILED:-0}" = "1" ]; then
-        log_info "Homebrew 不可用，使用 PPA 安裝 Neovim..."
-        if command -v run_as_root >/dev/null 2>&1; then
-            run_as_root add-apt-repository ppa:neovim-ppa/unstable -y
-            run_as_root apt-get update
+        if [ "${DISTRO:-}" = "ubuntu" ]; then
+            log_info "Homebrew 不可用，使用 PPA 安裝 Neovim..."
+            if ! command -v add-apt-repository >/dev/null 2>&1; then
+                install_package software-properties-common || log_warning "無法安裝 software-properties-common"
+            fi
+            if command -v add-apt-repository >/dev/null 2>&1 \
+               && run_as_root add-apt-repository ppa:neovim-ppa/unstable -y; then
+                run_as_root apt-get update || log_warning "加入 Neovim PPA 後更新套件索引失敗"
+            else
+                log_warning "無法加入 Neovim PPA，改用系統套件庫的 neovim"
+            fi
         else
-            sudo add-apt-repository ppa:neovim-ppa/unstable -y
-            sudo DEBIAN_FRONTEND=noninteractive apt-get update
+            log_info "Homebrew 不可用；${DISTRO:-此發行版} 不支援 PPA，改用系統套件庫的 neovim"
         fi
     fi
 fi

@@ -2,7 +2,9 @@
 
 # Docker 測試環境管理腳本
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE_NAME="linux-setting-test"
+IMAGE_NAME="${IMAGE_NAME:-linux-setting-test}"
+# 測試用的基底映像（Debian 系列）；留空則使用 Dockerfile 的預設值
+BASE_IMAGE="${BASE_IMAGE:-}"
 CONTAINER_NAME="${CONTAINER_NAME:-linux-setting-test-container}"
 
 # 顏色定義
@@ -55,7 +57,13 @@ build_image() {
         return 1
     fi
     
-    if docker build -t "$IMAGE_NAME" "$SCRIPT_DIR"; then
+    local build_args=()
+    if [ -n "$BASE_IMAGE" ]; then
+        build_args+=(--build-arg "BASE_IMAGE=$BASE_IMAGE")
+        log_info "基底映像: $BASE_IMAGE"
+    fi
+
+    if docker build ${build_args[@]+"${build_args[@]}"} -t "$IMAGE_NAME" "$SCRIPT_DIR"; then
         log_success "Docker 映像建立成功: $IMAGE_NAME"
         return 0
     else

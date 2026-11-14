@@ -1,20 +1,25 @@
 ## Linux 環境設定腳本
 
-快速建立多種 Linux 發行版開發環境的自動化安裝腳本，支援互動式選單、模組化安裝、錯誤回滾與詳細日誌。
+快速建立 Debian 系列 Linux 開發環境的自動化安裝腳本，支援互動式選單、模組化安裝與詳細日誌。
 
-### 🐧 支援的 Linux 發行版
+### 🐧 支援的平台
 
-- **Debian 系列**：Ubuntu、Debian、Kali Linux、Linux Mint、Pop!_OS、Elementary OS
-- **RHEL 系列**：Fedora、CentOS、RHEL、Rocky Linux、AlmaLinux
-- **Arch 系列**：Arch Linux、Manjaro、EndeavourOS、Garuda Linux
-- **SUSE 系列**：openSUSE、SLES（基本支援）
+每次變更都會在 CI 上對下列平台執行完整安裝並驗證結果，只測各發行版的**最新版本**：
 
-腳本會自動檢測系統並使用對應的包管理器（apt、dnf、yum、pacman、zypper）。
+| 發行版 | 測試對象 | 架構 |
+|---|---|---|
+| Ubuntu | 最新 LTS（`ubuntu:latest`） | x86_64、arm64 |
+| Debian | 目前的 stable（`debian:stable`） | x86_64、arm64 |
+| Kali Linux | rolling（實驗性，失敗不擋合併） | x86_64 |
+
+- 較舊的版本（例如 Ubuntu 22.04）沒有 CI 覆蓋；針對它們的備援邏輯仍保留，但不保證可用。
+- 其他 Debian 系列（Linux Mint、Pop!_OS 等）理論上可用，未經測試。
+- RHEL、Arch、SUSE 系列**目前不支援**：程式會偵測套件管理器，但模組的套件名稱是 apt 的，實際安裝不會成功。
 
 ### ✅ 主要特色
 
 - 一行指令遠端安裝
-- 自動檢測並適配不同 Linux 發行版
+- 在 x86_64 與 arm64 上皆可使用
 - 互動式選單自由選擇模組
 - 完整開發環境：Python / Docker / 終端 / 編輯器 / 監控工具
 - 自動備份與失敗回滾機制
@@ -115,7 +120,7 @@ FORCE_LINUX_TESTS=true ./tests/run_all_tests.sh   # 本機強制執行 Linux-onl
 
 ```bash
 ./docker-test.sh build && ./docker-test.sh test    # 快速測試
-docker-compose -f docker-compose.test.yml up ubuntu-test    # 多系統測試
+BASE_IMAGE=debian:stable ./docker-test.sh build                # 指定其他基底映像（預設 ubuntu:latest）
 ./tests/test_full_simulation.sh                             # 新容器內 HTTP 遠端安裝與成果驗證
 ./docker-test.sh run "CI=true bash tests/test_tui_smoke.sh"    # whiptail 成功／失敗操作流程
 # tests/simulate_remote_install.sh 在 Linux 容器內服務專案並從空目錄安裝

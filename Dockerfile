@@ -1,5 +1,8 @@
 # Linux Setting Scripts - Docker 測試環境
-FROM ubuntu:22.04
+# 基底映像可用 --build-arg BASE_IMAGE=... 指定（Debian 系列，例如 debian:stable、
+# kalilinux/kali-rolling）；預設跟隨最新的 Ubuntu LTS。
+ARG BASE_IMAGE=ubuntu:latest
+FROM ${BASE_IMAGE}
 
 # 設定環境變數
 ENV DEBIAN_FRONTEND=noninteractive
@@ -27,7 +30,6 @@ RUN apt-get update && \
         python3-pip \
         python3-venv \
         build-essential \
-        software-properties-common \
         apt-transport-https \
         ca-certificates \
         gnupg \
@@ -77,5 +79,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # 元數據標籤
 LABEL maintainer="Linux Setting Scripts" \
       description="測試環境 for Linux Setting Scripts" \
-      version="1.0" \
-      architecture="amd64"
+      version="1.0"
