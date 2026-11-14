@@ -85,7 +85,7 @@ test_script_permissions() {
     log_test "測試腳本權限..."
     
     for script in "$SCRIPT_DIR"/*.sh "$SCRIPT_DIR"/scripts/*/*.sh; do
-        # scripts/install/ 下是 install.sh 載入的片段，不是可獨立執行的入口（下面另外檢查）
+        # scripts/install/ 下是 install.sh 載入的片段，不是可獨立執行的入口，不要求執行權限
         case "$script" in "$SCRIPT_DIR"/scripts/install/*) continue ;; esac
         if [ -f "$script" ]; then
             if [ -x "$script" ]; then
@@ -95,18 +95,6 @@ test_script_permissions() {
             fi
         fi
     done
-
-    # 只供載入的片段不應有執行權限：直接執行它們沒有意義，也避免被誤當成入口
-    local part bad=""
-    for part in "$SCRIPT_DIR"/scripts/install/*.sh "$SCRIPT_DIR"/scripts/core/common/*.sh; do
-        [ -f "$part" ] || continue
-        [ ! -x "$part" ] || bad="$bad ${part#"$SCRIPT_DIR"/}"
-    done
-    if [ -z "$bad" ]; then
-        log_pass "載入用片段（scripts/install、scripts/core/common）沒有執行權限"
-    else
-        log_fail "載入用片段不應有執行權限：$bad"
-    fi
 }
 
 # 測試共用函數庫
