@@ -778,10 +778,9 @@ MINIMAL_MODULES="base python terminal"
 selected_modules=""
 installed_modules=""
 
-# 確保遠程安裝標記正確（如果 SCRIPT_DIR 在 /tmp 下也視為遠程安裝）
-if [[ "$SCRIPT_DIR" == /tmp/* ]]; then
-    REMOTE_INSTALL=true
-fi
+# REMOTE_INSTALL 只由上方的遠端 bootstrap 設定（找不到本地 common.sh 時）。
+# 過去這裡還會把「SCRIPT_DIR 位於 /tmp」當成遠端安裝，結果在 /tmp 下的完整專案
+# （例如 git clone 到 /tmp）執行時，本地腳本會被 $REPO_URL 的版本覆蓋。
 REMOTE_INSTALL=${REMOTE_INSTALL:-false}
 
 # 模組顯示名稱：優先使用 modules.conf 的 name，否則用內建名稱，最後退回 id
