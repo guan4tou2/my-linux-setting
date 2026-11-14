@@ -9,11 +9,6 @@ source "$SCRIPT_DIR/common.sh" || {
     exit 1
 }
 
-# 載入配置管理
-if [ -f "$SCRIPT_DIR/config_manager_simple.sh" ]; then
-    source "$SCRIPT_DIR/config_manager_simple.sh" 2>/dev/null || true
-fi
-
 log_info "########## 進階系統健康檢查 ##########"
 
 # 健康檢查配置
