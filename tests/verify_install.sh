@@ -48,6 +48,9 @@ for module in "$@"; do
             check 'terminal/ZSH_THEME' grep -Eq "^[[:space:]]*ZSH_THEME=[\"']?powerlevel10k/powerlevel10k([\"']|[[:space:]]|$)" "$HOME/.zshrc"
             check 'terminal/登入 shell' login_zsh
             ;;
+        docker)
+            for cmd in docker lazydocker; do check "$module/$cmd 可執行" version_works "$cmd"; done
+            ;;
         dev)
             for cmd in nvim lazygit node cargo; do check "$module/$cmd" command_exists "$cmd"; done
             check 'dev/lazygit 可執行' version_works lazygit

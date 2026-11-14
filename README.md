@@ -89,7 +89,7 @@ PARALLEL_JOBS=8 ./install.sh
 ## 🧩 安裝模組
 
 - **Python 開發環境**：python3, pip, uv, ranger-fm, s-tui
-- **Docker 工具**：docker-ce, docker-compose, lazydocker
+- **Docker 工具**：docker-ce, docker-compose, lazydocker（Kali 使用發行版套件庫的 `docker.io`，因官方安裝程式不支援 Kali；其他發行版若官方安裝程式失敗，會清掉本次新增的 Docker apt 來源並改裝 `docker.io`；最後仍沒有 `docker` 指令則該模組回報失敗）
 - **基礎工具**：git, curl, wget, lsd, bat, ripgrep, fd-find, fzf
 - **終端機設定**：zsh, oh-my-zsh, powerlevel10k, zsh-autosuggestions, zsh-syntax-highlighting
 - **開發工具**：neovim (LazyVim), lazygit, nodejs, cargo, lua
@@ -112,7 +112,7 @@ PARALLEL_JOBS=8 ./install.sh
 ./tests/test_dependencies.sh        # 依賴檢查
 ./tests/test_functionality.sh       # 功能測試
 ./tests/run_shellcheck.sh           # 受版控腳本：錯誤阻擋 CI，警告僅摘要
-./tests/verify_install.sh python base terminal dev monitoring  # 安裝成果斷言
+./tests/verify_install.sh python base docker terminal dev monitoring  # 安裝成果斷言
 ./scripts/config/preview_config.sh  # 預覽配置
 ```
 
@@ -126,7 +126,8 @@ FORCE_LINUX_TESTS=true ./tests/run_all_tests.sh   # 本機強制執行 Linux-onl
 ./docker-test.sh build && ./docker-test.sh test    # 快速測試
 BASE_IMAGE=debian:stable ./docker-test.sh build                # 指定其他基底映像（預設 ubuntu:latest）
 ./tests/test_full_simulation.sh                             # 新容器內 HTTP 遠端安裝與成果驗證
-./docker-test.sh run "CI=true bash tests/test_tui_smoke.sh"    # whiptail 成功／失敗操作流程
+./docker-test.sh run "CI=true bash tests/test_tui_smoke.sh"    # whiptail、fzf、gum 後端的成功／失敗操作流程（TUI_SMOKE_BACKENDS="fzf gum" 可指定後端；缺後端時 CI=true 會用 apt 安裝，否則略過）
+./docker-test.sh run "CI=true bash tests/test_docker_module.sh" # 實際安裝 Docker 模組，驗證 docker／lazydocker 可執行且 apt-get update 仍成功
 # tests/simulate_remote_install.sh 在 Linux 容器內服務專案並從空目錄安裝
 ```
 
@@ -210,6 +211,7 @@ brew install gum
 
 - `config/modules.conf` 的 `post_install` 會被當成 shell 指令執行（`eval`）。設定檔來源只有：`MODULES_CONF` 明確指定的檔案、安裝程式自己的 `config/modules.conf`、`~/.config/linux-setting/modules.conf`；**不會**採用目前工作目錄下的 `config/modules.conf`。仍請只使用你信任的設定檔。`script=` 只接受單純檔名，套件名稱不可以 `-` 開頭。
 - 安裝程式會在你確認安裝之後（`--dry-run` 不會）用 `sudo` 在 `/etc/apt/apt.conf.d/` 新增 `99-parallel-downloads`、`99-cache-optimization`、`99-timeout` 三個 APT 設定檔；這三個檔案會記入安裝清單，`./uninstall.sh` 會移除。
+- Docker 模組在 Kali 直接用發行版套件庫的 `docker.io`（不執行 `get.docker.com`，那是 Kali 官方文件的做法）；其他發行版先用 `get.docker.com`，失敗時移除該次新增的 Docker apt 來源與金鑰後改裝 `docker.io`。
 - Docker 模組預設會把目前使用者加入 `docker` 群組，這**等同給予該使用者 root 權限**。設定 `ADD_USER_TO_DOCKER_GROUP=false`（環境變數或設定檔）可關閉。
 - 設定檔備份（可能含有憑證）與日誌的根目錄權限為 `0700`。
 
